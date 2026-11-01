@@ -1,0 +1,1496 @@
+openapi: 3.1.0
+info:
+  title: SMSC Gateway API
+  version: 0.1.0-draft
+  description: |
+    Kontrak REST untuk SMS Gateway (server <-> dashboard <-> sistem eksternal <-> aplikasi Android).
+    Realtime ke device memakai WebSocket (lihat `device-ws-protocol.md`), realtime ke dashboard memakai SSE (`/events/stream`).
+
+    Konvensi:
+    - Semua waktu RFC 3339 UTC. Semua id adalah UUIDv7 (string).
+    - Nomor tujuan dinormalisasi ke E.164 (`+62...`). Input `08xx` diterima dan dikonversi memakai `default_region` (default `ID`).
+    - Error memakai RFC 9457 `application/problem+json`.
+    - Pagination cursor: `?limit=50&cursor=<opaque>`; respons memuat `next_cursor` (null jika habis).
+    - Operasi pembuatan yang berisiko ganda (`POST /messages`, `POST /campaigns`) menerima header `Idempotency-Key`.
+    - Endpoint bertanda `x-phase: 2` bukan bagian MVP tetapi kontraknya dikunci lebih awal.
+servers:
+  - url: https://smsc.example-tailnet.ts.net/api/v1
+    description: Via Tailscale Serve (HTTPS, MagicDNS)
+tags:
+  - name: Auth
+  - name: Devices
+  - name: DeviceAgent
+    description: Endpoint yang dipanggil aplikasi Android.
+  - name: SIMs
+  - name: Messages
+    description: Transaksi pengiriman (campaign maupun non-campaign).
+  - name: Campaigns
+  - name: Templates
+  - name: Policies
+    description: Manajemen delay, rate limit, jendela waktu, retry.
+  - name: Compliance
+  - name: Admin
+  - name: Stats
+  - name: Realtime
+
+security:
+  - sessionCookie: []
+  - apiKey: []
+
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Login dashboard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: {type: string, format: email}
+                password: {type: string, format: password}
+      responses:
+        '200':
+          description: Cookie sesi di-set (HttpOnly, Secure, SameSite=Lax). Klien wajib mengirim `X-CSRF-Token` pada request mutasi.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout
+      responses:
+        '204': {description: OK}
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Profil + peran pengguna saat ini
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+
+  /device-enrollments:
+    post:
+      tags: [Devices]
+      summary: Buat token enrollment sekali pakai (untuk QR)
+      description: Token berlaku 15 menit, sekali pakai, disimpan ter-hash. Dashboard merender `enroll_url` sebagai QR.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_name: {type: string, maxLength: 80}
+                policy_id: {type: string, format: uuid}
+                ttl_seconds: {type: integer, minimum: 60, maximum: 3600, default: 900}
+      responses:
+        '201':
+          description: Dibuat. `token` hanya tampil sekali.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Enrollment'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /device-enrollments/{enrollmentId}:
+    delete:
+      tags: [Devices]
+      summary: Cabut token enrollment yang belum dipakai
+      parameters:
+        - {name: enrollmentId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Dicabut}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /devices:
+    get:
+      tags: [Devices]
+      summary: Daftar device
+      parameters:
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/DeviceStatus'}}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Device'}}
+                  next_cursor: {type: [string, 'null']}
+  /devices/{deviceId}:
+    parameters:
+      - {$ref: '#/components/parameters/DeviceId'}
+    get:
+      tags: [Devices]
+      summary: Detail device (termasuk SIM)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Device'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Devices]
+      summary: Ubah nama, enable/disable, policy
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string, maxLength: 80}
+                enabled: {type: boolean}
+                policy_id: {type: [string, 'null'], format: uuid}
+                tags: {type: array, items: {type: string}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Device'}
+    delete:
+      tags: [Devices]
+      summary: Cabut device (revoke kredensial, putus WebSocket kode 4401)
+      description: Pesan `assigned`/`sending` milik device ini diproses sesuai aturan device-lost (lihat docs/03). Pesan `queued` tetap di antrean untuk SIM lain.
+      responses:
+        '204': {description: Dicabut}
+  /devices/{deviceId}/commands:
+    parameters:
+      - {$ref: '#/components/parameters/DeviceId'}
+    post:
+      tags: [Devices]
+      summary: Kirim perintah ke device via WebSocket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [ping, refresh_sims, restart_service, upload_logs, rotate_credential]
+      responses:
+        '202':
+          description: Perintah diterima. Hasil datang via event `device.command_result` di SSE.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  command_id: {type: string, format: uuid}
+        '409':
+          description: Device offline.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+
+  /device/enroll:
+    post:
+      tags: [DeviceAgent]
+      security: []
+      summary: Aplikasi menukar token QR menjadi kredensial device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceEnrollRequest'}
+      responses:
+        '201':
+          description: Berhasil. `device_secret` hanya dikirim sekali.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeviceEnrollResponse'}
+        '401':
+          description: Token tidak valid, kedaluwarsa, atau sudah dipakai.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /device/config:
+    get:
+      tags: [DeviceAgent]
+      security: [{deviceToken: []}]
+      summary: Ambil konfigurasi terbaru (fallback jika WebSocket belum tersambung)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeviceConfig'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /device/events:
+    post:
+      tags: [DeviceAgent]
+      security: [{deviceToken: []}]
+      summary: Kirim batch event status SMS via REST (fallback outbox flush)
+      description: Idempoten berdasarkan `event_id`. Dipakai ketika WebSocket tidak tersedia atau saat flush outbox besar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  maxItems: 500
+                  items: {$ref: '#/components/schemas/SmsEvent'}
+      responses:
+        '200':
+          description: Daftar `event_id` yang sudah diterima (boleh dihapus dari outbox).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  acked: {type: array, items: {type: string, format: uuid}}
+
+  /sims:
+    get:
+      tags: [SIMs]
+      summary: Semua SIM lintas device
+      parameters:
+        - {name: device_id, in: query, schema: {type: string, format: uuid}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/SimStatus'}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Sim'}}
+  /sims/{simId}:
+    parameters:
+      - {name: simId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      tags: [SIMs]
+      summary: Detail SIM + counter hari ini
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Sim'}
+    patch:
+      tags: [SIMs]
+      summary: Label, enable/disable, policy khusus SIM
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: {type: string, maxLength: 80}
+                enabled: {type: boolean}
+                policy_id: {type: [string, 'null'], format: uuid}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Sim'}
+
+  /messages:
+    get:
+      tags: [Messages]
+      summary: Daftar transaksi
+      parameters:
+        - {name: status, in: query, schema: {type: array, items: {$ref: '#/components/schemas/MessageStatus'}}, style: form, explode: false}
+        - {name: source, in: query, schema: {$ref: '#/components/schemas/MessageSource'}}
+        - {name: campaign_id, in: query, schema: {type: string, format: uuid}}
+        - {name: device_id, in: query, schema: {type: string, format: uuid}}
+        - {name: sim_id, in: query, schema: {type: string, format: uuid}}
+        - {name: to, in: query, description: Prefix/exact E.164, schema: {type: string}}
+        - {name: client_ref, in: query, schema: {type: string}}
+        - {name: created_from, in: query, schema: {type: string, format: date-time}}
+        - {name: created_to, in: query, schema: {type: string, format: date-time}}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Message'}}
+                  next_cursor: {type: [string, 'null']}
+    post:
+      tags: [Messages]
+      summary: Kirim SMS non-campaign (1..1000 penerima)
+      description: |
+        Dipakai oleh halaman "Kirim SMS" dan oleh sistem eksternal (API key).
+        Pesan masuk antrean (`queued`) dan dikirim sesuai policy; respons tidak menunggu pengiriman.
+      parameters:
+        - {name: Idempotency-Key, in: header, schema: {type: string, maxLength: 128}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MessageCreate'}
+      responses:
+        '202':
+          description: Diterima
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages: {type: array, items: {$ref: '#/components/schemas/Message'}}
+                  rejected:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        index: {type: integer}
+                        to: {type: string}
+                        reason: {type: string, enum: [invalid_number, suppressed, duplicate_client_ref]}
+        '422': {$ref: '#/components/responses/ValidationError'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /messages/export:
+    get:
+      tags: [Messages]
+      summary: Ekspor CSV dengan filter yang sama seperti daftar
+      responses:
+        '200':
+          description: CSV stream
+          content:
+            text/csv:
+              schema: {type: string}
+  /messages/{messageId}:
+    parameters:
+      - {$ref: '#/components/parameters/MessageId'}
+    get:
+      tags: [Messages]
+      summary: Detail transaksi + timeline event
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Message'
+                  - type: object
+                    properties:
+                      events: {type: array, items: {$ref: '#/components/schemas/MessageEvent'}}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /messages/{messageId}/cancel:
+    parameters:
+      - {$ref: '#/components/parameters/MessageId'}
+    post:
+      tags: [Messages]
+      summary: Batalkan pesan berstatus `queued` atau `assigned`
+      responses:
+        '200':
+          description: Dibatalkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Message'}
+        '409':
+          description: Sudah `sending` atau terminal, tidak bisa dibatalkan.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /messages/{messageId}/retry:
+    parameters:
+      - {$ref: '#/components/parameters/MessageId'}
+    post:
+      tags: [Messages]
+      summary: Antrekan ulang pesan `failed`/`expired`/`unknown`
+      description: Membuat attempt baru pada pesan yang sama. Untuk `unknown` operator harus mengonfirmasi risiko kirim ganda (`confirm_duplicate_risk=true`).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                confirm_duplicate_risk: {type: boolean}
+                sim_ids: {type: array, items: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Kembali ke `queued`
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Message'}
+        '409':
+          description: Status tidak boleh di-retry
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+
+  /campaigns:
+    get:
+      tags: [Campaigns]
+      summary: Daftar campaign
+      parameters:
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/CampaignStatus'}}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Campaign'}}
+                  next_cursor: {type: [string, 'null']}
+    post:
+      tags: [Campaigns]
+      summary: Buat campaign (status `draft`)
+      parameters:
+        - {name: Idempotency-Key, in: header, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CampaignInput'}
+      responses:
+        '201':
+          description: Dibuat
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Campaign'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /campaigns/{campaignId}:
+    parameters:
+      - {$ref: '#/components/parameters/CampaignId'}
+    get:
+      tags: [Campaigns]
+      summary: Detail + counter
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Campaign'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Campaigns]
+      summary: Ubah campaign. Penuh saat `draft`; saat `running`/`paused` hanya policy dan sim_ids.
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CampaignInput'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Campaign'}
+        '409':
+          description: Field tidak boleh diubah pada status ini.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+    delete:
+      tags: [Campaigns]
+      summary: Hapus campaign berstatus `draft`
+      responses:
+        '204': {description: Dihapus}
+        '409':
+          description: Bukan draft
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /campaigns/{campaignId}/recipients:
+    parameters:
+      - {$ref: '#/components/parameters/CampaignId'}
+    post:
+      tags: [Campaigns]
+      summary: Impor penerima (hanya saat `draft`; bisa dipanggil berulang)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipients]
+              properties:
+                dedupe: {type: boolean, default: true}
+                recipients:
+                  type: array
+                  maxItems: 50000
+                  items: {$ref: '#/components/schemas/RecipientInput'}
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary, description: 'CSV UTF-8. Kolom wajib `phone`; kolom lain menjadi variabel template.'}
+                dedupe: {type: boolean}
+      responses:
+        '200':
+          description: Ringkasan validasi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted: {type: integer}
+                  duplicates: {type: integer}
+                  suppressed: {type: integer}
+                  invalid:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        row: {type: integer}
+                        value: {type: string}
+                        reason: {type: string}
+  /campaigns/{campaignId}/start:
+    parameters:
+      - {$ref: '#/components/parameters/CampaignId'}
+    post:
+      tags: [Campaigns]
+      summary: Mulai (atau jadwalkan jika `schedule.start_at` di masa depan)
+      description: Validasi pra-start - ada penerima, template valid untuk semua variabel, minimal satu SIM aktif sesuai `sim_ids`. Materialisasi pesan dilakukan asinkron per batch.
+      responses:
+        '200':
+          description: Status menjadi `scheduled` atau `running`
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Campaign'}
+        '409':
+          description: Transisi tidak valid
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /campaigns/{campaignId}/pause:
+    parameters:
+      - {$ref: '#/components/parameters/CampaignId'}
+    post:
+      tags: [Campaigns]
+      summary: Jeda. Pesan `queued` tertahan, yang sedang `sending` diselesaikan.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Campaign'}
+  /campaigns/{campaignId}/resume:
+    parameters:
+      - {$ref: '#/components/parameters/CampaignId'}
+    post:
+      tags: [Campaigns]
+      summary: Lanjutkan dari `paused`
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Campaign'}
+  /campaigns/{campaignId}/cancel:
+    parameters:
+      - {$ref: '#/components/parameters/CampaignId'}
+    post:
+      tags: [Campaigns]
+      summary: Batalkan. Semua pesan `queued` menjadi `cancelled`.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Campaign'}
+  /campaigns/{campaignId}/preview:
+    parameters:
+      - {$ref: '#/components/parameters/CampaignId'}
+    post:
+      tags: [Campaigns]
+      summary: Render template untuk N penerima contoh + hitung segmen SMS
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sample: {type: integer, default: 3, maximum: 20}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  samples:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        to: {type: string}
+                        body: {type: string}
+                        encoding: {type: string, enum: [gsm7, ucs2]}
+                        parts: {type: integer}
+                  estimated_duration_seconds: {type: integer, description: Estimasi berdasar policy efektif dan jumlah SIM online.}
+
+  /templates:
+    get:
+      tags: [Templates]
+      summary: Daftar template
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Template'}}
+    post:
+      tags: [Templates]
+      summary: Buat template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TemplateInput'}
+      responses:
+        '201':
+          description: Dibuat
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Template'}
+  /templates/{templateId}:
+    parameters:
+      - {name: templateId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      tags: [Templates]
+      summary: Detail
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Template'}
+    put:
+      tags: [Templates]
+      summary: Ganti isi template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TemplateInput'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Template'}
+    delete:
+      tags: [Templates]
+      summary: Hapus
+      responses:
+        '204': {description: Dihapus}
+
+  /dispatch-policies:
+    get:
+      tags: [Policies]
+      summary: Daftar policy pengiriman
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/DispatchPolicy'}}
+    post:
+      tags: [Policies]
+      summary: Buat policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DispatchPolicyInput'}
+      responses:
+        '201':
+          description: Dibuat
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DispatchPolicy'}
+  /dispatch-policies/{policyId}:
+    parameters:
+      - {name: policyId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      tags: [Policies]
+      summary: Detail
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DispatchPolicy'}
+    put:
+      tags: [Policies]
+      summary: Ubah. Perubahan di-push ke device (`config.update`) dan berlaku untuk pesan yang belum di-lease.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DispatchPolicyInput'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DispatchPolicy'}
+    delete:
+      tags: [Policies]
+      summary: Hapus (ditolak jika masih dipakai atau default)
+      responses:
+        '204': {description: Dihapus}
+        '409':
+          description: Masih dipakai
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /dispatch-policies/{policyId}/effective:
+    get:
+      tags: [Policies]
+      summary: Simulasi policy efektif untuk kombinasi tertentu (debug)
+      parameters:
+        - {name: policyId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: sim_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Hasil merge global -> device -> sim -> campaign
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DispatchPolicy'}
+  /settings/default-policy:
+    put:
+      tags: [Policies]
+      summary: Tetapkan policy global default
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [policy_id]
+              properties:
+                policy_id: {type: string, format: uuid}
+      responses:
+        '204': {description: OK}
+
+  /suppressions:
+    get:
+      tags: [Compliance]
+      summary: Daftar nomor yang diblokir (opt-out / blacklist)
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Suppression'}}
+                  next_cursor: {type: [string, 'null']}
+    post:
+      tags: [Compliance]
+      summary: Tambah nomor (bulk)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [numbers]
+              properties:
+                numbers: {type: array, items: {type: string}}
+                reason: {type: string}
+      responses:
+        '201': {description: Ditambahkan}
+  /suppressions/{suppressionId}:
+    delete:
+      tags: [Compliance]
+      summary: Hapus dari daftar blokir
+      parameters:
+        - {name: suppressionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: OK}
+
+  /api-keys:
+    get:
+      tags: [Admin]
+      summary: Daftar API key (tanpa secret)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ApiKey'}}
+    post:
+      tags: [Admin]
+      summary: Buat API key. Secret hanya tampil sekali.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string}
+                scopes:
+                  type: array
+                  items: {type: string, enum: ['messages:send', 'messages:read', 'campaigns:read']}
+                expires_at: {type: [string, 'null'], format: date-time}
+      responses:
+        '201':
+          description: Dibuat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiKey'
+                  - type: object
+                    properties:
+                      secret: {type: string, description: 'Format `smsc_live_<random>`'}
+  /api-keys/{apiKeyId}:
+    delete:
+      tags: [Admin]
+      summary: Cabut
+      parameters:
+        - {name: apiKeyId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: OK}
+  /users:
+    get:
+      tags: [Admin]
+      summary: Daftar pengguna dashboard (admin)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Me'}}
+    post:
+      tags: [Admin]
+      summary: Buat pengguna
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: {type: string, format: email}
+                role: {$ref: '#/components/schemas/Role'}
+                password: {type: string, format: password}
+      responses:
+        '201': {description: Dibuat}
+  /audit-logs:
+    get:
+      tags: [Admin]
+      summary: Jejak audit tindakan admin
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/AuditLog'}}
+                  next_cursor: {type: [string, 'null']}
+  /webhooks:
+    get:
+      x-phase: 2
+      tags: [Admin]
+      summary: Daftar webhook status pesan
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Webhook'}}
+    post:
+      x-phase: 2
+      tags: [Admin]
+      summary: Daftarkan webhook. Payload ditandatangani HMAC-SHA256 (`X-SMSC-Signature`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url: {type: string, format: uri}
+                events:
+                  type: array
+                  items: {type: string, enum: [message.sent, message.delivered, message.failed, campaign.completed, device.offline]}
+      responses:
+        '201':
+          description: Dibuat
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Webhook'}
+
+  /stats/overview:
+    get:
+      tags: [Stats]
+      summary: Ringkasan dashboard
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devices: {type: object, properties: {online: {type: integer}, degraded: {type: integer}, offline: {type: integer}}}
+                  sims_active: {type: integer}
+                  queue_depth: {type: integer}
+                  today:
+                    type: object
+                    properties:
+                      accepted: {type: integer}
+                      sent: {type: integer}
+                      delivered: {type: integer}
+                      failed: {type: integer}
+                  success_rate_24h: {type: number}
+  /stats/timeseries:
+    get:
+      tags: [Stats]
+      summary: Deret waktu jumlah per status
+      parameters:
+        - {name: from, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: bucket, in: query, schema: {type: string, enum: [minute, hour, day], default: hour}}
+        - {name: campaign_id, in: query, schema: {type: string, format: uuid}}
+        - {name: sim_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  points:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        t: {type: string, format: date-time}
+                        sent: {type: integer}
+                        delivered: {type: integer}
+                        failed: {type: integer}
+
+  /events/stream:
+    get:
+      tags: [Realtime]
+      summary: Server-Sent Events untuk dashboard
+      description: |
+        `text/event-stream`. Jenis event: `message.updated`, `campaign.updated`, `device.updated`, `sim.updated`, `device.command_result`.
+        Setiap event memiliki `id` monoton; klien yang reconnect mengirim `Last-Event-ID` dan server me-replay hingga 5 menit terakhir. Di luar itu klien melakukan refetch.
+      responses:
+        '200':
+          description: Stream
+          content:
+            text/event-stream:
+              schema: {type: string}
+
+  /healthz:
+    get:
+      tags: [Stats]
+      security: []
+      servers:
+        - url: https://smsc.example-tailnet.ts.net
+      summary: Liveness. `/readyz` memeriksa koneksi DB.
+      responses:
+        '200': {description: OK}
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: smsc_session
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: smsc_live_*
+    deviceToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque (device_secret)
+
+  parameters:
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    Cursor: {name: cursor, in: query, schema: {type: string}}
+    DeviceId: {name: deviceId, in: path, required: true, schema: {type: string, format: uuid}}
+    MessageId: {name: messageId, in: path, required: true, schema: {type: string, format: uuid}}
+    CampaignId: {name: campaignId, in: path, required: true, schema: {type: string, format: uuid}}
+
+  responses:
+    Unauthorized:
+      description: Tidak terautentikasi
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Forbidden:
+      description: Peran tidak cukup
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    NotFound:
+      description: Tidak ditemukan
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    ValidationError:
+      description: Validasi gagal
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    TooManyRequests:
+      description: Rate limit API
+      headers:
+        Retry-After: {schema: {type: integer}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: {type: string, description: 'URI/slug kode error, mis. `campaign.invalid_transition`'}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: {type: string}
+              message: {type: string}
+
+    Role: {type: string, enum: [admin, operator, viewer]}
+    Me:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        role: {$ref: '#/components/schemas/Role'}
+        tailscale_login: {type: [string, 'null'], description: Terisi jika diautentikasi lewat identity header Tailscale Serve.}
+
+    Enrollment:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        token: {type: string, description: Hanya tampil sekali.}
+        enroll_url: {type: string, example: 'smsc://enroll?s=https%3A%2F%2Fsmsc.example-tailnet.ts.net&t=ABCD1234'}
+        web_url: {type: string, description: 'Fallback https yang membuka app lewat App Link / menampilkan kode manual.'}
+        short_code: {type: string, description: 'Kode 8 karakter untuk input manual.'}
+        expires_at: {type: string, format: date-time}
+
+    DeviceEnrollRequest:
+      type: object
+      required: [token, install_id, device_info, sims]
+      properties:
+        token: {type: string, description: Token atau short_code.}
+        install_id: {type: string, format: uuid, description: UUID acak per-instalasi untuk mencegah enroll ganda.}
+        device_info:
+          type: object
+          required: [manufacturer, model, sdk_int, app_version]
+          properties:
+            manufacturer: {type: string}
+            model: {type: string}
+            android_version: {type: string, example: '13'}
+            sdk_int: {type: integer, minimum: 29}
+            app_version: {type: string}
+        capabilities: {$ref: '#/components/schemas/DeviceCapabilities'}
+        sims:
+          type: array
+          items: {$ref: '#/components/schemas/SimReport'}
+    DeviceEnrollResponse:
+      type: object
+      properties:
+        device_id: {type: string, format: uuid}
+        device_secret: {type: string}
+        ws_url: {type: string, example: 'wss://smsc.example-tailnet.ts.net/ws/device'}
+        config: {$ref: '#/components/schemas/DeviceConfig'}
+    DeviceConfig:
+      type: object
+      properties:
+        protocol_version: {type: integer, const: 1}
+        heartbeat_interval_sec: {type: integer, default: 30}
+        ws_ping_interval_sec: {type: integer, default: 20}
+        reconnect_backoff: {type: object, properties: {min_ms: {type: integer, default: 1000}, max_ms: {type: integer, default: 60000}}}
+        guardrails:
+          type: object
+          description: Batas keras yang juga ditegakkan device sebagai pertahanan kedua.
+          properties:
+            min_gap_ms: {type: integer}
+            max_per_minute: {type: [integer, 'null']}
+            os_sms_guard: {type: object, properties: {max_per_window: {type: integer, default: 25}, window_sec: {type: integer, default: 1800}}}
+        config_version: {type: integer}
+
+    DeviceCapabilities:
+      type: object
+      properties:
+        default_sms_app: {type: boolean}
+        os_sms_limit_unlocked: {type: boolean}
+        battery_optimization_ignored: {type: boolean}
+        notifications_enabled: {type: boolean}
+        restricted_settings_allowed: {type: boolean}
+        tailscale_vpn_active: {type: boolean}
+
+    DeviceStatus: {type: string, enum: [pending, online, degraded, offline, revoked]}
+    Device:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        status: {$ref: '#/components/schemas/DeviceStatus'}
+        status_reason: {type: [string, 'null'], example: 'low_battery'}
+        enabled: {type: boolean}
+        manufacturer: {type: string}
+        model: {type: string}
+        android_version: {type: string}
+        sdk_int: {type: integer}
+        app_version: {type: string}
+        battery_level: {type: [integer, 'null']}
+        charging: {type: [boolean, 'null']}
+        network_type: {type: [string, 'null'], enum: [wifi, cellular, ethernet, none, null]}
+        tailscale_ip: {type: [string, 'null']}
+        capabilities: {$ref: '#/components/schemas/DeviceCapabilities'}
+        policy_id: {type: [string, 'null'], format: uuid}
+        tags: {type: array, items: {type: string}}
+        last_seen_at: {type: [string, 'null'], format: date-time}
+        connected_since: {type: [string, 'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+        sims: {type: array, items: {$ref: '#/components/schemas/Sim'}}
+
+    SimStatus: {type: string, enum: [active, no_service, absent, disabled]}
+    SimReport:
+      type: object
+      required: [slot_index, subscription_id]
+      properties:
+        slot_index: {type: integer, minimum: 0, description: 'Identitas stabil SIM dalam device (0 = SIM 1).'}
+        subscription_id: {type: integer, description: 'Android subscriptionId. Volatil, hanya hint.'}
+        carrier_name: {type: [string, 'null']}
+        display_name: {type: [string, 'null']}
+        phone_number: {type: [string, 'null']}
+        is_esim: {type: boolean}
+        signal_level: {type: [integer, 'null'], minimum: 0, maximum: 4}
+        registered: {type: boolean}
+        roaming: {type: boolean}
+    Sim:
+      allOf:
+        - $ref: '#/components/schemas/SimReport'
+        - type: object
+          properties:
+            id: {type: string, format: uuid}
+            device_id: {type: string, format: uuid}
+            label: {type: [string, 'null']}
+            enabled: {type: boolean}
+            status: {$ref: '#/components/schemas/SimStatus'}
+            policy_id: {type: [string, 'null'], format: uuid}
+            next_eligible_at: {type: [string, 'null'], format: date-time}
+            today:
+              type: object
+              properties:
+                sent: {type: integer}
+                delivered: {type: integer}
+                failed: {type: integer}
+            last_seen_at: {type: [string, 'null'], format: date-time}
+
+    MessageStatus:
+      type: string
+      enum: [queued, assigned, sending, sent, delivered, failed, cancelled, expired, unknown]
+    MessageSource: {type: string, enum: [dashboard, api, campaign]}
+    ErrorCode:
+      type: string
+      enum:
+        - invalid_destination
+        - short_code_blocked
+        - permission_denied
+        - radio_off
+        - no_service
+        - generic_failure
+        - null_pdu
+        - os_rate_limited
+        - sim_unavailable
+        - delivery_failed
+        - ack_timeout
+        - sent_timeout
+        - device_lost
+        - device_revoked
+        - expired
+        - suppressed
+    Message:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        source: {$ref: '#/components/schemas/MessageSource'}
+        campaign_id: {type: [string, 'null'], format: uuid}
+        client_ref: {type: [string, 'null']}
+        to: {type: string, description: E.164}
+        body: {type: string}
+        encoding: {type: string, enum: [gsm7, ucs2]}
+        parts: {type: integer}
+        status: {$ref: '#/components/schemas/MessageStatus'}
+        attempt: {type: integer}
+        max_attempts: {type: integer}
+        error_code: {oneOf: [{$ref: '#/components/schemas/ErrorCode'}, {type: 'null'}]}
+        error_detail: {type: [string, 'null']}
+        priority: {type: integer, minimum: 0, maximum: 9}
+        device_id: {type: [string, 'null'], format: uuid}
+        sim_id: {type: [string, 'null'], format: uuid}
+        created_at: {type: string, format: date-time}
+        not_before: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        assigned_at: {type: [string, 'null'], format: date-time}
+        sent_at: {type: [string, 'null'], format: date-time}
+        delivered_at: {type: [string, 'null'], format: date-time}
+        finished_at: {type: [string, 'null'], format: date-time}
+    MessageEvent:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        attempt: {type: integer}
+        type: {type: string, enum: [created, queued, assigned, acked, sending, part_sent, sent, part_delivered, delivered, failed, requeued, cancelled, expired, marked_unknown, manual_retry]}
+        at: {type: string, format: date-time}
+        actor: {type: string, enum: [system, device, user, api]}
+        sim_id: {type: [string, 'null'], format: uuid}
+        error_code: {type: [string, 'null']}
+        data: {type: object, additionalProperties: true}
+
+    RecipientInput:
+      type: object
+      required: [to]
+      properties:
+        to: {type: string, example: '08123456789'}
+        vars:
+          type: object
+          additionalProperties: {type: string}
+        client_ref: {type: string, maxLength: 128}
+    MessageCreate:
+      type: object
+      required: [recipients]
+      description: Wajib salah satu dari `body` atau `template_id`.
+      properties:
+        recipients:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: {$ref: '#/components/schemas/RecipientInput'}
+        body: {type: string, maxLength: 1600}
+        template_id: {type: string, format: uuid}
+        sim_ids: {type: array, items: {type: string, format: uuid}, description: 'Allow-list SIM. Kosong = semua SIM aktif.'}
+        device_ids: {type: array, items: {type: string, format: uuid}}
+        policy_id: {type: string, format: uuid}
+        priority: {type: integer, minimum: 0, maximum: 9, default: 5}
+        not_before: {type: string, format: date-time}
+        ttl_seconds: {type: integer, minimum: 30}
+
+    CampaignStatus: {type: string, enum: [draft, scheduled, running, paused, completed, cancelled]}
+    CampaignInput:
+      type: object
+      properties:
+        name: {type: string, maxLength: 120}
+        description: {type: string}
+        body: {type: string, maxLength: 1600}
+        template_id: {type: string, format: uuid}
+        sim_ids: {type: array, items: {type: string, format: uuid}}
+        policy_id: {type: string, format: uuid}
+        priority: {type: integer, minimum: 0, maximum: 9, default: 3}
+        schedule:
+          type: object
+          properties:
+            start_at: {type: [string, 'null'], format: date-time}
+        auto_pause:
+          type: object
+          description: Hentikan otomatis jika terlalu banyak gagal.
+          properties:
+            enabled: {type: boolean, default: true}
+            window: {type: integer, default: 50, description: Jumlah pesan terakhir yang dievaluasi.}
+            max_failure_ratio: {type: number, minimum: 0, maximum: 1, default: 0.5}
+    Campaign:
+      allOf:
+        - $ref: '#/components/schemas/CampaignInput'
+        - type: object
+          properties:
+            id: {type: string, format: uuid}
+            status: {$ref: '#/components/schemas/CampaignStatus'}
+            pause_reason: {type: [string, 'null'], enum: [user, auto_failure_ratio, no_capacity, null]}
+            counters:
+              type: object
+              properties:
+                total: {type: integer}
+                queued: {type: integer}
+                in_flight: {type: integer}
+                sent: {type: integer}
+                delivered: {type: integer}
+                failed: {type: integer}
+                cancelled: {type: integer}
+                expired: {type: integer}
+            estimated_finish_at: {type: [string, 'null'], format: date-time}
+            created_by: {type: string, format: uuid}
+            created_at: {type: string, format: date-time}
+            started_at: {type: [string, 'null'], format: date-time}
+            finished_at: {type: [string, 'null'], format: date-time}
+
+    TemplateInput:
+      type: object
+      required: [name, body]
+      properties:
+        name: {type: string}
+        body: {type: string, maxLength: 1600, example: 'Halo {{name}}, tagihan {{amount}} jatuh tempo {{due}}.'}
+    Template:
+      allOf:
+        - $ref: '#/components/schemas/TemplateInput'
+        - type: object
+          properties:
+            id: {type: string, format: uuid}
+            variables: {type: array, items: {type: string}}
+            updated_at: {type: string, format: date-time}
+
+    SendWindow:
+      type: object
+      properties:
+        timezone: {type: string, example: Asia/Jakarta}
+        windows:
+          type: array
+          items:
+            type: object
+            required: [days, start, end]
+            properties:
+              days: {type: array, items: {type: integer, minimum: 1, maximum: 7}, description: 1=Senin .. 7=Minggu}
+              start: {type: string, example: '08:00'}
+              end: {type: string, example: '20:00'}
+    DispatchPolicyInput:
+      type: object
+      required: [name]
+      description: Field null/absen berarti "tidak diatur pada level ini" dan diwarisi dari level di atasnya.
+      properties:
+        name: {type: string}
+        min_delay_ms: {type: [integer, 'null'], minimum: 0, description: Jeda minimum antar pengiriman pada SIM yang sama.}
+        max_delay_ms: {type: [integer, 'null'], minimum: 0, description: 'Jeda maksimum. Jeda aktual = acak seragam [min,max].'}
+        burst_size: {type: [integer, 'null'], minimum: 1, description: Setelah N pesan berturut-turut pada SIM, jeda panjang.}
+        burst_pause_ms: {type: [integer, 'null'], minimum: 0}
+        max_inflight_per_sim: {type: [integer, 'null'], minimum: 1, default: 1}
+        rate_limits:
+          type: object
+          properties:
+            per_minute: {type: [integer, 'null']}
+            per_hour: {type: [integer, 'null']}
+            per_day: {type: [integer, 'null']}
+        send_window: {oneOf: [{$ref: '#/components/schemas/SendWindow'}, {type: 'null'}]}
+        max_attempts: {type: [integer, 'null'], minimum: 1, maximum: 10}
+        retry_backoff_ms: {type: [integer, 'null'], minimum: 1000}
+        retry_backoff_max_ms: {type: [integer, 'null']}
+        message_ttl_seconds: {type: [integer, 'null'], minimum: 30}
+        track_delivery: {type: [boolean, 'null']}
+        ack_timeout_ms: {type: [integer, 'null']}
+        sent_timeout_ms: {type: [integer, 'null']}
+        retry_on_unknown: {type: [boolean, 'null'], default: false}
+    DispatchPolicy:
+      allOf:
+        - $ref: '#/components/schemas/DispatchPolicyInput'
+        - type: object
+          properties:
+            id: {type: string, format: uuid}
+            is_default: {type: boolean}
+            updated_at: {type: string, format: date-time}
+
+    Suppression:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        reason: {type: [string, 'null']}
+        created_at: {type: string, format: date-time}
+
+    ApiKey:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        prefix: {type: string, description: 8 karakter pertama untuk identifikasi.}
+        scopes: {type: array, items: {type: string}}
+        last_used_at: {type: [string, 'null'], format: date-time}
+        expires_at: {type: [string, 'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+
+    Webhook:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        url: {type: string, format: uri}
+        events: {type: array, items: {type: string}}
+        signing_secret: {type: string, description: Tampil sekali saat dibuat.}
+        enabled: {type: boolean}
+
+    AuditLog:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        at: {type: string, format: date-time}
+        actor: {type: string}
+        action: {type: string, example: device.revoke}
+        target_type: {type: string}
+        target_id: {type: string}
+        data: {type: object, additionalProperties: true}
+
+    SmsEvent:
+      type: object
+      required: [event_id, message_id, attempt, state, at]
+      properties:
+        event_id: {type: string, format: uuid, description: Kunci idempotensi.}
+        message_id: {type: string, format: uuid}
+        attempt: {type: integer}
+        state: {type: string, enum: [sending, part_sent, sent, part_delivered, delivered, failed]}
+        part_index: {type: [integer, 'null']}
+        parts_total: {type: integer}
+        error_code: {oneOf: [{$ref: '#/components/schemas/ErrorCode'}, {type: 'null'}]}
+        android_result_code: {type: [integer, 'null'], description: 'Nilai mentah SmsManager.RESULT_ERROR_* untuk debugging.'}
+        at: {type: string, format: date-time}
