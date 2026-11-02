@@ -12,9 +12,7 @@ info:
     - Error memakai RFC 9457 `application/problem+json`.
     - Pagination cursor: `?limit=50&cursor=<opaque>`; respons memuat `next_cursor` (null jika habis).
     - Operasi pembuatan yang berisiko ganda (`POST /messages`, `POST /campaigns`) menerima header `Idempotency-Key`.
-    - Endpoint bertanda `x-phase: 2` bukan bagian MVP tetapi kontraknya dikunci lebih awal.
     - Semua endpoint dapat membalas `401` (tidak terautentikasi), `403` (peran/scope/CSRF), `429` (rate limit, dengan `Retry-After`) dan `500`, semuanya `application/problem+json`; tidak diulang per operasi.
-    - Endpoint fase 2/3 (kampanye, webhook) membalas `501 not_implemented` sampai diimplementasikan.
     - Endpoint tambahan di luar MVP awal: `GET/PUT /settings/dispatch-pause` (kill switch global, spec 09 §8).
 servers:
   - url: https://smsc.example-tailnet.ts.net/api/v1
@@ -33,6 +31,7 @@ tags:
     description: Manajemen delay, rate limit, jendela waktu, retry.
   - name: Compliance
   - name: Admin
+  - name: Webhooks
   - name: Stats
   - name: Realtime
 
@@ -1006,9 +1005,8 @@ paths:
                   next_cursor: {type: [string, 'null']}
   /webhooks:
     get:
-      x-phase: 2
-      tags: [Admin]
-      summary: Daftar webhook status pesan
+      tags: [Webhooks]
+      summary: Daftar webhook (tanpa secret)
       responses:
         '200':
           description: OK
@@ -1016,12 +1014,20 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [items]
                 properties:
                   items: {type: array, items: {$ref: '#/components/schemas/Webhook'}}
     post:
-      x-phase: 2
-      tags: [Admin]
-      summary: Daftarkan webhook. Payload ditandatangani HMAC-SHA256 (`X-SMSC-Signature`).
+      tags: [Webhooks]
+      summary: Daftarkan webhook. `signing_secret` hanya tampil SEKALI pada respons ini.
+      description: |
+        Target HTTP(S) dipanggil server dengan `POST` JSON (lihat skema `WebhookEnvelope`). Header:
+        `X-SMSC-Event`, `X-SMSC-Delivery` (uuid; **sama pada setiap percobaan ulang**, gunakan untuk dedup), `X-SMSC-Timestamp` (epoch detik),
+        `X-SMSC-Signature: sha256=<hex>` = HMAC-SHA256(`signing_secret`, `timestamp + "." + body mentah`).
+        Penerima wajib memverifikasi tanda tangan memakai perbandingan waktu-konstan dan menolak timestamp > 5 menit.
+        Balas `2xx` (maks. 10 detik) untuk menandai berhasil. Selain itu dicoba ulang: 30 dtk, 2 mnt, 10 mnt, 1 jam, 6 jam; lalu ditandai `failed`
+        (dapat dikirim ulang manual). Pengiriman *at-least-once*: event yang sama dapat tiba lebih dari sekali.
+        Redirect tidak diikuti. Alamat loopback, link-local (termasuk metadata cloud), dan unspecified ditolak; jaringan privat/tailnet diizinkan.
       requestBody:
         required: true
         content:
@@ -1031,15 +1037,143 @@ paths:
               required: [url, events]
               properties:
                 url: {type: string, format: uri}
-                events:
-                  type: array
-                  items: {type: string, enum: [message.sent, message.delivered, message.failed, campaign.completed, device.offline]}
+                events: {type: array, minItems: 1, items: {$ref: '#/components/schemas/WebhookEvent'}}
+                description: {type: string}
       responses:
         '201':
           description: Dibuat
           content:
             application/json:
+              schema: {$ref: '#/components/schemas/WebhookCreated'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /webhooks/{webhookId}:
+    parameters:
+      - {$ref: '#/components/parameters/WebhookId'}
+    get:
+      tags: [Webhooks]
+      summary: Detail webhook
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
               schema: {$ref: '#/components/schemas/Webhook'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Webhooks]
+      summary: Ubah url, events, enabled, atau description. Webhook nonaktif tidak menerima event baru; pengiriman tertunda menunggu sampai diaktifkan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url: {type: string, format: uri}
+                events: {type: array, minItems: 1, items: {$ref: '#/components/schemas/WebhookEvent'}}
+                enabled: {type: boolean}
+                description: {type: [string, 'null']}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Webhook'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+    delete:
+      tags: [Webhooks]
+      summary: Hapus webhook beserta riwayat pengirimannya
+      responses:
+        '204': {description: Dihapus}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /webhooks/{webhookId}/test:
+    parameters:
+      - {$ref: '#/components/parameters/WebhookId'}
+    post:
+      tags: [Webhooks]
+      summary: Kirim event uji `webhook.test` (tanpa memedulikan langganan event)
+      responses:
+        '202':
+          description: Diantrekan. Hasilnya terlihat pada riwayat pengiriman.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [delivery_id]
+                properties:
+                  delivery_id: {type: string, format: uuid}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /webhooks/{webhookId}/deliveries:
+    parameters:
+      - {$ref: '#/components/parameters/WebhookId'}
+    get:
+      tags: [Webhooks]
+      summary: Riwayat pengiriman (terbaru dulu)
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/WebhookDelivery'}}
+                  next_cursor: {type: [string, 'null']}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /webhooks/{webhookId}/deliveries/{deliveryId}/retry:
+    parameters:
+      - {$ref: '#/components/parameters/WebhookId'}
+      - {name: deliveryId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      tags: [Webhooks]
+      summary: Kirim ulang pengiriman berstatus `failed` (percobaan dimulai dari nol)
+      responses:
+        '204': {description: Diantrekan}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Bukan berstatus failed (`webhook.not_retryable`)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+  /settings/retention:
+    get:
+      tags: [Admin]
+      summary: Pengaturan retensi data + ringkasan eksekusi terakhir
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RetentionSettings'}
+    put:
+      tags: [Admin]
+      summary: Ubah retensi
+      description: |
+        `body_retention_days`: isi pesan (dan variabel/nomor mentah/client_ref penerima campaign yang sudah selesai) dibersihkan setelah N hari sejak pesan selesai;
+        `0` = segera setelah selesai. Metadata (nomor E.164, status, waktu) dipertahankan. Pesan yang isinya sudah dibersihkan tidak dapat di-retry.
+        `event_retention_days`: timeline event dihapus setelah N hari. Audit log tidak pernah dihapus otomatis.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body_retention_days, event_retention_days]
+              properties:
+                body_retention_days: {type: integer, minimum: 0, maximum: 3650}
+                event_retention_days: {type: integer, minimum: 1, maximum: 3650}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RetentionSettings'}
+        '422': {$ref: '#/components/responses/ValidationError'}
 
   /stats/overview:
     get:
@@ -1137,6 +1271,7 @@ components:
     DeviceId: {name: deviceId, in: path, required: true, schema: {type: string, format: uuid}}
     MessageId: {name: messageId, in: path, required: true, schema: {type: string, format: uuid}}
     CampaignId: {name: campaignId, in: path, required: true, schema: {type: string, format: uuid}}
+    WebhookId: {name: webhookId, in: path, required: true, schema: {type: string, format: uuid}}
 
   responses:
     Unauthorized:
@@ -1616,14 +1751,74 @@ components:
         expires_at: {type: [string, 'null'], format: date-time}
         created_at: {type: string, format: date-time}
 
+    WebhookEvent:
+      type: string
+      enum: [message.sent, message.delivered, message.failed, campaign.completed, campaign.paused, device.offline]
     Webhook:
       type: object
+      required: [id, url, events, enabled, created_at]
       properties:
         id: {type: string, format: uuid}
         url: {type: string, format: uri}
-        events: {type: array, items: {type: string}}
-        signing_secret: {type: string, description: Tampil sekali saat dibuat.}
+        events: {type: array, items: {$ref: '#/components/schemas/WebhookEvent'}}
         enabled: {type: boolean}
+        description: {type: [string, 'null']}
+        created_at: {type: string, format: date-time}
+    WebhookCreated:
+      allOf:
+        - $ref: '#/components/schemas/Webhook'
+        - type: object
+          required: [signing_secret]
+          properties:
+            signing_secret: {type: string, description: 'Format `whsec_...`. Tampil sekali; simpan di sisi penerima. Disimpan terenkripsi (AES-256-GCM) di server.'}
+    WebhookDelivery:
+      type: object
+      required: [id, webhook_id, event, status, attempts, created_at]
+      properties:
+        id: {type: string, format: uuid, description: 'Sama dengan header X-SMSC-Delivery.'}
+        webhook_id: {type: string, format: uuid}
+        event: {type: string, description: 'Salah satu WebhookEvent atau `webhook.test`.'}
+        status: {type: string, enum: [pending, delivered, failed]}
+        attempts: {type: integer}
+        last_status: {type: [integer, 'null'], description: 'Kode HTTP percobaan terakhir; null bila tidak ada respons.'}
+        last_error: {type: [string, 'null']}
+        next_attempt_at: {type: [string, 'null'], format: date-time}
+        delivered_at: {type: [string, 'null'], format: date-time}
+        failed_at: {type: [string, 'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+    WebhookEnvelope:
+      type: object
+      description: Isi body POST ke URL webhook (dokumentasi; bukan respons API).
+      required: [event, delivery_id, at, data]
+      properties:
+        event: {type: string}
+        delivery_id: {type: string, format: uuid}
+        at: {type: string, format: date-time, description: Waktu event dibuat.}
+        data:
+          type: object
+          description: |
+            `message.*`: {message_id, client_ref, to, status, campaign_id, sim_id, device_id, attempt, error_code, created_at, sent_at, delivered_at}.
+            `campaign.*`: {campaign_id, name, status, counters, reason?, at}. `device.offline`: {device_id, name, reason, at}. `webhook.test`: {message}.
+            Isi SMS tidak pernah disertakan.
+          additionalProperties: true
+    RetentionRun:
+      type: object
+      required: [at, bodies_purged, events_deleted, recipients_scrubbed, sessions_deleted, enrollments_deleted, deliveries_deleted]
+      properties:
+        at: {type: string, format: date-time}
+        bodies_purged: {type: integer}
+        events_deleted: {type: integer}
+        recipients_scrubbed: {type: integer}
+        sessions_deleted: {type: integer}
+        enrollments_deleted: {type: integer}
+        deliveries_deleted: {type: integer}
+    RetentionSettings:
+      type: object
+      required: [body_retention_days, event_retention_days, last_run]
+      properties:
+        body_retention_days: {type: integer, minimum: 0, maximum: 3650}
+        event_retention_days: {type: integer, minimum: 1, maximum: 3650}
+        last_run: {oneOf: [{$ref: '#/components/schemas/RetentionRun'}, {type: 'null'}]}
 
     AuditLog:
       type: object

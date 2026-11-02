@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (63 operasi)
+# Daftar endpoint (71 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -109,8 +109,21 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `GET` | `/users` | Daftar pengguna dashboard (admin) | apiKey/sessionCookie | 200 |
 | `POST` | `/users` | Buat pengguna | apiKey/sessionCookie | 201 |
 | `GET` | `/audit-logs` | Jejak audit tindakan admin | apiKey/sessionCookie | 200 |
-| `GET` | `/webhooks` | Daftar webhook status pesan (fase 2) | apiKey/sessionCookie | 200 |
-| `POST` | `/webhooks` | Daftarkan webhook. Payload ditandatangani HMAC-SHA256 (`X-SMSC-Signature`). (fase 2) | apiKey/sessionCookie | 201 |
+| `GET` | `/settings/retention` | Pengaturan retensi data + ringkasan eksekusi terakhir | apiKey/sessionCookie | 200 |
+| `PUT` | `/settings/retention` | Ubah retensi | apiKey/sessionCookie | 200,422 |
+
+## Webhooks
+
+| Method | Path | Fungsi | Auth | Status |
+|---|---|---|---|---|
+| `GET` | `/webhooks` | Daftar webhook (tanpa secret) | apiKey/sessionCookie | 200 |
+| `POST` | `/webhooks` | Daftarkan webhook. `signing_secret` hanya tampil SEKALI pada respons ini. | apiKey/sessionCookie | 201,422 |
+| `GET` | `/webhooks/{webhookId}` | Detail webhook | apiKey/sessionCookie | 200,404 |
+| `PATCH` | `/webhooks/{webhookId}` | Ubah url, events, enabled, atau description. Webhook nonaktif tidak menerima event baru; pengiriman tertunda menunggu sampai diaktifkan. | apiKey/sessionCookie | 200,404,422 |
+| `DELETE` | `/webhooks/{webhookId}` | Hapus webhook beserta riwayat pengirimannya | apiKey/sessionCookie | 204,404 |
+| `POST` | `/webhooks/{webhookId}/test` | Kirim event uji `webhook.test` (tanpa memedulikan langganan event) | apiKey/sessionCookie | 202,404 |
+| `GET` | `/webhooks/{webhookId}/deliveries` | Riwayat pengiriman (terbaru dulu) | apiKey/sessionCookie | 200,404 |
+| `POST` | `/webhooks/{webhookId}/deliveries/{deliveryId}/retry` | Kirim ulang pengiriman berstatus `failed` (percobaan dimulai dari nol) | apiKey/sessionCookie | 204,404,409 |
 
 ## Stats
 

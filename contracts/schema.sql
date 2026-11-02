@@ -1,4 +1,4 @@
--- SMSC Gateway — skema PostgreSQL 16 (v1, snapshot AKHIR = 0001_init + 0002_campaigns; dicek oleh server/tests/schema_sync.sh). Sumber kebenaran: docs/03 dan docs/spec/07.
+-- SMSC Gateway — skema PostgreSQL 16 (v1, snapshot AKHIR = migrasi 0001+0002+0003; dicek oleh server/tests/schema_sync.sh). Sumber kebenaran: docs/03 dan docs/spec/07.
 -- ID dibuat oleh aplikasi (UUIDv7). Semua waktu timestamptz (UTC).
 
 BEGIN;
@@ -258,6 +258,7 @@ CREATE INDEX messages_to_idx         ON messages (to_e164, created_at DESC);
 CREATE INDEX messages_sim_sent_idx   ON messages (sim_id, sent_at) WHERE sent_at IS NOT NULL;
 CREATE INDEX messages_expiry_idx     ON messages (expires_at) WHERE status IN ('queued','assigned');
 CREATE INDEX messages_unknown_idx    ON messages (assigned_at) WHERE status = 'sending';
+CREATE INDEX messages_purge_idx ON messages ((COALESCE(finished_at, delivered_at, sent_at, created_at))) WHERE body IS NOT NULL AND status NOT IN ('queued','assigned','sending');
 CREATE UNIQUE INDEX messages_idem_uq ON messages (owner_id, idempotency_key, to_e164) WHERE idempotency_key IS NOT NULL;
 CREATE UNIQUE INDEX messages_recipient_uq ON messages (recipient_id) WHERE recipient_id IS NOT NULL;
 CREATE UNIQUE INDEX messages_api_ref_uq ON messages (client_ref) WHERE source = 'api' AND client_ref IS NOT NULL;
@@ -275,6 +276,7 @@ CREATE TABLE message_events (
   device_event_id uuid UNIQUE
 );
 CREATE INDEX message_events_msg_idx ON message_events (message_id, at);
+CREATE INDEX message_events_at_idx ON message_events (at);
 
 -- ---------- fase 2 & operasional ----------
 CREATE TABLE webhooks (
@@ -283,7 +285,10 @@ CREATE TABLE webhooks (
   events         text[] NOT NULL,
   signing_secret bytea NOT NULL,
   enabled        boolean NOT NULL DEFAULT true,
-  created_at     timestamptz NOT NULL DEFAULT now()
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  description    text,
+  created_by     uuid REFERENCES users(id) ON DELETE SET NULL,
+  updated_at     timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE webhook_deliveries (
@@ -294,9 +299,14 @@ CREATE TABLE webhook_deliveries (
   attempts     smallint NOT NULL DEFAULT 0,
   next_attempt_at timestamptz,
   delivered_at timestamptz,
-  last_status  integer
+  last_status  integer,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  failed_at    timestamptz,
+  last_error   text,
+  last_attempt_at timestamptz
 );
 CREATE INDEX webhook_deliveries_due ON webhook_deliveries (next_attempt_at) WHERE delivered_at IS NULL;
+CREATE INDEX webhook_deliveries_hook_idx ON webhook_deliveries (webhook_id, created_at DESC);
 
 CREATE TABLE audit_logs (
   id          uuid PRIMARY KEY,

@@ -72,7 +72,9 @@ func newEnvOpts(t *testing.T, opts ...func(*config.Config)) *env {
 	cfg := config.Config{DatabaseURL: dsn, PublicBaseURL: "http://example.test", SessionSecret: strings.Repeat("s", 40), DefaultRegion: "ID",
 		DispatchTick: 150 * time.Millisecond, ReaperInterval: 150 * time.Millisecond, OfflineAfter: 90 * time.Second,
 		HeartbeatIntervalSec: 30, EnrollTTL: 15 * time.Minute, RequireVPN: false,
-		CampaignTick: 150 * time.Millisecond, CampaignQueueCap: 20000, NoCapacityAfter: 10 * time.Minute}
+		CampaignTick: 150 * time.Millisecond, CampaignQueueCap: 20000, NoCapacityAfter: 10 * time.Minute,
+		WebhookTimeout: 2 * time.Second, WebhookBackoff: []time.Duration{300 * time.Millisecond, 400 * time.Millisecond, 500 * time.Millisecond}, WebhookAllowLoopback: true,
+		WebhookKey: strings.Repeat("k", 40), WebhookWorkers: 4, WebhookTick: 100 * time.Millisecond, RetentionInterval: time.Hour}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -84,6 +86,7 @@ func newEnvOpts(t *testing.T, opts ...func(*config.Config)) *env {
 	go svc.RunDispatcher(ctx)
 	go svc.RunReaper(ctx)
 	go svc.RunCampaigns(ctx)
+	go svc.RunWebhooks(ctx)
 	// policy default cepat untuk tes: delay 300 ms, tanpa batas rate, jendela sepanjang hari, timeout pendek
 	e.sql(`UPDATE dispatch_policies SET min_delay_ms=300, max_delay_ms=300, burst_size=100000, burst_pause_ms=0,
 		rate_per_minute=NULL, rate_per_hour=NULL, rate_per_day=NULL, ack_timeout_ms=1500, sent_timeout_ms=3000,

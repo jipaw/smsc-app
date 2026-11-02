@@ -191,13 +191,14 @@ WITH c AS (
   FOR UPDATE OF m SKIP LOCKED LIMIT 1)
 UPDATE messages m SET status='assigned', sim_id=$1, device_id=$2, attempt=GREATEST(m.attempt,1), assigned_at=now(),
        lease_expires_at = now() + ($3::int * interval '1 millisecond'), error_code=NULL
-FROM c WHERE m.id=c.id RETURNING m.id`
+FROM c WHERE m.id=c.id RETURNING m.id, extract(epoch FROM (now() - GREATEST(m.created_at, m.not_before)))`
 
 // assignNext: dalam satu transaksi - kunci baris SIM, periksa ulang jeda/inflight/rate, lalu ambil pesan (SKIP LOCKED).
 // Mengembalikan (id, waktuSiapBerikut, ditugaskan).
 func (s *Service) assignNext(ctx context.Context, l lane, eff policy.Effective) (uuid.UUID, time.Time, bool) {
 	var id uuid.UUID
 	var wait time.Time
+	var waited float64
 	assigned := false
 	err := s.withTx(ctx, func(tx pgx.Tx) error {
 		var next *time.Time
@@ -241,7 +242,7 @@ func (s *Service) assignNext(ctx context.Context, l lane, eff policy.Effective) 
 		if !wait.IsZero() {
 			return nil
 		}
-		if err := tx.QueryRow(ctx, pickSQL, l.simID, l.deviceID, eff.AckTimeoutMs).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, pickSQL, l.simID, l.deviceID, eff.AckTimeoutMs).Scan(&id, &waited); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
 			}
@@ -257,6 +258,10 @@ func (s *Service) assignNext(ctx context.Context, l lane, eff policy.Effective) 
 	if err != nil {
 		s.Log.Error("dispatcher: assign", "err", err)
 		return uuid.Nil, time.Time{}, false
+	}
+	if assigned {
+		s.M.DispatchAssignments.Inc()
+		s.M.DispatchWait.Observe(waited)
 	}
 	return id, wait, assigned
 }
@@ -342,6 +347,7 @@ func (s *Service) reapOnce(ctx context.Context) {
 	for _, id := range s.idsQuery(ctx, `SELECT id FROM messages WHERE status='assigned' AND lease_expires_at < now() LIMIT 100`) {
 		c := "ack_timeout"
 		apply(id, TransitionOpts{To: StatusQueued, EventType: "requeued", Actor: "system", ErrorCode: &c, SkipLane: true})
+		s.M.LeaseExpired.Inc()
 	}
 	// 2. sending terlalu lama tanpa kabar -> unknown (atau requeue bila retry_on_unknown)
 	if eff, err := s.Effective(ctx, s.Pool, nil, nil, nil); err == nil {
@@ -376,6 +382,7 @@ func (s *Service) reapOnce(ctx context.Context) {
 		rows.Close()
 		for _, id := range ids {
 			s.Log.Info("device offline (tanpa heartbeat)", "device", id)
+			s.emitDeviceOffline(ctx, id, "heartbeat_timeout")
 			s.publishDevice(ctx, id)
 		}
 	}

@@ -68,6 +68,7 @@ func (h *Hub) Send(id uuid.UUID, env proto.Envelope) error {
 	}
 	select {
 	case s.out <- b:
+		h.svc.M.WSMessages.WithLabelValues(env.Type, "out").Inc()
 		return nil
 	default: // backpressure: putus sesi, device akan reconnect dan rekonsiliasi (spec 04 §5)
 		s.cancel()
@@ -178,7 +179,10 @@ func (h *Hub) run(parent context.Context, conn *websocket.Conn, deviceID uuid.UU
 	}
 	h.ses[deviceID] = s
 	h.mu.Unlock()
+	h.svc.M.WSConnections.Inc()
+	h.svc.M.WSConnects.Inc()
 	defer func() {
+		h.svc.M.WSConnections.Dec()
 		h.mu.Lock()
 		current := h.ses[deviceID] == s
 		if current {
@@ -291,7 +295,15 @@ func (h *Hub) reply(s *session, typ string, payload any, ref *string) {
 	}
 }
 
+// knownTypes membatasi kardinalitas label: tipe dari HP tak tepercaya.
+var knownTypes = map[string]bool{proto.TypeHeartbeat: true, proto.TypeCommandAck: true, proto.TypeSmsEvent: true, proto.TypeSimReport: true, proto.TypeCommandResult: true, proto.TypeHello: true}
+
 func (h *Hub) handle(ctx context.Context, s *session, m proto.Envelope) {
+	lbl := "unknown"
+	if knownTypes[m.Type] {
+		lbl = m.Type
+	}
+	h.svc.M.WSMessages.WithLabelValues(lbl, "in").Inc()
 	switch m.Type {
 	case proto.TypeHeartbeat:
 		var hb proto.Heartbeat

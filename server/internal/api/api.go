@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,7 +48,7 @@ func New(svc *core.Service, h *hub.Hub, b *bus.Bus, log *slog.Logger) *API {
 
 func (a *API) Router() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.Recoverer, a.securityHeaders, a.requestLog)
+	r.Use(middleware.RequestID, middleware.Recoverer, a.securityHeaders, a.requestLog, a.httpMetrics)
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -150,10 +151,17 @@ func (a *API) Router() http.Handler {
 				r.With(operator("")).Post("/campaigns/{campaignId}/"+act, a.campaignAction(act))
 			}
 
-			// fase 3: kontrak sudah dikunci, implementasi menyusul
-			ni := a.notImplemented
-			r.With(admin).Get("/webhooks", ni)
-			r.With(admin).Post("/webhooks", ni)
+			// webhook & retensi (fase 3)
+			r.With(admin).Get("/webhooks", a.listWebhooks)
+			r.With(admin).Post("/webhooks", a.createWebhook)
+			r.With(admin).Get("/webhooks/{webhookId}", a.getWebhook)
+			r.With(admin).Patch("/webhooks/{webhookId}", a.patchWebhook)
+			r.With(admin).Delete("/webhooks/{webhookId}", a.deleteWebhook)
+			r.With(admin).Post("/webhooks/{webhookId}/test", a.testWebhook)
+			r.With(admin).Get("/webhooks/{webhookId}/deliveries", a.listDeliveries)
+			r.With(admin).Post("/webhooks/{webhookId}/deliveries/{deliveryId}/retry", a.retryDelivery)
+			r.With(admin).Get("/settings/retention", a.getRetention)
+			r.With(admin).Put("/settings/retention", a.putRetention)
 		})
 	})
 
@@ -301,4 +309,27 @@ func ownerOf(p *principal) uuid.UUID {
 		return p.apiKeyID
 	}
 	return p.user.ID
+}
+
+// httpMetrics mencatat permintaan dengan POLA rute (mis. /api/v1/messages/{messageId}), bukan URL, agar kardinalitas tetap kecil.
+func (a *API) httpMetrics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(ww, r)
+		route := "unmatched"
+		if rc := chi.RouteContext(r.Context()); rc != nil && rc.RoutePattern() != "" {
+			route = rc.RoutePattern()
+		}
+		if r.URL.Path == "/api/v1/events/stream" || r.URL.Path == "/ws/device" { // koneksi panjang: tidak masuk histogram durasi
+			a.Svc.M.HTTPRequests.WithLabelValues(r.Method, route, strconv.Itoa(ww.Status())).Inc()
+			return
+		}
+		st := ww.Status()
+		if st == 0 {
+			st = 200
+		}
+		a.Svc.M.HTTPRequests.WithLabelValues(r.Method, route, strconv.Itoa(st)).Inc()
+		a.Svc.M.HTTPDuration.WithLabelValues(r.Method, route).Observe(time.Since(start).Seconds())
+	})
 }

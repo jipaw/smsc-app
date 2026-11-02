@@ -40,6 +40,7 @@ func (s *Service) OnSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.S
 	if err != nil || err2 != nil {
 		return fmt.Errorf("id tidak valid")
 	}
+	s.M.EventIngest.WithLabelValues(ev.State).Inc()
 	var out Message
 	var changed bool
 	err = s.withTx(ctx, func(tx pgx.Tx) error {

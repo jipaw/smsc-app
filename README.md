@@ -1,6 +1,6 @@
 # SMSC — SMS Gateway Android + Tailscale
 
-Paket desain (analisis, stack, kontrak, flow) sebagai dasar dokumentasi penuh dan implementasi. Belum ada kode aplikasi.
+Paket desain (analisis, stack, kontrak, flow), server + dashboard (fase 1–3) yang teruji, dan skeleton PoC Android. Aplikasi Android produksi belum ada (menunggu hasil PoC).
 
 ## Ringkasan keputusan
 
@@ -48,18 +48,19 @@ Paket desain (analisis, stack, kontrak, flow) sebagai dasar dokumentasi penuh da
 
 | Path | Isi |
 |---|---|
-| [`openapi.yaml`](contracts/openapi.yaml) | REST, OpenAPI 3.1 (63 operasi) |
+| [`openapi.yaml`](contracts/openapi.yaml) | REST, OpenAPI 3.1 (71 operasi) |
 | [`ws-schema.json`](contracts/ws-schema.json) + [`test-vectors/`](contracts/test-vectors/) | Protokol WebSocket: JSON Schema, 16 contoh valid, 13 invalid |
 | [`device-ws-protocol.md`](contracts/device-ws-protocol.md) | Penjelasan protokol WebSocket |
 | [`schema.sql`](contracts/schema.sql) | DDL PostgreSQL 16 (diuji: dimuat bersih, constraint diverifikasi) |
 | [`tools/verify.sh`](contracts/tools/verify.sh) | Verifikasi kontrak (OpenAPI, vector, tabel endpoint) |
 
-**Server & dashboard (`server/`, `web/`)** — implementasi fase 1 + campaign fase 2, teruji (lihat [`docs/STATUS.md`](docs/STATUS.md))
+**Server & dashboard (`server/`, `web/`)** — implementasi fase 1–3 (campaign, webhook, retensi, metrik), teruji (lihat [`docs/STATUS.md`](docs/STATUS.md))
 
 | Path | Isi |
 |---|---|
 | [`server/`](server/README.md) | `smscd` (Go + PostgreSQL): REST, WS hub, dispatcher/reaper, SSE; tes integrasi dengan simulator HP + `contract_check` |
 | [`web/`](web/README.md) | Dashboard React/TS; tipe dari OpenAPI; E2E Chromium (axe, mobile, RBAC) |
+| [`ops/prometheus/alerts.yml`](ops/prometheus/alerts.yml) | 16 aturan alert Prometheus |
 | [`server/tests/fake_device.py`](server/tests/fake_device.py) | HP palsu untuk demo: `--server … --token <kode QR>` |
 
 **PoC Android (`android/`, `poc/`)** — skeleton untuk membuktikan risiko R1/R2/R3/R5/R6 di HP nyata

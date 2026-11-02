@@ -21,6 +21,7 @@ import (
 
 	"github.com/jipaw/smsc-app/server/internal/bus"
 	"github.com/jipaw/smsc-app/server/internal/config"
+	"github.com/jipaw/smsc-app/server/internal/metrics"
 	"github.com/jipaw/smsc-app/server/internal/proto"
 )
 
@@ -39,6 +40,7 @@ type Service struct {
 	Cfg  config.Config
 	Log  *slog.Logger
 	Bus  *bus.Bus
+	M    *metrics.Metrics
 
 	link     DeviceLink
 	wake     chan struct{}
@@ -47,7 +49,26 @@ type Service struct {
 }
 
 func New(pool *pgxpool.Pool, cfg config.Config, log *slog.Logger, b *bus.Bus) *Service {
-	return &Service{Pool: pool, Cfg: cfg, Log: log, Bus: b, wake: make(chan struct{}, 1)}
+	m := metrics.New(pool)
+	// seri berlabel terbatas dibuat sejak awal (nilai 0) agar grafik/alert tidak bergantung pada "data belum ada"
+	for from, tos := range allowed {
+		for _, to := range tos {
+			m.Transitions.WithLabelValues(string(from), string(to)).Add(0)
+		}
+	}
+	for _, r := range []string{"delivered", "retry", "failed"} {
+		m.WebhookDeliveries.WithLabelValues(r).Add(0)
+	}
+	for _, k := range []string{"message_bodies", "recipients", "message_events", "sessions", "enrollments", "webhook_deliveries"} {
+		m.RetentionRows.WithLabelValues(k).Add(0)
+	}
+	for _, st := range []string{"sending", "part_sent", "sent", "part_delivered", "delivered", "failed"} {
+		m.EventIngest.WithLabelValues(st).Add(0)
+	}
+	for _, src := range []string{"dashboard", "api", "campaign"} {
+		m.MessagesCreated.WithLabelValues(src).Add(0)
+	}
+	return &Service{Pool: pool, Cfg: cfg, Log: log, Bus: b, M: m, wake: make(chan struct{}, 1)}
 }
 
 func (s *Service) SetLink(l DeviceLink) { s.link = l }

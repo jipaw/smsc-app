@@ -12,4 +12,4 @@ psql "${BASE/\/postgres?/\/$A?}" -q -v ON_ERROR_STOP=1 -f contracts/schema.sql >
 for f in server/internal/db/migrations/*.sql; do psql "${BASE/\/postgres?/\/$B?}" -q -v ON_ERROR_STOP=1 -f "$f" >/dev/null; done
 # seed data (INSERT) tidak relevan: bandingkan struktur saja
 dump(){ pg_dump --schema-only --no-owner --no-privileges "${BASE/\/postgres?/\/$1?}" | grep -v -E '^(--|SET |SELECT pg_catalog|\\restrict|\\unrestrict|$)'; }
-if diff <(dump $A) <(dump $B) >/tmp/schema_sync.diff; then echo "skema sinkron: schema.sql == migrasi (0001+0002)"; else echo "SKEMA TIDAK SINKRON:"; head -30 /tmp/schema_sync.diff; exit 1; fi
+if diff <(dump $A) <(dump $B) >/tmp/schema_sync.diff; then echo "skema sinkron: schema.sql == semua migrasi"; else echo "SKEMA TIDAK SINKRON:"; head -30 /tmp/schema_sync.diff; exit 1; fi

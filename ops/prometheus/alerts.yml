@@ -1,0 +1,90 @@
+# Aturan alert SMSC (Prometheus). Setiap nama metrik diverifikasi terhadap /metrics asli oleh server/tests (TestAlertRulesReferenceExistingMetrics).
+# Alert disk/host (mis. DbDisk) berasal dari node_exporter, bukan dari smscd.
+groups:
+  - name: smsc.devices
+    rules:
+      - alert: SmscAllDevicesOffline
+        expr: sum(smsc_devices{status="online"}) == 0 and sum(smsc_devices{status=~"online|degraded|offline"}) > 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: Tidak ada HP gateway online
+          runbook: docs/spec/10-panduan-operasional.md#r-01-device-offline
+      - alert: SmscDeviceOffline
+        expr: smsc_devices{status="offline"} > 0
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "Ada device offline > 10 menit"}
+      - alert: SmscSimNoService
+        expr: smsc_sims{status="no_service"} > 0
+        for: 15m
+        labels: {severity: warning}
+        annotations: {summary: "Ada SIM tanpa layanan > 15 menit"}
+      - alert: SmscLowBattery
+        expr: smsc_device_battery_percent < 15 and on(device) smsc_device_charging == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Baterai HP {{ $labels.name }} < 15% dan tidak mengisi"}
+      - alert: SmscDeviceFlapping
+        expr: increase(smsc_ws_connects_total[10m]) > 30
+        labels: {severity: warning}
+        annotations: {summary: "Sesi WebSocket device berulang kali dibuka (koneksi tidak stabil)"}
+  - name: smsc.delivery
+    rules:
+      - alert: SmscQueueStuck
+        expr: sum(smsc_queue_depth) > 0 and sum(rate(smsc_message_transitions_total{to="sent"}[10m])) == 0 and smsc_queue_oldest_age_seconds > 600
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: Antrean tidak mengalir
+          runbook: docs/spec/10-panduan-operasional.md#r-02-antrean-menumpuk--tidak-mengalir
+      - alert: SmscDispatchLag
+        expr: smsc_sim_next_eligible_lag_seconds > 120
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Lane SIM siap tetapi tidak melepas pesan > 2 menit"}
+      - alert: SmscHighFailureRatio
+        expr: |
+          sum(rate(smsc_message_transitions_total{to="failed"}[15m]))
+            / clamp_min(sum(rate(smsc_message_transitions_total{to=~"sent|failed"}[15m])), 0.0001) > 0.3
+          and sum(rate(smsc_message_transitions_total{to=~"sent|failed"}[15m])) > 0
+        for: 15m
+        labels: {severity: warning}
+        annotations: {summary: "Rasio gagal 15 menit > 30%"}
+      - alert: SmscLeaseExpiredSpike
+        expr: increase(smsc_lease_expired_total[10m]) > 20
+        labels: {severity: warning}
+        annotations: {summary: "Banyak lease kedaluwarsa: HP tidak mengonfirmasi perintah kirim"}
+      - alert: SmscUnknownMessages
+        expr: increase(smsc_message_transitions_total{to="unknown"}[1h]) > 0
+        labels: {severity: info}
+        annotations: {summary: "Ada pesan berstatus tidak pasti (HP terputus saat mengirim); tinjau sebelum retry"}
+  - name: smsc.platform
+    rules:
+      - alert: SmscWebhookDeliveryFailing
+        expr: increase(smsc_webhook_deliveries_total{result="failed"}[1h]) > 0
+        labels: {severity: warning}
+        annotations: {summary: "Pengiriman webhook gagal final (retry habis)"}
+      - alert: SmscWebhookBacklog
+        expr: smsc_webhook_oldest_pending_age_seconds > 3600
+        labels: {severity: warning}
+        annotations: {summary: "Pengiriman webhook tertunda > 1 jam"}
+      - alert: SmscHttp5xx
+        expr: sum(rate(smsc_http_requests_total{status=~"5.."}[5m])) > 0.1
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Server mengembalikan 5xx"}
+      - alert: SmscDbPoolSaturated
+        expr: smsc_db_pool_connections{state="acquired"} / smsc_db_pool_connections{state="max"} > 0.9
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Pool koneksi database hampir penuh"}
+      - alert: SmscMetricScrapeErrors
+        expr: increase(smsc_scrape_errors_total[15m]) > 0
+        labels: {severity: info}
+        annotations: {summary: "Gagal membaca sebagian metrik dari database"}
+      - alert: SmscRetentionNotRunning
+        expr: increase(smsc_retention_runs_total[26h]) == 0
+        for: 1h
+        labels: {severity: info}
+        annotations: {summary: "Job retensi tidak berjalan > 26 jam (data pribadi tidak dibersihkan)"}

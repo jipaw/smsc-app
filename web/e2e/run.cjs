@@ -13,6 +13,8 @@ if (!BASE) { console.error('SMSC_TEST_DATABASE_URL belum diset'); process.exit(2
 const DB = 'smsc_e2e_' + crypto.randomBytes(4).toString('hex')
 const PORT = 19000 + Math.floor(Math.random() * 900)
 const URL_ = `http://127.0.0.1:${PORT}`
+const MPORT = PORT + 1000, HPORT = PORT + 2000
+const http = require('http')
 const OUT = path.join(__dirname, 'out')
 const AXE = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8')
 const ADMIN = 'admin@e2e.test', PW = 'e2e-admin-password-1'
@@ -49,7 +51,7 @@ async function axeCheck(page, name) {
 async function main() {
   psql(`CREATE DATABASE ${DB}`)
   const env = { ...process.env, DATABASE_URL: BASE.replace('/postgres?', `/${DB}?`), PUBLIC_BASE_URL: URL_, SESSION_SECRET: 's'.repeat(40), HTTP_ADDR: `127.0.0.1:${PORT}`,
-    AUTO_MIGRATE: 'true', SECURE_COOKIES: 'false', REQUIRE_VPN: 'false', DISPATCH_TICK: '300ms', REAPER_INTERVAL: '500ms' }
+    AUTO_MIGRATE: 'true', SECURE_COOKIES: 'false', REQUIRE_VPN: 'false', DISPATCH_TICK: '300ms', WEBHOOK_ALLOW_LOOPBACK: 'true', METRICS_ADDR: `127.0.0.1:${MPORT}`, WEBHOOK_TICK: '300ms', REAPER_INTERVAL: '500ms' }
   execFileSync(BIN, ['migrate'], { env })
   execFileSync(BIN, ['admin', 'create', '--email', ADMIN, '--password', PW], { env })
   const srv = spawn(BIN, ['serve'], { env, stdio: 'ignore' }); procs.push(srv)
@@ -265,9 +267,59 @@ async function main() {
   check(true, 'batalkan campaign (konfirmasi kata BATAL) -> status Dibatalkan')
   await page.getByRole('link', { name: 'Campaigns', exact: true }).click()
   await page.getByText('Tagihan E2E').waitFor()
+  await page.getByText('Promo E2E').waitFor(); await until(async () => (await page.getByRole('progressbar').count()) === 2, 5000, 'dua progress bar')
   check((await page.getByText('Promo E2E').count()) === 1 && (await page.getByRole('progressbar').count()) === 2, 'daftar campaign memuat kedua campaign dengan progres')
   await axeCheck(page, 'daftar campaign')
   await shot('16-campaign-list')
+
+
+  // ---- webhook, retensi, metrik (fase 3) ----
+  const hits = []
+  const recv = http.createServer((rq, rs) => { let b = ''; rq.on('data', (c) => (b += c)); rq.on('end', () => { hits.push({ h: rq.headers, b }); rs.writeHead(200); rs.end('ok') }) })
+  await new Promise((r) => recv.listen(HPORT, '127.0.0.1', r)); procs.push({ kill: () => recv.close() })
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto(URL_ + '/settings')
+  await page.getByRole('tab', { name: 'Webhook' }).click()
+  await page.getByLabel('URL penerima').fill('ftp://salah')
+  await page.getByRole('button', { name: 'Tambah webhook' }).click()
+  await page.getByRole('alert').first().waitFor()
+  check(true, 'webhook: URL tidak valid ditolak dengan pesan')
+  await page.getByLabel('URL penerima').fill(`http://127.0.0.1:${HPORT}/hook`)
+  await page.getByRole('button', { name: 'Tambah webhook' }).click()
+  const secretEl = page.locator('.okbox .mono'); await secretEl.waitFor()
+  const whsec = (await secretEl.textContent()).trim()
+  check(/^whsec_/.test(whsec), 'webhook: secret penandatangan tampil sekali saat dibuat')
+  await axeCheck(page, 'pengaturan webhook')
+  await shot('17-webhooks')
+  await page.getByRole('button', { name: 'Uji', exact: true }).click()
+  await until(async () => hits.length >= 1, 10000, 'event uji diterima')
+  const h0 = hits[0]
+  const expect = 'sha256=' + crypto.createHmac('sha256', whsec).update(h0.h['x-smsc-timestamp'] + '.' + h0.b).digest('hex')
+  check(h0.h['x-smsc-signature'] === expect && h0.h['x-smsc-event'] === 'webhook.test', 'webhook: tanda tangan HMAC-SHA256 dari tombol Uji valid')
+  await page.getByRole('button', { name: 'Riwayat' }).click()
+  await page.getByRole('dialog').getByText('webhook.test').waitFor()
+  check(true, 'webhook: riwayat pengiriman menampilkan event uji')
+  await page.keyboard.press('Escape')
+  const sendRes = await api('POST', '/api/v1/messages', { recipients: [{ to: '08123450001' }], body: 'webhook e2e' }, cookie, csrf)
+  await until(async () => hits.some((x) => JSON.parse(x.b).event === 'message.delivered'), 20000, 'webhook message.delivered')
+  check(sendRes.status === 202 && !hits.some((x) => x.b.includes('webhook e2e')), 'webhook: event pesan terkirim, isi SMS tidak bocor')
+  await page.getByRole('tab', { name: 'Retensi' }).click()
+  await page.getByLabel(/Simpan isi pesan/).fill('30')
+  await page.getByRole('button', { name: 'Simpan', exact: true }).click()
+  await page.getByText('Retensi disimpan').waitFor()
+  await page.reload(); await page.getByRole('tab', { name: 'Retensi' }).click()
+  check((await page.getByLabel(/Simpan isi pesan/).inputValue()) === '30', 'retensi: nilai tersimpan dan dimuat ulang')
+  await page.getByLabel(/Simpan isi pesan/).fill('9999')
+  await page.getByRole('button', { name: 'Simpan', exact: true }).click()
+  await page.getByRole('alert').first().waitFor()
+  check(true, 'retensi: nilai di luar batas ditolak')
+  await axeCheck(page, 'pengaturan retensi')
+  const met = await fetch(`http://127.0.0.1:${MPORT}/metrics`)
+  const mt = await met.text()
+  check(met.status === 200 && /smsc_devices\{status="online"\} 1/.test(mt) && /smsc_webhook_deliveries_total\{result="delivered"\} [1-9]/.test(mt), 'metrik: /metrics di listener terpisah memuat device online & webhook terkirim')
+  check(!mt.includes('webhook e2e') && !mt.includes('08123450001') && !mt.includes('+628123450001'), 'metrik: tanpa isi/nomor pesan')
+  const pub = await fetch(URL_ + '/metrics')
+  check(!(await pub.text()).includes('smsc_devices'), 'metrik: tidak terekspos di listener publik')
 
   // ---- responsif + tema gelap ----
   await page.setViewportSize({ width: 390, height: 800 })
@@ -309,7 +361,7 @@ async function main() {
   await page.getByRole('heading', { name: 'SMSC Gateway' }).waitFor()
   check(true, 'logout kembali ke login')
 
-  const real = errors.filter((e) => !/favicon|Failed to load resource.*(401|429)/.test(e))
+  const real = errors.filter((e) => !/favicon|Failed to load resource.*(401|422|429)/.test(e))
   check(real.length === 0, 'tidak ada error konsol/halaman', real.join(' | ').slice(0, 300))
   await browser.close()
 }

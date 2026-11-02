@@ -270,6 +270,7 @@ func (s *Service) CreateMessages(ctx context.Context, owner uuid.UUID, source, i
 			if err := sub.Commit(ctx); err != nil {
 				return err
 			}
+			s.M.MessagesCreated.WithLabelValues(source).Inc()
 			if err := insertEvent(ctx, tx, id, 0, "created", source, nil, nil, nil, nil); err != nil {
 				return err
 			}
@@ -393,7 +394,26 @@ func (s *Service) transition(ctx context.Context, tx pgx.Tx, id uuid.UUID, o Tra
 			return cur, err
 		}
 	}
-	return scanMsg(tx.QueryRow(ctx, `SELECT `+msgCols+` FROM messages WHERE id=$1`, id))
+	m, err := scanMsg(tx.QueryRow(ctx, `SELECT `+msgCols+` FROM messages WHERE id=$1`, id))
+	if err != nil {
+		return m, err
+	}
+	s.M.Transitions.WithLabelValues(string(cur.Status), string(o.To)).Inc()
+	// outbox webhook: ditulis dalam transaksi yang sama dengan perubahan status
+	switch o.To {
+	case StatusSent:
+		err = s.emitWebhook(ctx, tx, "message.sent", messageWebhookData(m))
+	case StatusDelivered:
+		if cur.SentAt == nil { // delivered tanpa event sent sebelumnya: pelanggan 'sent' tetap menerima
+			err = s.emitWebhook(ctx, tx, "message.sent", messageWebhookData(m))
+		}
+		if err == nil {
+			err = s.emitWebhook(ctx, tx, "message.delivered", messageWebhookData(m))
+		}
+	case StatusFailed:
+		err = s.emitWebhook(ctx, tx, "message.failed", messageWebhookData(m))
+	}
+	return m, err
 }
 
 // ---------- baca / daftar ----------
@@ -591,6 +611,9 @@ func (s *Service) RetryMessage(ctx context.Context, id uuid.UUID, actor string, 
 		}
 		if cur.Status != StatusFailed && cur.Status != StatusExpired && cur.Status != StatusUnknown {
 			return NewProblem(http.StatusConflict, "message.invalid_transition", "Tidak dapat di-retry", fmt.Sprintf("pesan berstatus %q", cur.Status))
+		}
+		if cur.Body == nil {
+			return Validation(FieldError{Field: "message", Message: "isi pesan sudah dibersihkan oleh kebijakan retensi sehingga tidak dapat dikirim ulang"})
 		}
 		if cur.Status == StatusUnknown && !r.ConfirmDuplicateRisk {
 			return Validation(FieldError{"confirm_duplicate_risk", "wajib true untuk pesan berstatus unknown (risiko SMS ganda)"})

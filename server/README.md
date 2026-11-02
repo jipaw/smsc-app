@@ -3,19 +3,42 @@
 Go 1.24 + PostgreSQL 16. Satu biner: REST API, WebSocket device, SSE, dispatcher, reaper, dan dashboard (embed).
 Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 
-## Status irisan fase 1
+## Status (fase 1–3)
 
-| Sudah | Belum (fase 2/3, endpoint membalas `501 not_implemented`) |
+| Sudah | Belum (fase 4) |
 |---|---|
-| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | Webhook (fase 3) |
-| Enrollment sekali pakai, registry device/SIM, revoke, perintah jarak jauh | Retensi otomatis, rotasi kredensial |
-| WS hub protokol v1 (hello + rekonsiliasi, heartbeat, sms.event idempoten, sim.report) | Metrik Prometheus (`/metrics`), 2FA |
-| Kirim pesan (normalisasi E.164, GSM-7/UCS-2, template, suppression, Idempotency-Key, `client_ref`) | Multi-instance (hanya leader tunggal via advisory lock) |
+| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | Rotasi kredensial, 2FA |
+| Enrollment sekali pakai, registry device/SIM, revoke, perintah jarak jauh | Multi-instance (hanya leader tunggal via advisory lock) |
+| WS hub protokol v1 (hello + rekonsiliasi, heartbeat, sms.event idempoten, sim.report) | |
+| Kirim pesan (normalisasi E.164, GSM-7/UCS-2, template, suppression, Idempotency-Key, `client_ref`) | |
 | Dispatcher per-SIM: delay acak [min,max], burst, rate menit/jam/hari, jendela waktu, concurrency, kill switch | |
 | Reaper: lease/ack timeout, `unknown` (sent timeout), kedaluwarsa, device offline | |
 | Mesin status satu pintu, retry + backoff, cancel/retry manual, transaksi + timeline, ekspor CSV aman | |
 | Policy berlapis (global/device/SIM/pesan) + CRUD + tampilan efektif, SSE dengan replay, statistik, audit log | |
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
+| **Webhook (fase 3)**: outbox transaksional, HMAC-SHA256, retry/backoff, SSRF guard, riwayat + kirim ulang | |
+| **Retensi (fase 3)**: pembersihan terjadwal, `PUT /settings/retention`, `smscd privacy erase` | |
+| **Metrik (fase 3)**: `/metrics` di listener terpisah, `ops/prometheus/alerts.yml` | |
+
+## Webhook, retensi, metrik (fase 3)
+
+| Env | Default | Arti |
+|---|---|---|
+| `WEBHOOK_TIMEOUT` | `10s` | Batas waktu per percobaan |
+| `WEBHOOK_BACKOFF` | `30s,2m,10m,1h,6h` | Jeda sebelum percobaan ke-2, 3, … (jumlah percobaan = jumlah jeda + 1) |
+| `WEBHOOK_TICK` | `1s` | Interval polling outbox (8 worker, lease 2 mnt) |
+| `WEBHOOK_ENC_KEY` | turunan `SESSION_SECRET` | Kunci enkripsi secret webhook |
+| `WEBHOOK_ALLOW_LOOPBACK` | `false` | Hanya uji/dev |
+| `RETENTION_INTERVAL` | `1h` | Frekuensi pembersihan |
+| `METRICS_ADDR` | `127.0.0.1:9090` | Listener `/metrics` terpisah; kosong = nonaktif |
+
+Event: `message.sent`, `message.delivered`, `message.failed`, `campaign.completed`, `campaign.paused`, `device.offline` (+ `webhook.test` dari tombol Uji). Header: `X-SMSC-Event`, `X-SMSC-Delivery`, `X-SMSC-Timestamp`, `X-SMSC-Signature: sha256=hex(HMAC(secret, timestamp + "." + body))`.
+
+```bash
+smscd privacy erase --number 08123456789 --suppress   # anonimkan semua jejak satu nomor (+ daftar blokir)
+curl -s 127.0.0.1:9090/metrics | grep ^smsc_
+promtool check rules ../ops/prometheus/alerts.yml     # bila promtool tersedia
+```
 
 ## Campaign — perilaku yang perlu diketahui
 

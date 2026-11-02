@@ -105,6 +105,9 @@ func (s *Service) simpleTransition(ctx context.Context, id uuid.UUID, actor, act
 		return Campaign{}, s.transitionFail(ctx, id, action)
 	}
 	s.Audit(ctx, actor, "campaign."+action, "campaign", id.String(), nil)
+	if action == "pause" {
+		s.emitCampaign(ctx, "campaign.paused", id, map[string]any{"reason": "user"})
+	}
 	s.publishCampaign(ctx, id)
 	s.Wake()
 	return s.GetCampaign(ctx, id)
@@ -205,6 +208,7 @@ func (s *Service) runCampaign(ctx context.Context, id uuid.UUID) {
 		AND NOT EXISTS (SELECT 1 FROM messages WHERE campaign_id=$1 AND status IN ('queued','assigned','sending'))`, id)
 	if err == nil && tag.RowsAffected() == 1 {
 		s.Log.Info("campaign selesai", "campaign", id)
+		s.emitCampaign(ctx, "campaign.completed", id, nil)
 		s.Audit(ctx, "system", "campaign.complete", "campaign", id.String(), nil)
 		s.publishCampaign(ctx, id)
 	}
@@ -282,6 +286,11 @@ func (s *Service) materialize(ctx context.Context, c Campaign) (int, error) {
 				status, code, finished = "failed", ptr("missing_variable"), ptr(time.Now())
 			}
 			info := sms.Analyze(body)
+			if status == "failed" { // pesan gagal sejak dibuat tetap memicu webhook message.failed
+				if err := s.emitWebhook(ctx, tx, "message.failed", map[string]any{"message_id": mid, "to": r.to, "status": "failed", "campaign_id": c.ID, "error_code": code, "created_at": time.Now().UTC()}); err != nil {
+					return err
+				}
+			}
 			b.Queue(`INSERT INTO messages(id,source,campaign_id,recipient_id,to_e164,body,encoding,parts,status,error_code,max_attempts,priority,policy_id,not_before,expires_at,finished_at)
 				VALUES ($1,'campaign',$2,$3,$4,$5,$6,$7,$8::message_status,$9,$10,$11,$12,now(),$13,$14)`,
 				mid, c.ID, r.id, r.to, body, info.Encoding, info.Parts, status, code, eff.MaxAttempts, c.Priority, c.PolicyID, expires, finished)
@@ -309,6 +318,10 @@ func (s *Service) materialize(ctx context.Context, c Campaign) (int, error) {
 		n = len(ids)
 		return nil
 	})
+	if err == nil && n > 0 {
+		s.M.MessagesCreated.WithLabelValues("campaign").Add(float64(n))
+		s.M.CampaignMaterialized.Add(float64(n))
+	}
 	return n, err
 }
 
@@ -358,6 +371,7 @@ func (s *Service) autoPause(ctx context.Context, id uuid.UUID, reason string, da
 		return false
 	}
 	s.Log.Warn("campaign dijeda otomatis", "campaign", id, "reason", reason)
+	s.emitCampaign(ctx, "campaign.paused", id, map[string]any{"reason": reason})
 	s.Audit(ctx, "system", "campaign.auto_pause", "campaign", id.String(), mergeMap(data, map[string]any{"reason": reason}))
 	s.publishCampaign(ctx, id)
 	return true
@@ -390,4 +404,16 @@ func (s *Service) capacityCheck(ctx context.Context, c Campaign) bool {
 	}
 	s.capSince.Delete(c.ID)
 	return s.autoPause(ctx, c.ID, "no_capacity", nil)
+}
+
+// emitCampaign menulis event webhook campaign dengan ringkasan counter.
+func (s *Service) emitCampaign(ctx context.Context, event string, id uuid.UUID, extra map[string]any) {
+	c, err := s.GetCampaign(ctx, id)
+	if err != nil {
+		return
+	}
+	data := mergeMap(map[string]any{"campaign_id": c.ID, "name": c.Name, "status": c.Status, "counters": c.Counters, "at": time.Now().UTC()}, extra)
+	if err := s.emitWebhook(ctx, s.Pool, event, data); err != nil {
+		s.Log.Warn("webhook campaign gagal ditulis", "err", err, "event", event)
+	}
 }

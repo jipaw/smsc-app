@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/jipaw/smsc-app/server/internal/api"
 	"github.com/jipaw/smsc-app/server/internal/bus"
@@ -55,10 +56,12 @@ func main() {
 		}
 	case "admin":
 		adminCmd(ctx, args, cfg, pool, log)
+	case "privacy":
+		privacyCmd(ctx, args, cfg, pool, log)
 	case "serve":
 		serve(ctx, cfg, pool, log)
 	default:
-		fmt.Fprintln(os.Stderr, "perintah tidak dikenal:", cmd, "(serve | migrate | admin create)")
+		fmt.Fprintln(os.Stderr, "perintah tidak dikenal:", cmd, "(serve | migrate | admin create | privacy erase)")
 		os.Exit(2)
 	}
 }
@@ -90,10 +93,25 @@ func serve(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, log *slog
 		go svc.RunDispatcher(leaderCtx)
 		go svc.RunReaper(leaderCtx)
 		go svc.RunCampaigns(leaderCtx)
+		go svc.RunWebhooks(leaderCtx)
+		go svc.RunRetention(leaderCtx)
 	} else {
 		log.Warn("instance lain sudah menjadi leader; dispatcher/reaper tidak dijalankan di sini")
 	}
 
+	// metrik Prometheus: listener TERPISAH (default loopback); kosongkan METRICS_ADDR untuk menonaktifkan
+	if cfg.MetricsAddr != "" {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.HandlerFor(svc.M.Reg, promhttp.HandlerOpts{Registry: svc.M.Reg}))
+		msrv := &http.Server{Addr: cfg.MetricsAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			if err := msrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("listener metrik berhenti", "err", err)
+			}
+		}()
+		defer msrv.Close()
+		log.Info("metrik tersedia", "addr", cfg.MetricsAddr+"/metrics")
+	}
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
@@ -144,4 +162,22 @@ func adminCmd(ctx context.Context, args []string, cfg config.Config, pool *pgxpo
 	if generated {
 		fmt.Printf("password (tampil sekali): %s\n", *pw)
 	}
+}
+
+func privacyCmd(ctx context.Context, args []string, cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) {
+	if len(args) == 0 || args[0] != "erase" {
+		fmt.Fprintln(os.Stderr, "pemakaian: smscd privacy erase --number <nomor> [--suppress]")
+		os.Exit(2)
+	}
+	fs := flag.NewFlagSet("privacy erase", flag.ExitOnError)
+	number := fs.String("number", "", "nomor yang datanya dihapus (08xx atau E.164)")
+	suppress := fs.Bool("suppress", false, "tambahkan juga ke daftar blokir agar tidak dikirimi lagi")
+	_ = fs.Parse(args[1:])
+	svc := core.New(pool, cfg, log, bus.New(time.Minute))
+	res, err := svc.EraseNumber(ctx, *number, *suppress, "cli:privacy")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gagal:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("selesai: %d pesan dianonimkan, %d penerima campaign dihapus, %d payload webhook dibersihkan, masuk daftar blokir: %v\n", res.Messages, res.Recipients, res.Deliveries, res.Suppressed)
 }

@@ -28,6 +28,18 @@ type Config struct {
 	CampaignTick         time.Duration // siklus materializer/scheduler/auto-pause
 	CampaignQueueCap     int           // maks. pesan campaign berstatus queued sekaligus (backpressure materialisasi)
 	NoCapacityAfter      time.Duration // pause otomatis bila tak ada SIM online selama ini
+
+	// webhook (fase 3)
+	WebhookTimeout       time.Duration
+	WebhookBackoff       []time.Duration // jeda antar percobaan ulang; len = jumlah retry (total percobaan = len+1)
+	WebhookAllowLoopback bool            // izinkan target 127.0.0.0/8 (dev/tes); metadata cloud 169.254/16 selalu diblokir
+	WebhookKey           string          // kunci enkripsi secret webhook (default: SESSION_SECRET)
+	WebhookWorkers       int
+	WebhookTick          time.Duration
+
+	// retensi & metrik (fase 3)
+	RetentionInterval time.Duration
+	MetricsAddr       string // listener terpisah; kosong = nonaktif
 }
 
 func env(k, def string) string {
@@ -65,6 +77,14 @@ func Load() (Config, error) {
 		CampaignTick:         envDur("CAMPAIGN_TICK", time.Second),
 		NoCapacityAfter:      envDur("NO_CAPACITY_AFTER", 10*time.Minute),
 		CampaignQueueCap:     20000,
+		WebhookTimeout:       envDur("WEBHOOK_TIMEOUT", 10*time.Second),
+		WebhookBackoff:       []time.Duration{30 * time.Second, 2 * time.Minute, 10 * time.Minute, time.Hour, 6 * time.Hour},
+		WebhookAllowLoopback: env("WEBHOOK_ALLOW_LOOPBACK", "false") == "true",
+		WebhookKey:           os.Getenv("WEBHOOK_ENC_KEY"),
+		WebhookWorkers:       8,
+		WebhookTick:          envDur("WEBHOOK_TICK", time.Second),
+		RetentionInterval:    envDur("RETENTION_INTERVAL", time.Hour),
+		MetricsAddr:          env("METRICS_ADDR", "127.0.0.1:9090"),
 	}
 	if v, err := strconv.Atoi(env("HEARTBEAT_INTERVAL_SEC", "30")); err == nil {
 		c.HeartbeatIntervalSec = v
@@ -81,6 +101,20 @@ func Load() (Config, error) {
 		c.LogLevel = slog.LevelError
 	default:
 		c.LogLevel = slog.LevelInfo
+	}
+	if v := os.Getenv("WEBHOOK_BACKOFF"); v != "" { // mis. "30s,2m,10m"
+		var bo []time.Duration
+		for _, part := range strings.Split(v, ",") {
+			if d, err := time.ParseDuration(strings.TrimSpace(part)); err == nil && d > 0 {
+				bo = append(bo, d)
+			}
+		}
+		if len(bo) > 0 {
+			c.WebhookBackoff = bo
+		}
+	}
+	if c.WebhookKey == "" {
+		c.WebhookKey = c.SessionSecret
 	}
 	var missing []string
 	if c.DatabaseURL == "" {

@@ -1042,3 +1042,161 @@ func (a *API) previewCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	a.writeJSON(w, http.StatusOK, p)
 }
+
+// ---------- webhook ----------
+
+func (a *API) listWebhooks(w http.ResponseWriter, r *http.Request) {
+	items, err := a.Svc.ListWebhooks(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *API) createWebhook(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		URL         string   `json:"url"`
+		Events      []string `json:"events"`
+		Description string   `json:"description"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	p := principalOf(r.Context())
+	wh, err := a.Svc.CreateWebhook(r.Context(), p.user.ID, in.URL, in.Events, in.Description)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(p), "webhook.create", "webhook", wh.ID.String(), map[string]any{"events": wh.Events})
+	a.writeJSON(w, http.StatusCreated, wh)
+}
+
+func (a *API) getWebhook(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "webhookId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	wh, err := a.Svc.GetWebhook(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, wh)
+}
+
+func (a *API) patchWebhook(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "webhookId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	f, ok := a.decodeMap(w, r)
+	if !ok {
+		return
+	}
+	wh, err := a.Svc.PatchWebhook(r.Context(), id, f)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(principalOf(r.Context())), "webhook.update", "webhook", id.String(), nil)
+	a.writeJSON(w, http.StatusOK, wh)
+}
+
+func (a *API) deleteWebhook(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "webhookId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	if err := a.Svc.DeleteWebhook(r.Context(), id); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(principalOf(r.Context())), "webhook.delete", "webhook", id.String(), nil)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) testWebhook(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "webhookId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	did, err := a.Svc.TestWebhook(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusAccepted, map[string]any{"delivery_id": did})
+}
+
+func (a *API) listDeliveries(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "webhookId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	items, next, err := a.Svc.ListDeliveries(r.Context(), id, qInt(r, "limit", 50), r.URL.Query().Get("cursor"))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	var nc any
+	if next != "" {
+		nc = next
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nc})
+}
+
+func (a *API) retryDelivery(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "webhookId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	did, perr := pathUUID(r, "deliveryId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	if err := a.Svc.RetryDelivery(r.Context(), id, did); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------- retensi ----------
+
+func (a *API) getRetention(w http.ResponseWriter, r *http.Request) {
+	rs, err := a.Svc.GetRetention(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, rs)
+}
+
+func (a *API) putRetention(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Body   *int `json:"body_retention_days"`
+		Events *int `json:"event_retention_days"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	if in.Body == nil || in.Events == nil {
+		a.writeProblem(w, r, core.Validation(core.FieldError{Field: "body_retention_days", Message: "kedua nilai wajib diisi"}))
+		return
+	}
+	rs, err := a.Svc.SetRetention(r.Context(), *in.Body, *in.Events, actorOf(principalOf(r.Context())))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, rs)
+}

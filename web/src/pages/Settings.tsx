@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { del, get, post, put } from '../lib/api'
+import { del, get, patch, post, put } from '../lib/api'
 import { fmtTime } from '../lib/format'
 import { isAdmin, useMe } from '../lib/session'
-import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, Role, Suppression } from '../lib/types'
+import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, Suppression, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
 import { Empty, ErrorBox, errMsg, Field, Loading, Modal, useToast } from '../components/ui'
 
-const TABS = ['Policy', 'Daftar blokir', 'API key', 'Pengguna', 'Audit'] as const
+const TABS = ['Policy', 'Daftar blokir', 'API key', 'Webhook', 'Retensi', 'Pengguna', 'Audit'] as const
 
 export function Settings() {
   const me = useMe()
@@ -16,7 +16,7 @@ export function Settings() {
     <div className="stack">
       <h1>Pengaturan</h1>
       <div className="tabs" role="tablist">{TABS.map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{t}</button>)}</div>
-      {tab === 'Policy' && <Policies />}{tab === 'Daftar blokir' && <Suppressions />}{tab === 'API key' && <ApiKeys />}{tab === 'Pengguna' && <Users />}{tab === 'Audit' && <Audit />}
+      {tab === 'Policy' && <Policies />}{tab === 'Daftar blokir' && <Suppressions />}{tab === 'API key' && <ApiKeys />}{tab === 'Webhook' && <Webhooks />}{tab === 'Retensi' && <Retention />}{tab === 'Pengguna' && <Users />}{tab === 'Audit' && <Audit />}
     </div>
   )
 }
@@ -135,5 +135,106 @@ function Audit() {
   return (
     <div className="card scroll-x">{q.isLoading && <Loading />}<ErrorBox error={q.error} />
       <table><thead><tr><th>Waktu</th><th>Pelaku</th><th>Aksi</th><th>Target</th></tr></thead><tbody>{q.data?.items.map((a) => <tr key={a.id}><td className="muted">{fmtTime(a.at)}</td><td>{a.actor}</td><td className="mono">{a.action}</td><td className="mono">{a.target_type} {a.target_id?.slice(0, 8)}</td></tr>)}</tbody></table></div>
+  )
+}
+
+const EVENTS: WebhookEvent[] = ['message.sent', 'message.delivered', 'message.failed', 'campaign.completed', 'campaign.paused', 'device.offline']
+
+function Webhooks() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [url, setUrl] = useState('')
+  const [events, setEvents] = useState<WebhookEvent[]>(['message.delivered', 'message.failed'])
+  const [secret, setSecret] = useState('')
+  const [open, setOpen] = useState<Webhook | null>(null)
+  const q = useQuery({ queryKey: ['webhooks'], queryFn: () => get<{ items: Webhook[] }>('/webhooks') })
+  const refresh = () => qc.invalidateQueries({ queryKey: ['webhooks'] })
+  const create = useMutation({ mutationFn: () => post<WebhookCreated>('/webhooks', { url, events }), onSuccess: (w) => { setSecret(w.signing_secret); setUrl(''); refresh() } })
+  const toggle = useMutation({ mutationFn: (w: Webhook) => patch(`/webhooks/${w.id}`, { enabled: !w.enabled }), onSuccess: refresh })
+  const rm = useMutation({ mutationFn: (id: string) => del(`/webhooks/${id}`), onSuccess: () => { setOpen(null); refresh() } })
+  const test = useMutation({ mutationFn: (id: string) => post(`/webhooks/${id}/test`, {}), onSuccess: () => { toast('Event uji dikirim'); qc.invalidateQueries({ queryKey: ['deliveries'] }) } })
+  return (
+    <div className="stack">
+      <div className="card stack">
+        <Field label="URL penerima" hint="HTTP(S). Jaringan privat/tailnet diizinkan; loopback dan alamat metadata cloud ditolak.">
+          <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://billing.example.ts.net/hooks/sms" />
+        </Field>
+        <fieldset className="row" style={{ border: 0, padding: 0 }}><legend className="muted">Event</legend>
+          {EVENTS.map((ev) => <label key={ev} className="row"><input type="checkbox" checked={events.includes(ev)} onChange={(e) => setEvents((p) => e.target.checked ? [...p, ev] : p.filter((x) => x !== ev))} />{ev}</label>)}
+        </fieldset>
+        <ErrorBox error={create.error} />
+        <div><button className="primary" disabled={!url || events.length === 0 || create.isPending} onClick={() => create.mutate()}>Tambah webhook</button></div>
+        {secret && <div className="okbox" role="status">Secret penandatangan — salin sekarang, tidak akan ditampilkan lagi:<br /><span className="mono">{secret}</span> <button className="small" onClick={() => navigator.clipboard?.writeText(secret)}>Salin</button></div>}
+      </div>
+      {q.isLoading && <Loading what="webhook" />}
+      <ErrorBox error={q.error} />
+      {q.data && q.data.items.length === 0 && <Empty>Belum ada webhook.</Empty>}
+      {q.data && q.data.items.length > 0 && (
+        <div className="card scroll-x"><table><thead><tr><th>URL</th><th>Event</th><th>Status</th><th /></tr></thead><tbody>
+          {q.data.items.map((w) => (
+            <tr key={w.id}><td className="mono">{w.url}</td><td>{w.events.join(', ')}</td><td>{w.enabled ? 'aktif' : 'nonaktif'}</td>
+              <td className="right"><span className="row">
+                <button className="small" onClick={() => setOpen(w)}>Riwayat</button>
+                <button className="small" disabled={test.isPending} onClick={() => test.mutate(w.id)}>Uji</button>
+                <button className="small" onClick={() => toggle.mutate(w)}>{w.enabled ? 'Nonaktifkan' : 'Aktifkan'}</button>
+                <button className="small danger" onClick={() => window.confirm(`Hapus webhook ${w.url}?`) && rm.mutate(w.id)}>Hapus</button></span></td></tr>))}
+        </tbody></table></div>)}
+      {open && <Deliveries webhook={open} onClose={() => setOpen(null)} />}
+    </div>
+  )
+}
+
+function Deliveries({ webhook, onClose }: { webhook: Webhook; onClose: () => void }) {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['deliveries', webhook.id], queryFn: () => get<Page<WebhookDelivery>>(`/webhooks/${webhook.id}/deliveries?limit=50`), refetchInterval: 3000 })
+  const retry = useMutation({ mutationFn: (id: string) => post(`/webhooks/${webhook.id}/deliveries/${id}/retry`, {}), onSuccess: () => qc.invalidateQueries({ queryKey: ['deliveries', webhook.id] }) })
+  return (
+    <Modal open onClose={onClose} title={`Riwayat pengiriman — ${webhook.url}`} wide>
+      <ErrorBox error={q.error} /><ErrorBox error={retry.error} />
+      {q.data && q.data.items.length === 0 && <Empty>Belum ada pengiriman.</Empty>}
+      {q.data && q.data.items.length > 0 && (
+        <div className="scroll-x"><table><thead><tr><th>Waktu</th><th>Event</th><th>Status</th><th>Percobaan</th><th>Respons</th><th /></tr></thead><tbody>
+          {q.data.items.map((d) => (
+            <tr key={d.id}><td className="muted">{fmtTime(d.created_at)}</td><td className="mono">{d.event}</td><td>{d.status}</td><td>{d.attempts}</td>
+              <td>{d.last_status ?? d.last_error ?? '—'}</td>
+              <td className="right">{d.status === 'failed' && <button className="small" disabled={retry.isPending} onClick={() => retry.mutate(d.id)}>Kirim ulang</button>}</td></tr>))}
+        </tbody></table></div>)}
+    </Modal>
+  )
+}
+
+function Retention() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const q = useQuery({ queryKey: ['retention'], queryFn: () => get<RetentionSettings>('/settings/retention') })
+  const [body, setBody] = useState('')
+  const [ev, setEv] = useState('')
+  const save = useMutation({
+    mutationFn: () => put<RetentionSettings>('/settings/retention', { body_retention_days: Number(body !== '' ? body : q.data?.body_retention_days), event_retention_days: Number(ev !== '' ? ev : q.data?.event_retention_days) }),
+    onSuccess: () => { toast('Retensi disimpan'); setBody(''); setEv(''); qc.invalidateQueries({ queryKey: ['retention'] }) },
+  })
+  if (q.isLoading) return <Loading what="pengaturan retensi" />
+  if (!q.data) return <ErrorBox error={q.error} />
+  const r = q.data.last_run
+  return (
+    <div className="stack">
+      <div className="card stack">
+        <p className="muted">Isi pesan yang sudah selesai dihapus setelah sekian hari (metadata tetap ada). 0 = hapus segera setelah selesai. Pembersihan berjalan otomatis tiap jam.</p>
+        <div className="grid cols-4">
+          <Field label="Simpan isi pesan (hari)" hint="0–3650"><input type="number" min={0} max={3650} value={body !== '' ? body : q.data.body_retention_days} onChange={(e) => setBody(e.target.value)} /></Field>
+          <Field label="Simpan riwayat event (hari)" hint="1–3650"><input type="number" min={1} max={3650} value={ev !== '' ? ev : q.data.event_retention_days} onChange={(e) => setEv(e.target.value)} /></Field>
+        </div>
+        <ErrorBox error={save.error} />
+        <div><button className="primary" disabled={save.isPending} onClick={() => save.mutate()}>Simpan</button></div>
+      </div>
+      <div className="card" aria-label="Pembersihan terakhir">
+        <h2>Pembersihan terakhir</h2>
+        {!r ? <p className="muted">Belum pernah berjalan.</p> : (
+          <dl><dt>Waktu</dt><dd>{fmtTime(r.at)}</dd>
+            <dt>Isi pesan dibersihkan</dt><dd>{r.bodies_purged}</dd><dt>Event dihapus</dt><dd>{r.events_deleted}</dd>
+            <dt>Penerima campaign dianonimkan</dt><dd>{r.recipients_scrubbed}</dd><dt>Sesi dihapus</dt><dd>{r.sessions_deleted}</dd>
+            <dt>Enrollment dihapus</dt><dd>{r.enrollments_deleted}</dd><dt>Riwayat webhook dihapus</dt><dd>{r.deliveries_deleted}</dd></dl>)}
+      </div>
+    </div>
   )
 }

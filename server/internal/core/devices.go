@@ -507,8 +507,19 @@ func (s *Service) OnConnected(ctx context.Context, id uuid.UUID, h proto.Hello) 
 }
 
 func (s *Service) OnDisconnected(ctx context.Context, id uuid.UUID) {
-	_, _ = s.Pool.Exec(ctx, `UPDATE devices SET status='offline', connected_since=NULL WHERE id=$1 AND status IN ('online','degraded','pending')`, id)
+	tag, _ := s.Pool.Exec(ctx, `UPDATE devices SET status='offline', connected_since=NULL WHERE id=$1 AND status IN ('online','degraded','pending')`, id)
+	if tag.RowsAffected() > 0 {
+		s.emitDeviceOffline(ctx, id, "disconnected")
+	}
 	s.publishDevice(ctx, id)
+}
+
+func (s *Service) emitDeviceOffline(ctx context.Context, id uuid.UUID, reason string) {
+	var name string
+	_ = s.Pool.QueryRow(ctx, `SELECT name FROM devices WHERE id=$1`, id).Scan(&name)
+	if err := s.emitWebhook(ctx, s.Pool, "device.offline", map[string]any{"device_id": id, "name": name, "reason": reason, "at": time.Now().UTC()}); err != nil {
+		s.Log.Warn("webhook device.offline gagal ditulis", "err", err)
+	}
 }
 
 // ApplyHeartbeat memperbarui telemetri dan mengevaluasi online/degraded (FR-02 KP2).

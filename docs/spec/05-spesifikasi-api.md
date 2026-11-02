@@ -47,6 +47,8 @@ Sumber kebenaran skema: [`contracts/openapi.yaml`](../../contracts/openapi.yaml)
 | `campaign.no_capacity` | 422 | Tidak ada SIM aktif yang memenuhi `sim_ids` |
 | `policy.empty_window` | 422 | Irisan jendela waktu kosong |
 | `policy.in_use` | 409 | Policy dipakai / default |
+| `webhook.not_retryable` | 409 | Pengiriman webhook belum berstatus `failed` |
+| `privacy.active_messages` | 409 | Penghapusan nomor ditolak: masih ada pesan aktif |
 | `device.offline` | 409 | Perintah ke device offline |
 | `enrollment.invalid_token` | 401 | Token/kode tidak valid, terpakai, kedaluwarsa |
 | `rate_limited` | 429 | Melampaui batas |
@@ -142,10 +144,10 @@ data: {}
 | `device.command_result` | `command_id,device_id,ok,detail` |
 | `resync` | klien refetch semua data aktif |
 
-## 5. Webhook (fase 3)
+## 5. Webhook
 
 Request `POST` ke URL terdaftar, `Content-Type: application/json`, header:
-`X-SMSC-Event`, `X-SMSC-Delivery` (uuid), `X-SMSC-Timestamp` (epoch detik), `X-SMSC-Signature: sha256=<hex>` = HMAC-SHA256(secret, `timestamp + "." + body`). Penerima wajib menolak timestamp > 5 menit. Retry: 30 dtk, 2 mnt, 10 mnt, 1 jam, 6 jam (5×) pada non-2xx/timeout 10 dtk; kemudian ditandai gagal. Payload:
+`X-SMSC-Event`, `X-SMSC-Delivery` (uuid), `X-SMSC-Timestamp` (epoch detik), `X-SMSC-Signature: sha256=<hex>` = HMAC-SHA256(secret, `timestamp + "." + body`). Penerima wajib menolak timestamp > 5 menit. Retry: 30 dtk, 2 mnt, 10 mnt, 1 jam, 6 jam setelah percobaan pertama (6 percobaan total, dapat dikonfigurasi) pada non-2xx/timeout 10 dtk; kemudian ditandai `failed` dan dapat dikirim ulang manual. `X-SMSC-Delivery` sama pada semua percobaan — penerima wajib dedup (at-least-once). Redirect tidak diikuti. Event: `message.sent|delivered|failed`, `campaign.completed|paused`, `device.offline`; `webhook.test` hanya dari endpoint uji. Isi SMS tidak pernah disertakan. Secret (`whsec_…`) hanya ada pada respons pembuatan. Payload:
 
 ```json
 { "event":"message.delivered", "delivery_id":"0192…", "at":"…",

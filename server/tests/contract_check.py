@@ -58,8 +58,6 @@ def validate_response(method, path, status, body, content_type):
         problems.append(f"{tag}: operasi tidak ada di openapi.yaml")
         return
     resp = op[3]["responses"].get(str(status))
-    if resp is None and status == 501 and path.startswith('/api/v1/webhooks'):
-        return  # fase 2/3, didokumentasikan global
     if resp is None and status in (401, 403, 429, 500):  # didokumentasikan global di info.description
         resp = SPEC["components"]["responses"].get({401: "Unauthorized", 403: "Forbidden", 429: "TooManyRequests"}.get(status, "Unauthorized"))
     if resp is None:
@@ -250,10 +248,26 @@ def run_checks(pw):
     call("POST", f"/api/v1/campaigns/{c2['id']}/recipients", {"recipients": [{"to": "08123456790"}]}, 200)
     call("DELETE", f"/api/v1/campaigns/{c2['id']}/recipients", expect=200)
     call("DELETE", f"/api/v1/campaigns/{c2['id']}", expect=204)
-    # webhook tetap fase 3
-    st, _ = call("GET", "/api/v1/webhooks")
-    if st != 501:
-        problems.append(f"GET /webhooks harus 501 sementara, dapat {st}")
+    # webhook + retensi (fase 3)
+    call("GET", "/api/v1/webhooks", expect=200)
+    call("POST", "/api/v1/webhooks", {"url": "ftp://x", "events": ["message.sent"]}, 422)
+    call("POST", "/api/v1/webhooks", {"url": "http://169.254.169.254/x", "events": ["message.sent"]}, 422)
+    st, wh = call("POST", "/api/v1/webhooks", {"url": "http://100.64.0.9:9/hook", "events": ["message.sent", "campaign.completed"], "description": "uji"}, 201)
+    wid = wh["id"]
+    call("GET", f"/api/v1/webhooks/{wid}", expect=200)
+    call("GET", f"/api/v1/webhooks/{uuid.uuid4()}", expect=404)
+    call("PATCH", f"/api/v1/webhooks/{wid}", {"description": "ubah", "enabled": True}, 200)
+    call("PATCH", f"/api/v1/webhooks/{wid}", {"events": ["bukan.event"]}, 422)
+    st, tr = call("POST", f"/api/v1/webhooks/{wid}/test", {}, 202)
+    time.sleep(1.5)
+    st, dl = call("GET", f"/api/v1/webhooks/{wid}/deliveries", expect=200)
+    for d in dl.get("items", [])[:1]:
+        call("POST", f"/api/v1/webhooks/{wid}/deliveries/{d['id']}/retry", {}, 409)
+    call("POST", f"/api/v1/webhooks/{wid}/deliveries/{uuid.uuid4()}/retry", {}, 404)
+    call("DELETE", f"/api/v1/webhooks/{wid}", expect=204)
+    st, rt = call("GET", "/api/v1/settings/retention", expect=200)
+    call("PUT", "/api/v1/settings/retention", {"body_retention_days": 90, "event_retention_days": 180}, 200)
+    call("PUT", "/api/v1/settings/retention", {"body_retention_days": -1, "event_retention_days": 180}, 422)
 
     # revoke di akhir
     call("DELETE", f"/api/v1/devices/{dev}", expect=204)

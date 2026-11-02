@@ -47,6 +47,8 @@ Opsi A (Compose + sidecar) dan catatan jaringan ada di `docs/04` §4. Verifikasi
 | `WS_MAX_MESSAGE_BYTES` | `65536` | |
 | `SSE_REPLAY_SECONDS` | `300` | |
 | `METRICS_ADDR` | `127.0.0.1:9090` | Endpoint `/metrics` terpisah |
+| `WEBHOOK_ENC_KEY` | turunan `SESSION_SECRET` | Atur terpisah di produksi (merotasi SESSION_SECRET tanpa ini membuat secret webhook tak terbaca) |
+| `WEBHOOK_TIMEOUT`, `WEBHOOK_BACKOFF`, `WEBHOOK_TICK`, `RETENTION_INTERVAL` | lihat `server/README.md` | |
 
 Konfigurasi bisnis (policy, retensi, timeouts) diubah dari dashboard/`settings`, tanpa restart.
 
@@ -76,6 +78,8 @@ Upgrade aplikasi Android: distribusikan APK baru; device lama tetap berfungsi se
 - Disk: ±2 GB per juta pesan sebelum retensi (spec 07 §7).
 
 ## 6. Monitoring dan alert
+
+Aturan alert siap pakai: [`ops/prometheus/alerts.yml`](../../ops/prometheus/alerts.yml) (16 alert; ambang awal, setel dengan data nyata; belum dijalankan di Prometheus sungguhan). Nama metrik sesuai implementasi (`smsc_devices`, `smsc_queue_depth{priority}`, `smsc_message_transitions_total{from,to}`, `smsc_webhook_deliveries_total{result}`, `smsc_device_battery_percent`, dst.; daftar lengkap: `curl 127.0.0.1:9090/metrics`). Tabel di bawah menjelaskan maksud tiap sinyal; bila nama berbeda, implementasi yang benar.
 
 Metrik utama dan ambang awal (Prometheus/Alertmanager atau setara):
 
