@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (60 operasi)
+# Daftar endpoint (62 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -71,9 +71,9 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | Method | Path | Fungsi | Auth | Status |
 |---|---|---|---|---|
 | `GET` | `/templates` | Daftar template | apiKey/sessionCookie | 200 |
-| `POST` | `/templates` | Buat template | apiKey/sessionCookie | 201 |
+| `POST` | `/templates` | Buat template | apiKey/sessionCookie | 201,422 |
 | `GET` | `/templates/{templateId}` | Detail | apiKey/sessionCookie | 200 |
-| `PUT` | `/templates/{templateId}` | Ganti isi template | apiKey/sessionCookie | 200 |
+| `PUT` | `/templates/{templateId}` | Ganti isi template | apiKey/sessionCookie | 200,422,404 |
 | `DELETE` | `/templates/{templateId}` | Hapus | apiKey/sessionCookie | 204 |
 
 ## Policies
@@ -81,12 +81,14 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | Method | Path | Fungsi | Auth | Status |
 |---|---|---|---|---|
 | `GET` | `/dispatch-policies` | Daftar policy pengiriman | apiKey/sessionCookie | 200 |
-| `POST` | `/dispatch-policies` | Buat policy | apiKey/sessionCookie | 201 |
+| `POST` | `/dispatch-policies` | Buat policy | apiKey/sessionCookie | 201,422 |
 | `GET` | `/dispatch-policies/{policyId}` | Detail | apiKey/sessionCookie | 200 |
-| `PUT` | `/dispatch-policies/{policyId}` | Ubah. Perubahan di-push ke device (`config.update`) dan berlaku untuk pesan yang belum di-lease. | apiKey/sessionCookie | 200 |
+| `PUT` | `/dispatch-policies/{policyId}` | Ubah. Perubahan di-push ke device (`config.update`) dan berlaku untuk pesan yang belum di-lease. | apiKey/sessionCookie | 200,422,404 |
 | `DELETE` | `/dispatch-policies/{policyId}` | Hapus (ditolak jika masih dipakai atau default) | apiKey/sessionCookie | 204,409 |
 | `GET` | `/dispatch-policies/{policyId}/effective` | Simulasi policy efektif untuk kombinasi tertentu (debug) | apiKey/sessionCookie | 200 |
-| `PUT` | `/settings/default-policy` | Tetapkan policy global default | apiKey/sessionCookie | 204 |
+| `PUT` | `/settings/default-policy` | Tetapkan policy global default | apiKey/sessionCookie | 204,404 |
+| `GET` | `/settings/dispatch-pause` | Status kill switch global (pause semua pengiriman) | apiKey/sessionCookie | 200 |
+| `PUT` | `/settings/dispatch-pause` | Aktifkan/nonaktifkan kill switch. Saat aktif dispatcher tidak melepas pesan baru; yang sudah sending diselesaikan. | apiKey/sessionCookie | 200 |
 
 ## Compliance
 

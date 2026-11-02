@@ -9,3 +9,7 @@ android/.idea/
 __pycache__/
 *.pyc
 poc/server/out/
+# Server / dashboard
+server/bin/
+web/node_modules/
+web/dist/

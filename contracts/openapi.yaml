@@ -13,6 +13,9 @@ info:
     - Pagination cursor: `?limit=50&cursor=<opaque>`; respons memuat `next_cursor` (null jika habis).
     - Operasi pembuatan yang berisiko ganda (`POST /messages`, `POST /campaigns`) menerima header `Idempotency-Key`.
     - Endpoint bertanda `x-phase: 2` bukan bagian MVP tetapi kontraknya dikunci lebih awal.
+    - Semua endpoint dapat membalas `401` (tidak terautentikasi), `403` (peran/scope/CSRF), `429` (rate limit, dengan `Retry-After`) dan `500`, semuanya `application/problem+json`; tidak diulang per operasi.
+    - Endpoint fase 2/3 (kampanye, webhook) membalas `501 not_implemented` sampai diimplementasikan.
+    - Endpoint tambahan di luar MVP awal: `GET/PUT /settings/dispatch-pause` (kill switch global, spec 09 §8).
 servers:
   - url: https://smsc.example-tailnet.ts.net/api/v1
     description: Via Tailscale Serve (HTTPS, MagicDNS)
@@ -672,6 +675,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Template'}
+        '422': {$ref: '#/components/responses/ValidationError'}
   /templates/{templateId}:
     parameters:
       - {name: templateId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -698,6 +702,8 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Template'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+        '404': {$ref: '#/components/responses/NotFound'}
     delete:
       tags: [Templates]
       summary: Hapus
@@ -731,6 +737,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DispatchPolicy'}
+        '422': {$ref: '#/components/responses/ValidationError'}
   /dispatch-policies/{policyId}:
     parameters:
       - {name: policyId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -757,6 +764,8 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/DispatchPolicy'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+        '404': {$ref: '#/components/responses/NotFound'}
     delete:
       tags: [Policies]
       summary: Hapus (ditolak jika masih dipakai atau default)
@@ -795,6 +804,32 @@ paths:
                 policy_id: {type: string, format: uuid}
       responses:
         '204': {description: OK}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /settings/dispatch-pause:
+    get:
+      tags: [Policies]
+      summary: Status kill switch global (pause semua pengiriman)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PauseState'}
+    put:
+      tags: [Policies]
+      summary: Aktifkan/nonaktifkan kill switch. Saat aktif dispatcher tidak melepas pesan baru; yang sudah sending diselesaikan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PauseState'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PauseState'}
 
   /suppressions:
     get:
@@ -1095,6 +1130,12 @@ components:
           schema: {$ref: '#/components/schemas/Problem'}
 
   schemas:
+    PauseState:
+      type: object
+      required: [paused]
+      properties:
+        paused: {type: boolean}
+
     Problem:
       type: object
       required: [type, title, status]
@@ -1221,8 +1262,8 @@ components:
         phone_number: {type: [string, 'null']}
         is_esim: {type: boolean}
         signal_level: {type: [integer, 'null'], minimum: 0, maximum: 4}
-        registered: {type: boolean}
-        roaming: {type: boolean}
+        registered: {type: [boolean, 'null'], description: 'null = belum dilaporkan device.'}
+        roaming: {type: [boolean, 'null']}
     Sim:
       allOf:
         - $ref: '#/components/schemas/SimReport'
