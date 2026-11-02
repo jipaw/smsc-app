@@ -1,7 +1,7 @@
 # Server SMSC. Butuh Go 1.24+, PostgreSQL 16 (untuk tes), Node 22 (untuk dashboard).
 DB ?= postgres://nobody@localhost:55432/postgres?sslmode=disable
 
-.PHONY: build test unit integration contract web e2e verify
+.PHONY: build test unit integration contract schema load web e2e verify
 build:
 	go build -o bin/smscd ./cmd/smscd
 
@@ -15,7 +15,14 @@ integration:
 contract: build
 	SMSC_TEST_DATABASE_URL='$(DB)' python3 tests/contract_check.py bin/smscd
 
-test: unit integration contract
+schema:
+	SMSC_TEST_DATABASE_URL='$(DB)' bash tests/schema_sync.sh
+
+# beban campaign: impor 50.000 penerima + materialisasi + latensi API
+load: build
+	SMSC_TEST_DATABASE_URL='$(DB)' python3 tests/load_campaign.py bin/smscd 50000
+
+test: unit integration contract schema
 
 # bangun dashboard lalu salin ke folder embed
 web:

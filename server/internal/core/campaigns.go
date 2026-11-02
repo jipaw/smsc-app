@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/jipaw/smsc-app/server/internal/policy"
 	"github.com/jipaw/smsc-app/server/internal/sms"
 )
 
@@ -169,8 +170,8 @@ func (s *Service) hydrate(ctx context.Context, cs []*Campaign) error {
 		if c.Status == "running" {
 			remaining := c.Counters.Queued + c.Counters.InFlight
 			if remaining > 0 {
-				if _, perSec := s.throughput(ctx, c.PolicyID, c.SimIDs); perSec > 0 {
-					t := time.Now().Add(time.Duration(math.Ceil(float64(remaining)/perSec)) * time.Second)
+				if _, secs := s.estimate(ctx, c.PolicyID, c.SimIDs, remaining); secs > 0 {
+					t := time.Now().Add(time.Duration(math.Ceil(secs)) * time.Second)
 					c.EstimatedFinishAt = &t
 				}
 			}
@@ -211,24 +212,41 @@ func (s *Service) eligibleSims(ctx context.Context, simIDs []uuid.UUID, onlineOn
 	return n
 }
 
-// throughput: perkiraan pesan/detik agregat dari SIM online dan policy (global + campaign). Abaikan jendela waktu.
-func (s *Service) throughput(ctx context.Context, policyID *uuid.UUID, simIDs []uuid.UUID) (online int, perSec float64) {
+// estimateDuration: perkiraan kasar detik untuk mengirim n pesan lewat `online` SIM paralel.
+// base = jeda rata-rata + ±2 dtk waktu kirim (+ jeda burst yang diamortisasi); batas per menit/jam/hari
+// hanya memperlambat bila n per-SIM MELAMPAUI batas itu: (ceil(nSim/batas)-1) jendela penuh harus berlalu.
+// Tidak memperhitungkan jendela waktu kirim maupun retry.
+func estimateDuration(eff policy.Effective, online, n int) float64 {
+	if online <= 0 || n <= 0 {
+		return 0
+	}
+	per := float64(eff.MinDelayMs+eff.MaxDelayMs)/2000 + 2.0
+	if eff.BurstSize > 0 {
+		per += float64(eff.BurstPauseMs) / 1000 / float64(eff.BurstSize)
+	}
+	nSim := math.Ceil(float64(n) / float64(online))
+	secs := nSim * per
+	for _, w := range []struct {
+		limit int
+		win   float64
+	}{{eff.RatePerMinute, 60}, {eff.RatePerHour, 3600}, {eff.RatePerDay, 86400}} {
+		if w.limit > 0 {
+			if need := (math.Ceil(nSim/float64(w.limit)) - 1) * w.win; need > secs {
+				secs = need
+			}
+		}
+	}
+	return secs
+}
+
+// estimate: (SIM online, detik) untuk n pesan berdasarkan policy global + campaign. 0 detik bila tak ada SIM online.
+func (s *Service) estimate(ctx context.Context, policyID *uuid.UUID, simIDs []uuid.UUID, n int) (online int, secs float64) {
 	online = s.eligibleSims(ctx, simIDs, true)
 	eff, err := s.Effective(ctx, s.Pool, nil, nil, policyID)
 	if err != nil || online == 0 {
 		return online, 0
 	}
-	per := float64(eff.MinDelayMs+eff.MaxDelayMs)/2000 + 2.0 // jeda rata-rata + ±2 dtk waktu kirim
-	if eff.BurstSize > 0 {
-		per += float64(eff.BurstPauseMs) / 1000 / float64(eff.BurstSize)
-	}
-	rate := 1 / per
-	for _, c := range []float64{float64(eff.RatePerMinute) / 60, float64(eff.RatePerHour) / 3600, float64(eff.RatePerDay) / 86400} {
-		if c > 0 && c < rate {
-			rate = c
-		}
-	}
-	return online, rate * float64(online)
+	return online, estimateDuration(eff, online, n)
 }
 
 // ---------- CRUD ----------
@@ -898,10 +916,10 @@ func (s *Service) PreviewCampaign(ctx context.Context, id uuid.UUID, sample int)
 	if len(p.Samples) > 0 {
 		p.TotalParts = int(math.Round(float64(sumParts) / float64(len(p.Samples)) * float64(p.Recipients)))
 	}
-	online, perSec := s.throughput(ctx, c.PolicyID, c.SimIDs)
+	online, secs := s.estimate(ctx, c.PolicyID, c.SimIDs, p.Recipients)
 	p.OnlineSims = online
-	if perSec > 0 && p.Recipients > 0 {
-		d := int(math.Ceil(float64(p.Recipients) / perSec))
+	if secs > 0 && p.Recipients > 0 {
+		d := int(math.Ceil(secs))
 		p.EstimatedDurationSeconds = &d
 	}
 	return p, nil

@@ -48,13 +48,13 @@ Paket desain (analisis, stack, kontrak, flow) sebagai dasar dokumentasi penuh da
 
 | Path | Isi |
 |---|---|
-| [`openapi.yaml`](contracts/openapi.yaml) | REST, OpenAPI 3.1 (60 operasi) |
+| [`openapi.yaml`](contracts/openapi.yaml) | REST, OpenAPI 3.1 (63 operasi) |
 | [`ws-schema.json`](contracts/ws-schema.json) + [`test-vectors/`](contracts/test-vectors/) | Protokol WebSocket: JSON Schema, 16 contoh valid, 13 invalid |
 | [`device-ws-protocol.md`](contracts/device-ws-protocol.md) | Penjelasan protokol WebSocket |
 | [`schema.sql`](contracts/schema.sql) | DDL PostgreSQL 16 (diuji: dimuat bersih, constraint diverifikasi) |
 | [`tools/verify.sh`](contracts/tools/verify.sh) | Verifikasi kontrak (OpenAPI, vector, tabel endpoint) |
 
-**Server & dashboard (`server/`, `web/`)** — implementasi fase 1, teruji (lihat [`docs/STATUS.md`](docs/STATUS.md))
+**Server & dashboard (`server/`, `web/`)** — implementasi fase 1 + campaign fase 2, teruji (lihat [`docs/STATUS.md`](docs/STATUS.md))
 
 | Path | Isi |
 |---|---|

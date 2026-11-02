@@ -22,7 +22,8 @@ export function useEventStream(): SseState {
     }
     es.onopen = () => setState('live')
     es.onerror = () => setState(es.readyState === EventSource.CLOSED ? 'down' : 'connecting')
-    es.addEventListener('message.updated', () => mark('messages', 'message', 'overview', 'series'))
+    es.addEventListener('message.updated', () => mark('messages', 'message', 'overview', 'series', 'campaigns', 'campaign'))
+    es.addEventListener('campaign.updated', () => mark('campaigns', 'campaign', 'overview'))
     es.addEventListener('device.updated', () => mark('devices', 'device', 'overview', 'sims'))
     es.addEventListener('sim.updated', () => mark('devices', 'sims', 'device'))
     es.addEventListener('settings.updated', () => mark('overview', 'pause'))

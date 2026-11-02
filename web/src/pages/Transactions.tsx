@@ -9,7 +9,7 @@ import { Badge, Empty, ErrorBox, errMsg, Loading, Modal, useToast } from '../com
 const STATUSES = ['queued', 'assigned', 'sending', 'sent', 'delivered', 'failed', 'cancelled', 'expired', 'unknown']
 const SOURCES = ['dashboard', 'api', 'campaign']
 
-export function Transactions() {
+export function Transactions({ campaignId }: { campaignId?: string } = {}) {
   const me = useMe()
   const qc = useQueryClient()
   const toast = useToast()
@@ -22,7 +22,7 @@ export function Transactions() {
   const seen = useRef<Set<string>>(new Set())
   const [fresh, setFresh] = useState<Set<string>>(new Set())
 
-  const filters = { status, source, to: to.trim(), created_from: from ? new Date(from).toISOString() : '' }
+  const filters = { status, source, to: to.trim(), created_from: from ? new Date(from).toISOString() : '', campaign_id: campaignId }
   const q = useInfiniteQuery({
     queryKey: ['messages', filters],
     queryFn: ({ pageParam }) => get<Page<Message>>('/messages' + qs({ ...filters, limit: 50, cursor: pageParam })),
@@ -55,7 +55,7 @@ export function Transactions() {
 
   return (
     <div className="stack gap-lg">
-      <div className="row spread"><h1>Transaksi</h1>{op && <a className="btn" href={exportUrl} download>Ekspor CSV</a>}</div>
+      <div className="row spread">{campaignId ? <h2>Pesan campaign</h2> : <h1>Transaksi</h1>}{op && <a className="btn" href={exportUrl} download>Ekspor CSV</a>}</div>
       <div className="card stack">
         <div className="row" role="group" aria-label="Filter status">{STATUSES.map((s) => (
           <label key={s} className="row" style={{ gap: 4 }}><input type="checkbox" checked={status.includes(s)} onChange={(e) => setStatus((p) => e.target.checked ? [...p, s] : p.filter((x) => x !== s))} /><Badge status={s} /></label>))}</div>
@@ -72,7 +72,7 @@ export function Transactions() {
       </div>
       {q.isLoading && <Loading />}
       <ErrorBox error={q.error} />
-      {q.data && rows.length === 0 && <Empty>Tidak ada transaksi yang cocok dengan filter.</Empty>}
+      {q.data && rows.length === 0 && <Empty>{campaignId && !status.length && !to.trim() && !source && !from ? 'Belum ada pesan: pesan campaign dibuat bertahap setelah campaign berjalan.' : 'Tidak ada transaksi yang cocok dengan filter.'}</Empty>}
       {rows.length > 0 && (
         <div className="card scroll-x"><table className="cards">
           <thead><tr>{op && <th><span className="sr-only">Pilih</span></th>}<th>Waktu</th><th>Nomor</th><th>Isi</th><th>Sumber</th><th>Status</th><th>Try</th><th>Keterangan</th></tr></thead>

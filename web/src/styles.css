@@ -94,3 +94,15 @@ dialog.drawer { margin: 0 0 0 auto; height: 100vh; max-height: 100vh; width: min
 .qr { background: #fff; padding: 10px; border-radius: 8px; width: max-content; margin: 0 auto; } .qr img { display: block; }
 .login { min-height: 100%; display: grid; place-items: center; padding: 20px; } .login .card { width: min(380px, 100%); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.steps { display: flex; gap: 6px; flex-wrap: wrap; padding: 0; margin: 0 0 14px; list-style: none; counter-reset: s; }
+.steps li { counter-increment: s; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 12.5px; }
+.steps li::before { content: counter(s) ". "; } .steps li[aria-current="step"] { background: var(--primary); color: var(--primary-ink); font-weight: 700; }
+.steps li.done { color: var(--ok); }
+.pbar { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: var(--surface-2); }
+.pbar > i { display: block; height: 100%; } .pbar .delivered { background: var(--ok); } .pbar .sent { background: var(--ok); opacity: .55; } .pbar .inflight { background: var(--info); }
+.pbar .failed { background: var(--bad); } .pbar .other { background: var(--warn); } .pbar .queued { background: transparent; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; }
+.dropzone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 16px; text-align: center; }
+.dropzone.over { border-color: var(--primary); background: var(--info-bg); }
+.warnbox { color: var(--warn); background: var(--warn-bg); padding: 8px 10px; border-radius: 6px; }

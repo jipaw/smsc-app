@@ -87,7 +87,7 @@ Formulir satu halaman:
 - **Wizard 5 langkah** (draft otomatis tersimpan; dapat kembali):
   1. *Detail*: nama, deskripsi.
   2. *Penerima*: unggah CSV/tempel; tabel hasil validasi (diterima/duplikat/suppressed/invalid, unduh baris invalid), pemetaan kolom → variabel.
-  3. *Pesan*: tulis atau pilih template; variabel yang tidak ada di kolom CSV ditandai merah (blok lanjut); preview 3 penerima; segmen.
+  3. *Pesan*: tulis atau pilih template; variabel yang tidak ada di kolom CSV ditandai merah (blok lanjut). Saat "Lanjut", pesan disimpan lalu **seluruh penerima diperiksa** (isi pesan baru diketahui di langkah ini, jadi sel kosong pada baris tertentu baru ketahuan di sini): bila ada, wizard tertahan dengan jumlah per variabel dan tombol kembali ke langkah Penerima untuk hapus-semua + impor ulang.
   4. *SIM & Policy*: pilih SIM (default semua), policy (dropdown + ringkasan efektif: delay, rate, jendela, estimasi durasi), auto-pause (toggle + ambang), prioritas.
   5. *Review & jadwal*: ringkasan semua, tombol **Mulai sekarang** / **Jadwalkan** (pilih waktu).
 - **Detail**: header status + tombol (Pause/Resume/Cancel), kartu counter, grafik progres, estimasi selesai, banner `paused` dengan `pause_reason` dan saran tindakan, tab Pesan (tabel Transaksi terfilter), tab Pengaturan (ubah policy/SIM saat berjalan).

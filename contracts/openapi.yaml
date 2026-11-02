@@ -1443,6 +1443,13 @@ components:
             enabled: {type: boolean, default: true}
             window: {type: integer, default: 50, description: Jumlah pesan terakhir yang dievaluasi.}
             max_failure_ratio: {type: number, minimum: 0, maximum: 1, default: 0.5}
+    AutoPauseState:
+      type: object
+      required: [enabled, window, max_failure_ratio]
+      properties:
+        enabled: {type: boolean}
+        window: {type: integer, description: Jumlah percobaan terakhir yang dievaluasi.}
+        max_failure_ratio: {type: number, minimum: 0, maximum: 1}
     CampaignCounters:
       type: object
       description: 'Invarian: total = queued + in_flight + sent + delivered + failed + cancelled + expired + unknown.'
@@ -1461,9 +1468,18 @@ components:
       allOf:
         - $ref: '#/components/schemas/CampaignInput'
         - type: object
-          required: [id, name, status, counters, recipients, auto_pause, sim_ids, priority, created_at]
+          required: [id, name, status, counters, recipients, auto_pause, sim_ids, priority, schedule, created_at]
           properties:
             id: {type: string, format: uuid}
+            name: {type: string}
+            sim_ids: {type: array, items: {type: string, format: uuid}}
+            priority: {type: integer, minimum: 0, maximum: 9}
+            schedule:
+              type: object
+              required: [start_at]
+              properties:
+                start_at: {type: [string, 'null'], format: date-time}
+            auto_pause: {$ref: '#/components/schemas/AutoPauseState'}
             status: {$ref: '#/components/schemas/CampaignStatus'}
             pause_reason: {type: [string, 'null'], enum: [user, auto_failure_ratio, no_capacity, null]}
             counters: {$ref: '#/components/schemas/CampaignCounters'}
@@ -1496,7 +1512,7 @@ components:
               reason: {type: string, description: '`invalid_number` atau `missing_variable:<nama>`.'}
     CampaignPreview:
       type: object
-      required: [samples, recipients]
+      required: [samples, recipients, total_parts, online_sims, estimated_duration_seconds, missing_variables]
       properties:
         recipients: {type: integer}
         samples:
@@ -1512,7 +1528,7 @@ components:
         total_parts: {type: integer, description: Perkiraan total segmen seluruh penerima (dari contoh).}
         online_sims: {type: integer, description: Jumlah SIM yang saat ini dapat mengirim untuk campaign ini.}
         estimated_duration_seconds: {type: [integer, 'null'], description: 'null bila tidak ada SIM online. Kasar: tidak memperhitungkan jendela waktu.'}
-        missing_variables: {type: array, items: {type: object, properties: {name: {type: string}, recipients: {type: integer}}}}
+        missing_variables: {type: array, items: {type: object, required: [name, recipients], properties: {name: {type: string}, recipients: {type: integer}}}}
 
     TemplateInput:
       type: object

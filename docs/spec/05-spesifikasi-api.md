@@ -95,7 +95,8 @@ Catatan: `{{var}}` pada `body` langsung (tanpa `template_id`) dirender memakai `
 
 ```text
 POST /campaigns                         -> 201 draft
-POST /campaigns/{id}/recipients (CSV)   -> 200 {accepted,duplicates,suppressed,invalid[]}   (boleh berulang)
+POST /campaigns/{id}/recipients (CSV)   -> 200 {accepted,duplicates,suppressed,invalid[]}   (boleh berulang; dedupe wajib)
+DELETE /campaigns/{id}/recipients       -> 200 {removed}   (hapus semua untuk impor ulang; hanya draft)
 POST /campaigns/{id}/preview            -> 200 contoh render + estimasi
 POST /campaigns/{id}/start              -> 200 running|scheduled
 GET  /campaigns/{id}                    -> counters, estimated_finish_at

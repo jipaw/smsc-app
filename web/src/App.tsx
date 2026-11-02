@@ -10,7 +10,8 @@ import { Overview } from './pages/Overview'
 import { DeviceDetail, Devices, Sims } from './pages/Devices'
 import { Send } from './pages/Send'
 import { Transactions } from './pages/Transactions'
-import { Campaigns, Templates } from './pages/Templates'
+import { Templates } from './pages/Templates'
+import { CampaignDetail, CampaignWizard, Campaigns } from './pages/Campaigns'
 import { Settings } from './pages/Settings'
 
 export function App() {
@@ -27,7 +28,7 @@ export function App() {
           <Route index element={<Overview />} />
           <Route path="devices" element={<Devices />} /><Route path="devices/:id" element={<DeviceDetail />} />
           <Route path="sims" element={<Sims />} /><Route path="send" element={<Send />} />
-          <Route path="transactions" element={<Transactions />} /><Route path="campaigns" element={<Campaigns />} />
+          <Route path="transactions" element={<Transactions />} /><Route path="campaigns" element={<Campaigns />} /><Route path="campaigns/new" element={<CampaignWizard />} /><Route path="campaigns/:id/edit" element={<CampaignWizard />} /><Route path="campaigns/:id" element={<CampaignDetail />} />
           <Route path="templates" element={<Templates />} /><Route path="settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

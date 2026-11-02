@@ -38,15 +38,3 @@ export function Templates() {
     </div>
   )
 }
-
-export function Campaigns() {
-  return (
-    <div className="stack gap-lg"><h1>Campaigns</h1>
-      <div className="card stack">
-        <h2>Segera hadir (fase 2)</h2>
-        <p>Wizard campaign (impor CSV, template variabel, jadwal, auto-pause) belum diimplementasikan di server. Kontrak API-nya sudah ditetapkan di <span className="mono">contracts/openapi.yaml</span>.</p>
-        <p className="muted">Sementara itu, gunakan <strong>Kirim SMS</strong> untuk pengiriman massal hingga 1.000 nomor per permintaan, dengan delay dan batas per SIM tetap ditegakkan policy.</p>
-      </div>
-    </div>
-  )
-}

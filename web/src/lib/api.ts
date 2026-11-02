@@ -44,3 +44,11 @@ export function qs(params: Record<string, string | number | boolean | undefined 
   const s = u.toString()
   return s ? '?' + s : ''
 }
+
+/** Unggah multipart (CSV). Content-Type diisi browser (boundary); CSRF tetap dikirim. */
+export async function upload<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch('/api/v1' + path, { method: 'POST', body: form, headers: csrf ? { 'X-CSRF-Token': csrf, Accept: 'application/json' } : { Accept: 'application/json' }, credentials: 'same-origin' })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new ApiError(res.status, data.type || 'error', data.title || res.statusText, data.detail, data.errors)
+  return data as T
+}
