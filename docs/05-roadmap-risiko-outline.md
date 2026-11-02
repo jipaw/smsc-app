@@ -16,6 +16,8 @@
 
 Urutan PoC: **R1 → R3 → R2 → R6 → R5**, di perangkat nyata. Hasilnya dapat mengubah default policy dan wizard.
 
+> **Skeleton PoC tersedia:** `android/` (aplikasi uji), `poc/server/` (server uji), `poc/README.md` (prosedur per risiko) dan `poc/RESULTS_TEMPLATE.md`.
+
 ## 2. Roadmap
 
 | Fase | Cakupan | Keluaran |

@@ -1,0 +1,11 @@
+# Android / Gradle
+android/.gradle/
+android/**/build/
+android/local.properties
+android/.idea/
+*.iml
+*.apk
+# Python
+__pycache__/
+*.pyc
+poc/server/out/

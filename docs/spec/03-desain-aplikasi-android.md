@@ -102,7 +102,7 @@ onSmsSend(cmd):
 Aturan:
 
 1. `SmsManager.createForSubscriptionId(subId)` pada setiap kirim (jangan menyimpan instance lama).
-2. Setiap part mendapat `PendingIntent` eksplisit (komponen `SmsStatusReceiver`, `FLAG_IMMUTABLE`) dengan extra `message_id`, `attempt`, `part_index`, `kind=sent|delivered`; `requestCode` unik = hash(`message_id`,`attempt`,`part_index`,`kind`) agar tidak saling menimpa.
+2. Setiap part mendapat `PendingIntent` eksplisit ke `SmsResultReceiver`. Identitas unik dibawa oleh **data URI** `smsc://<message_id>/<attempt>/<part>/<kind>` (bukan `requestCode`, yang rawan tabrakan hash). Dipakai **`FLAG_MUTABLE`** (API 31+) bukan `FLAG_IMMUTABLE`: stack telepon mengisi extras (`pdu`, `format`, `errorCode`) lewat `fillIn`, yang diabaikan pada PendingIntent immutable sehingga laporan delivery tidak bisa dibaca. Aman karena intent eksplisit ke komponen non-exported. **Hipotesis ini diverifikasi di PoC R5** (log `DELIVERY_TANPA_PDU`); implementasi PoC: `android/app/.../AndroidSmsGateway.kt`.
 3. Pengecualian saat memanggil `SmsManager` (`IllegalArgumentException`, `SecurityException`) → event `failed` dengan kode terpetakan, tanpa menunggu intent.
 4. Konkurensi: satu `SendLane` per slot, serial; antar slot paralel.
 

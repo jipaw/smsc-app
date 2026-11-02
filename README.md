@@ -54,4 +54,13 @@ Paket desain (analisis, stack, kontrak, flow) sebagai dasar dokumentasi penuh da
 | [`schema.sql`](contracts/schema.sql) | DDL PostgreSQL 16 (diuji: dimuat bersih, constraint diverifikasi) |
 | [`tools/verify.sh`](contracts/tools/verify.sh) | Verifikasi kontrak (OpenAPI, vector, tabel endpoint) |
 
+**PoC Android (`android/`, `poc/`)** — skeleton untuk membuktikan risiko R1/R2/R3/R5/R6 di HP nyata
+
+| Path | Isi |
+|---|---|
+| [`android/`](android/README.md) | `:core` (logika, 26 unit test), `:typecheck` (type-check terhadap API Android asli), `:app` (APK uji; butuh Android SDK) |
+| [`poc/README.md`](poc/README.md) | Runbook eksperimen per risiko + [lembar hasil](poc/RESULTS_TEMPLATE.md) |
+| [`poc/server/`](poc/server/poc_server.py) | Server PoC satu-device (+ `selftest.py` memvalidasi skema dua arah) |
+| [`poc/tools/analyze.py`](poc/tools/analyze.py) | Ringkas `ledger.csv`/`events_*.csv` dari HP |
+
 Urutan baca: `docs/01` → `docs/02` → `docs/spec/01` → sisanya sesuai peran (Android: spec 03/06; backend: 04/05/07; frontend: 08; ops: 10/09; pengguna: 11). Pertanyaan terbuka ada di `docs/05` §3.

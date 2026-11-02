@@ -98,4 +98,4 @@ Tombol darurat "Pause semua pengiriman" (global kill switch, `settings.paused=tr
 - [ ] Revoke menutup WS ≤ 5 dtk dan menolak reconnect.
 - [ ] Backup terenkripsi & uji pulih terdokumentasi.
 - [ ] Pemindaian dependensi bersih (tanpa kerentanan tinggi/kritis terbuka).
-- [ ] APK: `allowBackup=false`, komponen non-exported kecuali yang perlu, `FLAG_IMMUTABLE` pada PendingIntent, tidak ada cleartext traffic.
+- [ ] APK: `allowBackup=false`, komponen non-exported kecuali yang perlu, PendingIntent hasil SMS memakai intent eksplisit ke komponen non-exported (`FLAG_MUTABLE` diperlukan agar `fillIn` telepon diteruskan; semua PendingIntent lain `FLAG_IMMUTABLE`), tidak ada cleartext traffic.
