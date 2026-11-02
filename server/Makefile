@@ -1,7 +1,7 @@
 # Server SMSC. Butuh Go 1.24+, PostgreSQL 16 (untuk tes), Node 22 (untuk dashboard).
 DB ?= postgres://nobody@localhost:55432/postgres?sslmode=disable
 
-.PHONY: build test unit integration contract web verify
+.PHONY: build test unit integration contract web e2e verify
 build:
 	go build -o bin/smscd ./cmd/smscd
 
@@ -20,6 +20,11 @@ test: unit integration contract
 # bangun dashboard lalu salin ke folder embed
 web:
 	cd ../web && npm ci && npm run build
-	rm -rf internal/webui/dist && cp -r ../web/dist internal/webui/dist
+	find internal/webui/dist -mindepth 1 ! -name .gitkeep -delete
+	cp -r ../web/dist/. internal/webui/dist/
 
-verify: test
+# E2E browser (Chromium) + HP palsu terhadap biner nyata dengan dashboard ter-embed
+e2e: web build
+	SMSC_TEST_DATABASE_URL='$(DB)' node ../web/e2e/run.cjs bin/smscd
+
+verify: test e2e

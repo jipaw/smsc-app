@@ -54,6 +54,14 @@ Paket desain (analisis, stack, kontrak, flow) sebagai dasar dokumentasi penuh da
 | [`schema.sql`](contracts/schema.sql) | DDL PostgreSQL 16 (diuji: dimuat bersih, constraint diverifikasi) |
 | [`tools/verify.sh`](contracts/tools/verify.sh) | Verifikasi kontrak (OpenAPI, vector, tabel endpoint) |
 
+**Server & dashboard (`server/`, `web/`)** — implementasi fase 1, teruji (lihat [`docs/STATUS.md`](docs/STATUS.md))
+
+| Path | Isi |
+|---|---|
+| [`server/`](server/README.md) | `smscd` (Go + PostgreSQL): REST, WS hub, dispatcher/reaper, SSE; tes integrasi dengan simulator HP + `contract_check` |
+| [`web/`](web/README.md) | Dashboard React/TS; tipe dari OpenAPI; E2E Chromium (axe, mobile, RBAC) |
+| [`server/tests/fake_device.py`](server/tests/fake_device.py) | HP palsu untuk demo: `--server … --token <kode QR>` |
+
 **PoC Android (`android/`, `poc/`)** — skeleton untuk membuktikan risiko R1/R2/R3/R5/R6 di HP nyata
 
 | Path | Isi |

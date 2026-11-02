@@ -1,0 +1,32 @@
+{
+  "name": "smsc-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "gen:api": "openapi-typescript ../contracts/openapi.yaml -o src/api/schema.d.ts --default-non-nullable false",
+    "dev": "npm run gen:api && vite",
+    "typecheck": "npm run gen:api && tsc --noEmit",
+    "test": "vitest run",
+    "e2e": "node e2e/run.cjs",
+    "build": "npm run gen:api && tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.62.7",
+    "qrcode": "1.5.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "7.18.5"
+  },
+  "devDependencies": {
+    "@types/qrcode": "1.5.5",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.4",
+    "axe-core": "^4.10.2",
+    "openapi-typescript": "7.4.4",
+    "typescript": "5.6.3",
+    "vite": "5.4.11",
+    "vitest": "2.1.8"
+  }
+}

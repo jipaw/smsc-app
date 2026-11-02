@@ -13,3 +13,7 @@ poc/server/out/
 server/bin/
 web/node_modules/
 web/dist/
+server/internal/webui/dist/*
+!server/internal/webui/dist/.gitkeep
+web/e2e/out/
+web/src/api/schema.d.ts

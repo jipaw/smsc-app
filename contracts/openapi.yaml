@@ -785,10 +785,10 @@ paths:
         - {name: sim_id, in: query, schema: {type: string, format: uuid}}
       responses:
         '200':
-          description: Hasil merge global -> device -> sim -> campaign
+          description: Nilai efektif hasil merge (view terhitung, tanpa id). global -> device -> sim, dengan policy terpilih sebagai preferensi.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/DispatchPolicy'}
+              schema: {$ref: '#/components/schemas/DispatchPolicyInput'}
   /settings/default-policy:
     put:
       tags: [Policies]
@@ -1156,6 +1156,7 @@ components:
     Role: {type: string, enum: [admin, operator, viewer]}
     Me:
       type: object
+      required: [id, email, role]
       properties:
         id: {type: string, format: uuid}
         email: {type: string, format: email}
@@ -1164,6 +1165,7 @@ components:
 
     Enrollment:
       type: object
+      required: [id, token, enroll_url, web_url, short_code, expires_at]
       properties:
         id: {type: string, format: uuid}
         token: {type: string, description: Hanya tampil sekali.}
@@ -1193,6 +1195,7 @@ components:
           items: {$ref: '#/components/schemas/SimReport'}
     DeviceEnrollResponse:
       type: object
+      required: [device_id, device_secret, ws_url, config]
       properties:
         device_id: {type: string, format: uuid}
         device_secret: {type: string}
@@ -1200,6 +1203,7 @@ components:
         config: {$ref: '#/components/schemas/DeviceConfig'}
     DeviceConfig:
       type: object
+      required: [protocol_version, heartbeat_interval_sec, config_version]
       properties:
         protocol_version: {type: integer, const: 1}
         heartbeat_interval_sec: {type: integer, default: 30}
@@ -1227,6 +1231,7 @@ components:
     DeviceStatus: {type: string, enum: [pending, online, degraded, offline, revoked]}
     Device:
       type: object
+      required: [id, name, status, enabled, capabilities, tags, created_at, sims]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
@@ -1256,7 +1261,7 @@ components:
       required: [slot_index, subscription_id]
       properties:
         slot_index: {type: integer, minimum: 0, description: 'Identitas stabil SIM dalam device (0 = SIM 1).'}
-        subscription_id: {type: integer, description: 'Android subscriptionId. Volatil, hanya hint.'}
+        subscription_id: {type: [integer, 'null'], description: 'Android subscriptionId. Volatil, hanya hint; null bila belum dilaporkan.'}
         carrier_name: {type: [string, 'null']}
         display_name: {type: [string, 'null']}
         phone_number: {type: [string, 'null']}
@@ -1268,6 +1273,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/SimReport'
         - type: object
+          required: [id, device_id, enabled, status, today]
           properties:
             id: {type: string, format: uuid}
             device_id: {type: string, format: uuid}
@@ -1309,13 +1315,14 @@ components:
         - suppressed
     Message:
       type: object
+      required: [id, source, to, encoding, parts, status, attempt, max_attempts, priority, created_at, not_before, expires_at]
       properties:
         id: {type: string, format: uuid}
         source: {$ref: '#/components/schemas/MessageSource'}
         campaign_id: {type: [string, 'null'], format: uuid}
         client_ref: {type: [string, 'null']}
         to: {type: string, description: E.164}
-        body: {type: string}
+        body: {type: [string, 'null'], description: 'null setelah dibersihkan oleh retensi body.'}
         encoding: {type: string, enum: [gsm7, ucs2]}
         parts: {type: integer}
         status: {$ref: '#/components/schemas/MessageStatus'}
@@ -1335,6 +1342,7 @@ components:
         finished_at: {type: [string, 'null'], format: date-time}
     MessageEvent:
       type: object
+      required: [id, attempt, type, at, actor]
       properties:
         id: {type: string, format: uuid}
         attempt: {type: integer}
@@ -1430,6 +1438,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/TemplateInput'
         - type: object
+          required: [id, name, body, variables, updated_at]
           properties:
             id: {type: string, format: uuid}
             variables: {type: array, items: {type: string}}
@@ -1478,6 +1487,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/DispatchPolicyInput'
         - type: object
+          required: [id, is_default, updated_at]
           properties:
             id: {type: string, format: uuid}
             is_default: {type: boolean}
@@ -1485,6 +1495,7 @@ components:
 
     Suppression:
       type: object
+      required: [id, number, created_at]
       properties:
         id: {type: string, format: uuid}
         number: {type: string}
@@ -1493,6 +1504,7 @@ components:
 
     ApiKey:
       type: object
+      required: [id, name, prefix, scopes, created_at]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
@@ -1513,6 +1525,7 @@ components:
 
     AuditLog:
       type: object
+      required: [id, at, actor, action]
       properties:
         id: {type: string, format: uuid}
         at: {type: string, format: date-time}
