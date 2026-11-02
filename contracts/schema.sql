@@ -1,4 +1,4 @@
--- SMSC Gateway — skema PostgreSQL 16 (v1). Sumber kebenaran: docs/03 dan docs/spec/07.
+-- SMSC Gateway — skema PostgreSQL 16 (v1, snapshot AKHIR = 0001_init + 0002_campaigns; dicek oleh server/tests/schema_sync.sh). Sumber kebenaran: docs/03 dan docs/spec/07.
 -- ID dibuat oleh aplikasi (UUIDv7). Semua waktu timestamptz (UTC).
 
 BEGIN;
@@ -187,9 +187,12 @@ CREATE TABLE campaigns (
   created_at   timestamptz NOT NULL DEFAULT now(),
   started_at   timestamptz,
   finished_at  timestamptz,
+  idempotency_key text,
+  eval_since   timestamptz,   -- baseline auto-pause: hanya percobaan setelah waktu ini yang dievaluasi (di-set saat start/resume)
   CHECK ((body IS NOT NULL) <> (template_id IS NOT NULL))
 );
 CREATE INDEX campaigns_status_idx ON campaigns (status);
+CREATE UNIQUE INDEX campaigns_idem_uq ON campaigns (created_by, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 CREATE TABLE campaign_recipients (
   id              uuid PRIMARY KEY,

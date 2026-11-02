@@ -854,3 +854,191 @@ func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+// ---------- campaign ----------
+
+func (a *API) listCampaigns(w http.ResponseWriter, r *http.Request) {
+	cs, next, err := a.Svc.ListCampaigns(r.Context(), r.URL.Query().Get("status"), qInt(r, "limit", 50), r.URL.Query().Get("cursor"))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	var nc any
+	if next != "" {
+		nc = next
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"items": cs, "next_cursor": nc})
+}
+
+func (a *API) createCampaign(w http.ResponseWriter, r *http.Request) {
+	f, ok := a.decodeMap(w, r)
+	if !ok {
+		return
+	}
+	p := principalOf(r.Context())
+	c, err := a.Svc.CreateCampaign(r.Context(), p.user.ID, r.Header.Get("Idempotency-Key"), f)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(p), "campaign.create", "campaign", c.ID.String(), map[string]any{"name": c.Name})
+	a.writeJSON(w, http.StatusCreated, c)
+}
+
+func (a *API) getCampaign(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "campaignId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	c, err := a.Svc.GetCampaign(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, c)
+}
+
+func (a *API) patchCampaign(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "campaignId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	f, ok := a.decodeMap(w, r)
+	if !ok {
+		return
+	}
+	c, err := a.Svc.PatchCampaign(r.Context(), id, f, actorOf(principalOf(r.Context())))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, c)
+}
+
+func (a *API) deleteCampaign(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "campaignId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	if err := a.Svc.DeleteCampaign(r.Context(), id, actorOf(principalOf(r.Context()))); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) importRecipients(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "campaignId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	var recs []core.RecipientInput
+	var rows []int
+	dedupe := true
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		r.Body = http.MaxBytesReader(w, r.Body, 21<<20)
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			a.writeProblem(w, r, core.Validation(core.FieldError{Field: "file", Message: "multipart tidak valid atau lebih dari 20 MiB"}))
+			return
+		}
+		if v := r.FormValue("dedupe"); v != "" {
+			dedupe = v != "false"
+		}
+		f, _, err := r.FormFile("file")
+		if err != nil {
+			a.writeProblem(w, r, core.Validation(core.FieldError{Field: "file", Message: "berkas CSV wajib diunggah (field 'file')"}))
+			return
+		}
+		defer f.Close()
+		recs, rows, err = core.ParseRecipientsCSV(f)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+	} else {
+		var in struct {
+			Dedupe     *bool                 `json:"dedupe"`
+			Recipients []core.RecipientInput `json:"recipients"`
+		}
+		if !a.decode(w, r, &in) {
+			return
+		}
+		recs = in.Recipients
+		if in.Dedupe != nil {
+			dedupe = *in.Dedupe
+		}
+	}
+	res, err := a.Svc.ImportRecipients(r.Context(), id, recs, rows, dedupe)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(principalOf(r.Context())), "campaign.import", "campaign", id.String(), map[string]any{"accepted": res.Accepted, "invalid": len(res.Invalid), "duplicates": res.Duplicates, "suppressed": res.Suppressed})
+	a.writeJSON(w, http.StatusOK, res)
+}
+
+func (a *API) clearRecipients(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "campaignId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	n, err := a.Svc.ClearRecipients(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"removed": n})
+}
+
+func (a *API) campaignAction(action string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, perr := pathUUID(r, "campaignId")
+		if perr != nil {
+			a.writeProblem(w, r, perr)
+			return
+		}
+		actor := actorOf(principalOf(r.Context()))
+		var c core.Campaign
+		var err error
+		switch action {
+		case "start":
+			c, err = a.Svc.StartCampaign(r.Context(), id, actor)
+		case "pause":
+			c, err = a.Svc.PauseCampaign(r.Context(), id, actor)
+		case "resume":
+			c, err = a.Svc.ResumeCampaign(r.Context(), id, actor)
+		case "cancel":
+			c, err = a.Svc.CancelCampaign(r.Context(), id, actor)
+		}
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		a.writeJSON(w, http.StatusOK, c)
+	}
+}
+
+func (a *API) previewCampaign(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "campaignId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	var in struct {
+		Sample int `json:"sample"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	p, err := a.Svc.PreviewCampaign(r.Context(), id, in.Sample)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, p)
+}

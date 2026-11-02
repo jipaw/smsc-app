@@ -39,7 +39,9 @@ type env struct {
 	cancel context.CancelFunc
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { return newEnvOpts(t) }
+
+func newEnvOpts(t *testing.T, opts ...func(*config.Config)) *env {
 	t.Helper()
 	base := os.Getenv("SMSC_TEST_DATABASE_URL")
 	if base == "" {
@@ -69,7 +71,11 @@ func newEnv(t *testing.T) *env {
 	}
 	cfg := config.Config{DatabaseURL: dsn, PublicBaseURL: "http://example.test", SessionSecret: strings.Repeat("s", 40), DefaultRegion: "ID",
 		DispatchTick: 150 * time.Millisecond, ReaperInterval: 150 * time.Millisecond, OfflineAfter: 90 * time.Second,
-		HeartbeatIntervalSec: 30, EnrollTTL: 15 * time.Minute, RequireVPN: false}
+		HeartbeatIntervalSec: 30, EnrollTTL: 15 * time.Minute, RequireVPN: false,
+		CampaignTick: 150 * time.Millisecond, CampaignQueueCap: 20000, NoCapacityAfter: 10 * time.Minute}
+	for _, o := range opts {
+		o(&cfg)
+	}
 	b := bus.New(5 * time.Minute)
 	svc := core.New(pool, cfg, log, b)
 	h := hub.New(svc, log)
@@ -77,6 +83,7 @@ func newEnv(t *testing.T) *env {
 	e := &env{t: t, pool: pool, svc: svc, hub: h, srv: srv, cancel: cancel}
 	go svc.RunDispatcher(ctx)
 	go svc.RunReaper(ctx)
+	go svc.RunCampaigns(ctx)
 	// policy default cepat untuk tes: delay 300 ms, tanpa batas rate, jendela sepanjang hari, timeout pendek
 	e.sql(`UPDATE dispatch_policies SET min_delay_ms=300, max_delay_ms=300, burst_size=100000, burst_pause_ms=0,
 		rate_per_minute=NULL, rate_per_hour=NULL, rate_per_day=NULL, ack_timeout_ms=1500, sent_timeout_ms=3000,
@@ -156,6 +163,17 @@ func (c *client) doH(method, path string, body any, out any, hdr map[string]stri
 	resp, err := c.http.Do(req)
 	if err != nil {
 		c.e.t.Fatal(err)
+	}
+	if resp.StatusCode == 429 { // hormati Retry-After seperti klien nyata, lalu ulangi sekali
+		resp.Body.Close()
+		time.Sleep(1100 * time.Millisecond)
+		if rd != nil {
+			b, _ := json.Marshal(body)
+			req.Body = io.NopCloser(bytes.NewReader(b))
+		}
+		if resp, err = c.http.Do(req); err != nil {
+			c.e.t.Fatal(err)
+		}
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)

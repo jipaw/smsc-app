@@ -443,7 +443,7 @@ paths:
   /campaigns:
     get:
       tags: [Campaigns]
-      summary: Daftar campaign
+      summary: Daftar campaign (dengan counter)
       parameters:
         - {name: status, in: query, schema: {$ref: '#/components/schemas/CampaignStatus'}}
         - {$ref: '#/components/parameters/Limit'}
@@ -455,14 +455,17 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [items]
                 properties:
                   items: {type: array, items: {$ref: '#/components/schemas/Campaign'}}
                   next_cursor: {type: [string, 'null']}
     post:
       tags: [Campaigns]
       summary: Buat campaign (status `draft`)
+      description: |
+        Wajib `name` dan salah satu dari `body`/`template_id`. Header `Idempotency-Key` yang sama (per pengguna) mengembalikan campaign yang sudah ada.
       parameters:
-        - {name: Idempotency-Key, in: header, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, schema: {type: string, maxLength: 128}}
       requestBody:
         required: true
         content:
@@ -480,7 +483,7 @@ paths:
       - {$ref: '#/components/parameters/CampaignId'}
     get:
       tags: [Campaigns]
-      summary: Detail + counter
+      summary: Detail + counter + perkiraan selesai
       responses:
         '200':
           description: OK
@@ -490,8 +493,10 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
     patch:
       tags: [Campaigns]
-      summary: Ubah campaign. Penuh saat `draft`; saat `running`/`paused` hanya policy dan sim_ids.
+      summary: Ubah campaign. Penuh saat `draft`; saat `scheduled`/`running`/`paused` hanya `policy_id` dan `sim_ids`.
+      description: Field yang tidak dikirim tidak berubah; `policy_id`/`description`/`schedule.start_at` bernilai `null` berarti dihapus. Perubahan policy/SIM berlaku untuk pesan campaign yang belum di-lease.
       requestBody:
+        required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/CampaignInput'}
@@ -501,16 +506,19 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Campaign'}
+        '404': {$ref: '#/components/responses/NotFound'}
         '409':
-          description: Field tidak boleh diubah pada status ini.
+          description: Field tidak boleh diubah pada status ini (`campaign.not_editable`).
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
+        '422': {$ref: '#/components/responses/ValidationError'}
     delete:
       tags: [Campaigns]
-      summary: Hapus campaign berstatus `draft`
+      summary: Hapus campaign berstatus `draft` (beserta penerimanya)
       responses:
         '204': {description: Dihapus}
+        '404': {$ref: '#/components/responses/NotFound'}
         '409':
           description: Bukan draft
           content:
@@ -521,7 +529,12 @@ paths:
       - {$ref: '#/components/parameters/CampaignId'}
     post:
       tags: [Campaigns]
-      summary: Impor penerima (hanya saat `draft`; bisa dipanggil berulang)
+      summary: Impor penerima (hanya saat `draft`; boleh berulang, maks. 50.000 per campaign)
+      description: |
+        Nomor dinormalisasi ke E.164 dan **satu nomor hanya sekali per campaign** (duplikat dihitung, tidak disimpan; `dedupe=false` ditolak pada v1).
+        Nomor di daftar blokir dilewati. Bila `body`/`template_id` sudah diisi, penerima yang kekurangan variabel template ditolak per baris.
+        CSV: UTF-8 (BOM diterima), pemisah `,` atau `;` terdeteksi otomatis, kolom wajib `phone`; kolom `client_ref` dipetakan ke referensi; kolom lain menjadi variabel (sel kosong = variabel tidak ada).
+        Nomor `row` pada `invalid` mengikuti nomor baris berkas (header = baris 1) atau indeks+1 untuk JSON.
       requestBody:
         required: true
         content:
@@ -530,7 +543,7 @@ paths:
               type: object
               required: [recipients]
               properties:
-                dedupe: {type: boolean, default: true}
+                dedupe: {type: boolean, default: true, description: 'Hanya `true` yang didukung.'}
                 recipients:
                   type: array
                   maxItems: 50000
@@ -540,42 +553,59 @@ paths:
               type: object
               required: [file]
               properties:
-                file: {type: string, format: binary, description: 'CSV UTF-8. Kolom wajib `phone`; kolom lain menjadi variabel template.'}
+                file: {type: string, format: binary, description: 'CSV UTF-8 (maks. 20 MiB).'}
                 dedupe: {type: boolean}
       responses:
         '200':
           description: Ringkasan validasi
           content:
             application/json:
+              schema: {$ref: '#/components/schemas/ImportResult'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Campaign bukan `draft` (`campaign.not_editable`).
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+    delete:
+      tags: [Campaigns]
+      summary: Hapus semua penerima (hanya saat `draft`), mis. untuk impor ulang setelah memperbaiki CSV
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
               schema:
                 type: object
+                required: [removed]
                 properties:
-                  accepted: {type: integer}
-                  duplicates: {type: integer}
-                  suppressed: {type: integer}
-                  invalid:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        row: {type: integer}
-                        value: {type: string}
-                        reason: {type: string}
+                  removed: {type: integer}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Campaign bukan `draft`
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
   /campaigns/{campaignId}/start:
     parameters:
       - {$ref: '#/components/parameters/CampaignId'}
     post:
       tags: [Campaigns]
       summary: Mulai (atau jadwalkan jika `schedule.start_at` di masa depan)
-      description: Validasi pra-start - ada penerima, template valid untuk semua variabel, minimal satu SIM aktif sesuai `sim_ids`. Materialisasi pesan dilakukan asinkron per batch.
+      description: |
+        Validasi pra-start: ada penerima, isi pesan lengkap, semua variabel template terpenuhi untuk semua penerima, irisan jendela waktu tidak kosong,
+        dan ada minimal satu SIM aktif yang sesuai `sim_ids` (`campaign.no_capacity`). Materialisasi pesan berjalan asinkron per batch (maks. 1.000/batch dan
+        maks. 20.000 pesan antre sekaligus, sehingga campaign besar tidak membengkakkan antrean).
       responses:
         '200':
           description: Status menjadi `scheduled` atau `running`
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Campaign'}
+        '404': {$ref: '#/components/responses/NotFound'}
         '409':
-          description: Transisi tidak valid
+          description: Transisi tidak valid (`campaign.invalid_transition`)
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
@@ -585,68 +615,76 @@ paths:
       - {$ref: '#/components/parameters/CampaignId'}
     post:
       tags: [Campaigns]
-      summary: Jeda. Pesan `queued` tertahan, yang sedang `sending` diselesaikan.
+      summary: Jeda. Pesan `queued` tertahan, yang sedang `sending` diselesaikan. (Pesan tetap tunduk pada TTL.)
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Campaign'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Transisi tidak valid
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
   /campaigns/{campaignId}/resume:
     parameters:
       - {$ref: '#/components/parameters/CampaignId'}
     post:
       tags: [Campaigns]
-      summary: Lanjutkan dari `paused`
+      summary: Lanjutkan dari `paused`. Evaluasi auto-pause dimulai ulang dari saat ini.
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Campaign'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Transisi tidak valid
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
   /campaigns/{campaignId}/cancel:
     parameters:
       - {$ref: '#/components/parameters/CampaignId'}
     post:
       tags: [Campaigns]
-      summary: Batalkan. Semua pesan `queued` menjadi `cancelled`.
+      summary: Batalkan. Semua pesan `queued` dan penerima yang belum dimaterialisasi menjadi `cancelled`; yang sudah di tangan HP diselesaikan.
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Campaign'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Transisi tidak valid
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
   /campaigns/{campaignId}/preview:
     parameters:
       - {$ref: '#/components/parameters/CampaignId'}
     post:
       tags: [Campaigns]
-      summary: Render template untuk N penerima contoh + hitung segmen SMS
+      summary: Render template untuk N penerima contoh + hitung segmen dan estimasi durasi
       requestBody:
         content:
           application/json:
             schema:
               type: object
               properties:
-                sample: {type: integer, default: 3, maximum: 20}
+                sample: {type: integer, default: 3, minimum: 1, maximum: 20}
       responses:
         '200':
           description: OK
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  samples:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        to: {type: string}
-                        body: {type: string}
-                        encoding: {type: string, enum: [gsm7, ucs2]}
-                        parts: {type: integer}
-                  estimated_duration_seconds: {type: integer, description: Estimasi berdasar policy efektif dan jumlah SIM online.}
+              schema: {$ref: '#/components/schemas/CampaignPreview'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/ValidationError'}
 
   /templates:
     get:
@@ -1313,6 +1351,7 @@ components:
         - device_revoked
         - expired
         - suppressed
+        - missing_variable
     Message:
       type: object
       required: [id, source, to, encoding, parts, status, attempt, max_attempts, priority, created_at, not_before, expires_at]
@@ -1384,13 +1423,14 @@ components:
     CampaignStatus: {type: string, enum: [draft, scheduled, running, paused, completed, cancelled]}
     CampaignInput:
       type: object
+      description: 'POST: `name` + (`body` atau `template_id`) wajib. PATCH: semua field opsional.'
       properties:
         name: {type: string, maxLength: 120}
-        description: {type: string}
-        body: {type: string, maxLength: 1600}
-        template_id: {type: string, format: uuid}
+        description: {type: [string, 'null']}
+        body: {type: [string, 'null'], maxLength: 1600, description: 'Salah satu dari body/template_id terisi; yang lain null.'}
+        template_id: {type: [string, 'null'], format: uuid}
         sim_ids: {type: array, items: {type: string, format: uuid}}
-        policy_id: {type: string, format: uuid}
+        policy_id: {type: [string, 'null'], format: uuid}
         priority: {type: integer, minimum: 0, maximum: 9, default: 3}
         schedule:
           type: object
@@ -1403,30 +1443,76 @@ components:
             enabled: {type: boolean, default: true}
             window: {type: integer, default: 50, description: Jumlah pesan terakhir yang dievaluasi.}
             max_failure_ratio: {type: number, minimum: 0, maximum: 1, default: 0.5}
+    CampaignCounters:
+      type: object
+      description: 'Invarian: total = queued + in_flight + sent + delivered + failed + cancelled + expired + unknown.'
+      required: [total, queued, in_flight, sent, delivered, failed, cancelled, expired, unknown]
+      properties:
+        total: {type: integer, description: Jumlah penerima.}
+        queued: {type: integer, description: Pesan antre + penerima yang belum dimaterialisasi (kecuali campaign dibatalkan).}
+        in_flight: {type: integer, description: 'assigned + sending.'}
+        sent: {type: integer, description: 'Status `sent` (menunggu laporan delivery); `delivered` dihitung terpisah.'}
+        delivered: {type: integer}
+        failed: {type: integer}
+        cancelled: {type: integer}
+        expired: {type: integer}
+        unknown: {type: integer}
     Campaign:
       allOf:
         - $ref: '#/components/schemas/CampaignInput'
         - type: object
+          required: [id, name, status, counters, recipients, auto_pause, sim_ids, priority, created_at]
           properties:
             id: {type: string, format: uuid}
             status: {$ref: '#/components/schemas/CampaignStatus'}
             pause_reason: {type: [string, 'null'], enum: [user, auto_failure_ratio, no_capacity, null]}
-            counters:
+            counters: {$ref: '#/components/schemas/CampaignCounters'}
+            recipients:
               type: object
+              required: [count, columns]
               properties:
-                total: {type: integer}
-                queued: {type: integer}
-                in_flight: {type: integer}
-                sent: {type: integer}
-                delivered: {type: integer}
-                failed: {type: integer}
-                cancelled: {type: integer}
-                expired: {type: integer}
-            estimated_finish_at: {type: [string, 'null'], format: date-time}
-            created_by: {type: string, format: uuid}
+                count: {type: integer}
+                columns: {type: array, items: {type: string}, description: 'Nama variabel yang tersedia (contoh dari 1.000 penerima pertama).'}
+            estimated_finish_at: {type: [string, 'null'], format: date-time, description: 'Perkiraan kasar berdasar SIM online dan policy; abaikan jendela waktu.'}
+            created_by: {type: [string, 'null'], format: uuid}
             created_at: {type: string, format: date-time}
             started_at: {type: [string, 'null'], format: date-time}
             finished_at: {type: [string, 'null'], format: date-time}
+    ImportResult:
+      type: object
+      required: [accepted, duplicates, suppressed, invalid]
+      properties:
+        accepted: {type: integer}
+        duplicates: {type: integer}
+        suppressed: {type: integer}
+        invalid:
+          type: array
+          items:
+            type: object
+            required: [row, value, reason]
+            properties:
+              row: {type: integer}
+              value: {type: string}
+              reason: {type: string, description: '`invalid_number` atau `missing_variable:<nama>`.'}
+    CampaignPreview:
+      type: object
+      required: [samples, recipients]
+      properties:
+        recipients: {type: integer}
+        samples:
+          type: array
+          items:
+            type: object
+            required: [to, body, encoding, parts]
+            properties:
+              to: {type: string}
+              body: {type: string}
+              encoding: {type: string, enum: [gsm7, ucs2]}
+              parts: {type: integer}
+        total_parts: {type: integer, description: Perkiraan total segmen seluruh penerima (dari contoh).}
+        online_sims: {type: integer, description: Jumlah SIM yang saat ini dapat mengirim untuk campaign ini.}
+        estimated_duration_seconds: {type: [integer, 'null'], description: 'null bila tidak ada SIM online. Kasar: tidak memperhitungkan jendela waktu.'}
+        missing_variables: {type: array, items: {type: object, properties: {name: {type: string}, recipients: {type: integer}}}}
 
     TemplateInput:
       type: object

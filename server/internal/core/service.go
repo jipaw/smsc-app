@@ -40,9 +40,10 @@ type Service struct {
 	Log  *slog.Logger
 	Bus  *bus.Bus
 
-	link    DeviceLink
-	wake    chan struct{}
-	cmdRefs sync.Map // id envelope sms.send -> uuid pesan
+	link     DeviceLink
+	wake     chan struct{}
+	cmdRefs  sync.Map // id envelope sms.send -> uuid pesan
+	capSince sync.Map // campaign id -> waktu pertama tanpa SIM online (no_capacity)
 }
 
 func New(pool *pgxpool.Pool, cfg config.Config, log *slog.Logger, b *bus.Bus) *Service {

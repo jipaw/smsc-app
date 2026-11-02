@@ -58,7 +58,7 @@ def validate_response(method, path, status, body, content_type):
         problems.append(f"{tag}: operasi tidak ada di openapi.yaml")
         return
     resp = op[3]["responses"].get(str(status))
-    if resp is None and status == 501 and (path.startswith('/api/v1/campaigns') or path.startswith('/api/v1/webhooks')):
+    if resp is None and status == 501 and path.startswith('/api/v1/webhooks'):
         return  # fase 2/3, didokumentasikan global
     if resp is None and status in (401, 403, 429, 500):  # didokumentasikan global di info.description
         resp = SPEC["components"]["responses"].get({401: "Unauthorized", 403: "Forbidden", 429: "TooManyRequests"}.get(status, "Unauthorized"))
@@ -222,10 +222,38 @@ def run_checks(pw):
     iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))  # noqa: E731
     call("GET", f"/api/v1/stats/timeseries?from={iso(now-86400)}&to={iso(now+3600)}&bucket=hour", expect=200)
 
-    # fase berikutnya: kontrak ada, implementasi 501 (didokumentasikan?)
-    st, _ = call("GET", "/api/v1/campaigns")
+    # campaign (fase 2)
+    call("GET", "/api/v1/campaigns", expect=200)
+    st, cm = call("POST", "/api/v1/campaigns", {"name": "Kontrak", "body": "Halo {{name}}", "priority": 4, "auto_pause": {"window": 20}}, 201, headers={"Idempotency-Key": "ct-1"})
+    cid = cm["id"]
+    call("POST", "/api/v1/campaigns", {"body": "x"}, 422)
+    call("GET", f"/api/v1/campaigns/{cid}", expect=200)
+    call("GET", f"/api/v1/campaigns/{uuid.uuid4()}", expect=404)
+    call("PATCH", f"/api/v1/campaigns/{cid}", {"description": "uji kontrak", "sim_ids": [sim]}, 200)
+    st, imp = call("POST", f"/api/v1/campaigns/{cid}/recipients", {"recipients": [
+        {"to": "08123456781", "vars": {"name": "A"}, "client_ref": "r1"}, {"to": "08123456782", "vars": {"name": "B"}},
+        {"to": "xx", "vars": {"name": "C"}}, {"to": "08123456781", "vars": {"name": "dup"}}, {"to": "08123456783", "vars": {}}]}, 200)
+    call("POST", f"/api/v1/campaigns/{cid}/recipients", {"dedupe": False, "recipients": []}, 422)
+    call("POST", f"/api/v1/campaigns/{cid}/preview", {"sample": 2}, 200)
+    call("POST", f"/api/v1/campaigns/{uuid.uuid4()}/preview", {}, 404)
+    call("POST", f"/api/v1/campaigns/{cid}/pause", {}, 409)  # draft tidak bisa di-pause
+    call("POST", f"/api/v1/campaigns/{cid}/start", {}, 200)
+    call("PATCH", f"/api/v1/campaigns/{cid}", {"name": "ganti"}, 409)
+    call("POST", f"/api/v1/campaigns/{cid}/recipients", {"recipients": []}, 409)
+    call("DELETE", f"/api/v1/campaigns/{cid}", expect=409)
+    call("POST", f"/api/v1/campaigns/{cid}/pause", {}, 200)
+    call("POST", f"/api/v1/campaigns/{cid}/resume", {}, 200)
+    call("POST", f"/api/v1/campaigns/{cid}/cancel", {}, 200)
+    call("GET", "/api/v1/campaigns?status=cancelled&limit=5", expect=200)
+    st, c2 = call("POST", "/api/v1/campaigns", {"name": "Draft"}, 422)
+    st, c2 = call("POST", "/api/v1/campaigns", {"name": "Draft", "body": "x"}, 201)
+    call("POST", f"/api/v1/campaigns/{c2['id']}/recipients", {"recipients": [{"to": "08123456790"}]}, 200)
+    call("DELETE", f"/api/v1/campaigns/{c2['id']}/recipients", expect=200)
+    call("DELETE", f"/api/v1/campaigns/{c2['id']}", expect=204)
+    # webhook tetap fase 3
+    st, _ = call("GET", "/api/v1/webhooks")
     if st != 501:
-        problems.append(f"GET /campaigns harus 501 sementara, dapat {st}")
+        problems.append(f"GET /webhooks harus 501 sementara, dapat {st}")
 
     # revoke di akhir
     call("DELETE", f"/api/v1/devices/{dev}", expect=204)

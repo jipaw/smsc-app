@@ -24,7 +24,10 @@ type Config struct {
 	HeartbeatIntervalSec int
 	EnrollTTL            time.Duration
 	SecureCookies        bool
-	RequireVPN           bool // Profil A: device tanpa VPN aktif ditandai degraded
+	RequireVPN           bool          // Profil A: device tanpa VPN aktif ditandai degraded
+	CampaignTick         time.Duration // siklus materializer/scheduler/auto-pause
+	CampaignQueueCap     int           // maks. pesan campaign berstatus queued sekaligus (backpressure materialisasi)
+	NoCapacityAfter      time.Duration // pause otomatis bila tak ada SIM online selama ini
 }
 
 func env(k, def string) string {
@@ -59,9 +62,15 @@ func Load() (Config, error) {
 		EnrollTTL:            envDur("ENROLL_TTL", 15*time.Minute),
 		SecureCookies:        env("SECURE_COOKIES", "true") == "true",
 		RequireVPN:           env("REQUIRE_VPN", "true") == "true",
+		CampaignTick:         envDur("CAMPAIGN_TICK", time.Second),
+		NoCapacityAfter:      envDur("NO_CAPACITY_AFTER", 10*time.Minute),
+		CampaignQueueCap:     20000,
 	}
 	if v, err := strconv.Atoi(env("HEARTBEAT_INTERVAL_SEC", "30")); err == nil {
 		c.HeartbeatIntervalSec = v
+	}
+	if v, err := strconv.Atoi(env("CAMPAIGN_QUEUE_CAP", "20000")); err == nil && v > 0 {
+		c.CampaignQueueCap = v
 	}
 	switch strings.ToLower(env("LOG_LEVEL", "info")) {
 	case "debug":

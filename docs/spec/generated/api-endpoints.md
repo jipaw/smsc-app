@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (62 operasi)
+# Daftar endpoint (63 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -54,17 +54,18 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 
 | Method | Path | Fungsi | Auth | Status |
 |---|---|---|---|---|
-| `GET` | `/campaigns` | Daftar campaign | apiKey/sessionCookie | 200 |
+| `GET` | `/campaigns` | Daftar campaign (dengan counter) | apiKey/sessionCookie | 200 |
 | `POST` | `/campaigns` | Buat campaign (status `draft`) | apiKey/sessionCookie | 201,422 |
-| `GET` | `/campaigns/{campaignId}` | Detail + counter | apiKey/sessionCookie | 200,404 |
-| `PATCH` | `/campaigns/{campaignId}` | Ubah campaign. Penuh saat `draft`; saat `running`/`paused` hanya policy dan sim_ids. | apiKey/sessionCookie | 200,409 |
-| `DELETE` | `/campaigns/{campaignId}` | Hapus campaign berstatus `draft` | apiKey/sessionCookie | 204,409 |
-| `POST` | `/campaigns/{campaignId}/recipients` | Impor penerima (hanya saat `draft`; bisa dipanggil berulang) | apiKey/sessionCookie | 200 |
-| `POST` | `/campaigns/{campaignId}/start` | Mulai (atau jadwalkan jika `schedule.start_at` di masa depan) | apiKey/sessionCookie | 200,409,422 |
-| `POST` | `/campaigns/{campaignId}/pause` | Jeda. Pesan `queued` tertahan, yang sedang `sending` diselesaikan. | apiKey/sessionCookie | 200 |
-| `POST` | `/campaigns/{campaignId}/resume` | Lanjutkan dari `paused` | apiKey/sessionCookie | 200 |
-| `POST` | `/campaigns/{campaignId}/cancel` | Batalkan. Semua pesan `queued` menjadi `cancelled`. | apiKey/sessionCookie | 200 |
-| `POST` | `/campaigns/{campaignId}/preview` | Render template untuk N penerima contoh + hitung segmen SMS | apiKey/sessionCookie | 200 |
+| `GET` | `/campaigns/{campaignId}` | Detail + counter + perkiraan selesai | apiKey/sessionCookie | 200,404 |
+| `PATCH` | `/campaigns/{campaignId}` | Ubah campaign. Penuh saat `draft`; saat `scheduled`/`running`/`paused` hanya `policy_id` dan `sim_ids`. | apiKey/sessionCookie | 200,404,409,422 |
+| `DELETE` | `/campaigns/{campaignId}` | Hapus campaign berstatus `draft` (beserta penerimanya) | apiKey/sessionCookie | 204,404,409 |
+| `POST` | `/campaigns/{campaignId}/recipients` | Impor penerima (hanya saat `draft`; boleh berulang, maks. 50.000 per campaign) | apiKey/sessionCookie | 200,404,409,422 |
+| `DELETE` | `/campaigns/{campaignId}/recipients` | Hapus semua penerima (hanya saat `draft`), mis. untuk impor ulang setelah memperbaiki CSV | apiKey/sessionCookie | 200,404,409 |
+| `POST` | `/campaigns/{campaignId}/start` | Mulai (atau jadwalkan jika `schedule.start_at` di masa depan) | apiKey/sessionCookie | 200,404,409,422 |
+| `POST` | `/campaigns/{campaignId}/pause` | Jeda. Pesan `queued` tertahan, yang sedang `sending` diselesaikan. (Pesan tetap tunduk pada TTL.) | apiKey/sessionCookie | 200,404,409 |
+| `POST` | `/campaigns/{campaignId}/resume` | Lanjutkan dari `paused`. Evaluasi auto-pause dimulai ulang dari saat ini. | apiKey/sessionCookie | 200,404,409 |
+| `POST` | `/campaigns/{campaignId}/cancel` | Batalkan. Semua pesan `queued` dan penerima yang belum dimaterialisasi menjadi `cancelled`; yang sudah di tangan HP diselesaikan. | apiKey/sessionCookie | 200,404,409 |
+| `POST` | `/campaigns/{campaignId}/preview` | Render template untuk N penerima contoh + hitung segmen dan estimasi durasi | apiKey/sessionCookie | 200,404,422 |
 
 ## Templates
 

@@ -11,6 +11,9 @@ python3 contracts/tools/validate_vectors.py | tail -n 3
 python3 contracts/tools/gen_api_ref.py >/dev/null
 git diff --exit-code -- docs/spec/generated/api-endpoints.md >/dev/null \
   || { echo "api-endpoints.md basi: commit hasil gen_api_ref.py"; exit 1; }
-cmp -s contracts/schema.sql server/internal/db/migrations/0001_init.sql \
-  || { echo "migrasi server (0001_init.sql) tidak sama dengan contracts/schema.sql"; exit 1; }
+if [ -n "${SMSC_TEST_DATABASE_URL:-}" ]; then
+  bash server/tests/schema_sync.sh
+else
+  echo "(lewati sinkron skema: set SMSC_TEST_DATABASE_URL untuk membandingkan schema.sql dengan migrasi)"
+fi
 echo "Kontrak OK"

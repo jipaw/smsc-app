@@ -183,7 +183,8 @@ const pickSQL = `
 WITH c AS (
   SELECT m.id FROM messages m
   WHERE m.status='queued' AND m.not_before <= now() AND m.expires_at > now()
-    AND (m.campaign_id IS NULL OR EXISTS (SELECT 1 FROM campaigns c WHERE c.id=m.campaign_id AND c.status='running'))
+    AND (m.campaign_id IS NULL OR EXISTS (SELECT 1 FROM campaigns c WHERE c.id=m.campaign_id AND c.status='running'
+         AND (cardinality(c.sim_ids)=0 OR $1::uuid = ANY(c.sim_ids))))
     AND (cardinality(m.route_sim_ids)=0 OR $1::uuid = ANY(m.route_sim_ids))
     AND (cardinality(m.route_device_ids)=0 OR $2::uuid = ANY(m.route_device_ids))
   ORDER BY m.priority DESC, m.not_before, m.id

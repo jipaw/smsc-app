@@ -137,14 +137,21 @@ func (a *API) Router() http.Handler {
 			r.With(viewer).Get("/stats/timeseries", a.timeseries)
 			r.With(viewer).Get("/events/stream", a.stream)
 
-			// fase 2/3: kontrak sudah dikunci, implementasi menyusul
+			// campaign (fase 2)
+			r.With(viewer).Get("/campaigns", a.listCampaigns)
+			r.With(operator("")).Post("/campaigns", a.createCampaign)
+			r.With(viewer).Get("/campaigns/{campaignId}", a.getCampaign)
+			r.With(operator("")).Patch("/campaigns/{campaignId}", a.patchCampaign)
+			r.With(operator("")).Delete("/campaigns/{campaignId}", a.deleteCampaign)
+			r.With(operator("")).Post("/campaigns/{campaignId}/recipients", a.importRecipients)
+			r.With(operator("")).Delete("/campaigns/{campaignId}/recipients", a.clearRecipients)
+			r.With(operator("")).Post("/campaigns/{campaignId}/preview", a.previewCampaign)
+			for _, act := range []string{"start", "pause", "resume", "cancel"} {
+				r.With(operator("")).Post("/campaigns/{campaignId}/"+act, a.campaignAction(act))
+			}
+
+			// fase 3: kontrak sudah dikunci, implementasi menyusul
 			ni := a.notImplemented
-			r.With(viewer).Get("/campaigns", ni)
-			r.With(operator("")).Post("/campaigns", ni)
-			r.With(viewer).Get("/campaigns/{campaignId}", ni)
-			r.With(operator("")).Patch("/campaigns/{campaignId}", ni)
-			r.With(operator("")).Delete("/campaigns/{campaignId}", ni)
-			r.With(operator("")).Post("/campaigns/{campaignId}/{action}", ni)
 			r.With(admin).Get("/webhooks", ni)
 			r.With(admin).Post("/webhooks", ni)
 		})
