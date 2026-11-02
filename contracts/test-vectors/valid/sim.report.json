@@ -1,0 +1,33 @@
+{
+  "v": 1,
+  "type": "sim.report",
+  "id": "0192f3c0-7a1e-7c3e-9a55-00000000000c",
+  "ref": null,
+  "ts": "2026-11-01T10:15:30.123Z",
+  "payload": {
+    "sims": [
+      {
+        "slot_index": 0,
+        "subscription_id": 3,
+        "carrier_name": "Telkomsel",
+        "display_name": "SIM 1",
+        "phone_number": null,
+        "is_esim": false,
+        "signal_level": 3,
+        "registered": true,
+        "roaming": false
+      },
+      {
+        "slot_index": 1,
+        "subscription_id": 4,
+        "carrier_name": "XL",
+        "display_name": "SIM 2",
+        "phone_number": "+628111",
+        "is_esim": true,
+        "signal_level": 2,
+        "registered": true,
+        "roaming": false
+      }
+    ]
+  }
+}

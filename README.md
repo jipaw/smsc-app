@@ -17,14 +17,41 @@ Paket desain (analisis, stack, kontrak, flow) sebagai dasar dokumentasi penuh da
 
 ## Isi repo
 
+**Paket desain (dasar keputusan)**
+
 | Path | Isi |
 |---|---|
-| [`docs/01-analisis-dan-stack.md`](docs/01-analisis-dan-stack.md) | Kebutuhan, fakta platform Android, keputusan transport & Tailscale, rekomendasi stack, alternatif |
-| [`docs/02-arsitektur-dan-flow.md`](docs/02-arsitektur-dan-flow.md) | Arsitektur, flow enrollment/koneksi/kirim/campaign/dispatcher/recovery, struktur dashboard |
-| [`docs/03-model-data-dan-state.md`](docs/03-model-data-dan-state.md) | ERD, tabel, state machine pesan, resolusi policy, kode error, retensi |
-| [`docs/04-konektivitas-keamanan-deployment.md`](docs/04-konektivitas-keamanan-deployment.md) | ACL Tailscale, autentikasi, ancaman, deployment, panduan setup HP, observability |
-| [`docs/05-roadmap-risiko-outline.md`](docs/05-roadmap-risiko-outline.md) | Risiko + PoC, roadmap, pertanyaan terbuka, outline dokumentasi penuh |
-| [`contracts/openapi.yaml`](contracts/openapi.yaml) | Kontrak REST (tervalidasi) |
-| [`contracts/device-ws-protocol.md`](contracts/device-ws-protocol.md) | Kontrak WebSocket device↔server |
+| [`docs/01-analisis-dan-stack.md`](docs/01-analisis-dan-stack.md) | Kebutuhan, fakta platform Android, transport & Tailscale (termasuk profil tanpa Tailscale), stack |
+| [`docs/02-arsitektur-dan-flow.md`](docs/02-arsitektur-dan-flow.md) | Arsitektur, flow enrollment/koneksi/kirim/campaign/dispatcher/recovery, dashboard |
+| [`docs/03-model-data-dan-state.md`](docs/03-model-data-dan-state.md) | ERD, state machine, resolusi policy, kode error |
+| [`docs/04-konektivitas-keamanan-deployment.md`](docs/04-konektivitas-keamanan-deployment.md) | ACL Tailscale, autentikasi, deployment, panduan HP, Profil B (WSS publik) |
+| [`docs/05-roadmap-risiko-outline.md`](docs/05-roadmap-risiko-outline.md) | Risiko + PoC, roadmap, pertanyaan terbuka |
 
-Mulai baca dari dok. 01, lalu dok. 02. Pertanyaan terbuka yang perlu dijawab ada di dok. 05 §3.
+**Dokumentasi penuh (`docs/spec/`)**
+
+| # | Dokumen |
+|---|---|
+| 01 | [Product Requirements](docs/spec/01-product-requirements.md) — FR/NFR dengan kriteria penerimaan |
+| 02 | [Arsitektur Sistem + ADR](docs/spec/02-arsitektur-sistem.md) |
+| 03 | [Desain Aplikasi Android](docs/spec/03-desain-aplikasi-android.md) |
+| 04 | [Desain Backend](docs/spec/04-desain-backend.md) — dispatcher, WS hub, reaper |
+| 05 | [Spesifikasi API](docs/spec/05-spesifikasi-api.md) · [daftar endpoint](docs/spec/generated/api-endpoints.md) |
+| 06 | [Protokol Device (normatif)](docs/spec/06-spesifikasi-protokol-device.md) |
+| 07 | [Model Data & Migrasi](docs/spec/07-model-data-dan-migrasi.md) |
+| 08 | [Spesifikasi Dashboard](docs/spec/08-spesifikasi-dashboard.md) |
+| 09 | [Keamanan](docs/spec/09-keamanan.md) |
+| 10 | [Panduan Operasional](docs/spec/10-panduan-operasional.md) |
+| 11 | [Panduan Pengguna](docs/spec/11-panduan-pengguna.md) |
+| 12 | [Rencana Uji](docs/spec/12-rencana-uji.md) |
+
+**Kontrak (`contracts/`)** — sumber kebenaran yang dapat diverifikasi mesin
+
+| Path | Isi |
+|---|---|
+| [`openapi.yaml`](contracts/openapi.yaml) | REST, OpenAPI 3.1 (60 operasi) |
+| [`ws-schema.json`](contracts/ws-schema.json) + [`test-vectors/`](contracts/test-vectors/) | Protokol WebSocket: JSON Schema, 16 contoh valid, 13 invalid |
+| [`device-ws-protocol.md`](contracts/device-ws-protocol.md) | Penjelasan protokol WebSocket |
+| [`schema.sql`](contracts/schema.sql) | DDL PostgreSQL 16 (diuji: dimuat bersih, constraint diverifikasi) |
+| [`tools/verify.sh`](contracts/tools/verify.sh) | Verifikasi kontrak (OpenAPI, vector, tabel endpoint) |
+
+Urutan baca: `docs/01` → `docs/02` → `docs/spec/01` → sisanya sesuai peran (Android: spec 03/06; backend: 04/05/07; frontend: 08; ops: 10/09; pengguna: 11). Pertanyaan terbuka ada di `docs/05` §3.

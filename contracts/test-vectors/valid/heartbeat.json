@@ -1,0 +1,30 @@
+{
+  "v": 1,
+  "type": "heartbeat",
+  "id": "0192f3c0-7a1e-7c3e-9a55-000000000003",
+  "ref": null,
+  "ts": "2026-11-01T10:15:30.123Z",
+  "payload": {
+    "battery": {
+      "level": 82,
+      "charging": true,
+      "temperature_c": 31.2
+    },
+    "network": {
+      "type": "wifi",
+      "tailscale_vpn_active": true,
+      "rtt_ms": 38
+    },
+    "sims": [
+      {
+        "slot_index": 0,
+        "registered": true,
+        "signal_level": 3,
+        "roaming": false
+      }
+    ],
+    "queue_depth_local": 0,
+    "clock_skew_ms": -120,
+    "uptime_sec": 86400
+  }
+}

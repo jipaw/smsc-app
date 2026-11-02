@@ -1,5 +1,7 @@
 # Kontrak WebSocket Device (protocol v1)
 
+> Sumber kebenaran mesin-terbaca: [`ws-schema.json`](ws-schema.json) (JSON Schema 2020-12). Contoh valid/invalid ada di [`test-vectors/`](test-vectors/) dan divalidasi dengan `python3 contracts/tools/validate_vectors.py`. Bila dokumen ini dan schema berbeda, schema yang menang dan dokumen harus diperbaiki.
+
 Kanal dua arah antara aplikasi Android dan server. Device **selalu yang memulai koneksi** (outbound ke alamat tailnet server), sehingga tidak perlu port terbuka di HP dan server tidak perlu tahu IP HP.
 
 - Endpoint: `wss://<host-tailnet>/ws/device`
@@ -57,7 +59,7 @@ Selain itu, ping/pong level WebSocket dikirim server tiap `ws_ping_interval_sec`
 
 ### 3.1 `hello` (D→S)
 
-Dikirim segera setelah tersambung. `inflight` adalah isi tabel `sms_job` lokal (Room) yang belum terminal, dan `pending_events` jumlah event di outbox.
+Dikirim segera setelah tersambung. `inflight` adalah isi tabel `sms_job` lokal (Room) yang belum terminal (`state`: `accepted|sending|sent|delivered|failed`), dan `pending_events` jumlah event di outbox.
 
 ```json
 {
@@ -141,7 +143,7 @@ Server menurunkan status device menjadi `degraded` jika: baterai < 15% dan tidak
 { "accepted": true, "reason": null }
 ```
 
-`reason` bila `accepted=false`: `duplicate`, `expired`, `sim_unavailable`, `permission_denied`, `busy`, `invalid`. `accepted=true` memindahkan pesan ke `sending` (setelah job disimpan ke Room, **sebelum** SmsManager dipanggil). `duplicate` berarti job sudah ada: server mengambil state terakhir dari event outbox, bukan menganggap gagal.
+`reason` bila `accepted=false` (wajib): `duplicate`, `expired`, `sim_unavailable`, `permission_denied`, `busy`, `invalid`, `already_sending`. `accepted=true` memindahkan pesan ke `sending` (setelah job disimpan ke Room, **sebelum** SmsManager dipanggil). `duplicate` berarti job sudah ada: server mengambil state terakhir dari event outbox, bukan menganggap gagal.
 
 ### 3.6 `sms.event` (D→S)
 

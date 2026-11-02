@@ -62,6 +62,19 @@ Ini bukan detail implementasi; masing-masing memengaruhi arsitektur.
 
 Menghilangkan kebutuhan slot VPN dan app kedua, tetapi menambah build Go (gomobile), ukuran APK, dan beban pemeliharaan. Disiapkan lewat abstraksi `ServerEndpoint`/`Transport` di app supaya dapat diganti tanpa mengubah protokol. Dipicu bila HP harus memakai VPN lain.
 
+### 4.3 Profil deployment tanpa Tailscale (didukung oleh desain, bukan default)
+
+WebSocket dan autentikasi device tidak bergantung pada Tailscale; Tailscale hanya lapisan jaringan dan akses. Karena itu server dapat dijalankan dalam dua profil dengan kontrak yang sama:
+
+| | Profil A — Tailnet (default) | Profil B — WSS publik (di-hardening) |
+|---|---|---|
+| Jangkauan | Server hanya di tailnet | `wss://sms.domain.tld/ws/device` di internet publik lewat reverse proxy (Caddy/nginx) + TLS publik |
+| Di HP | App Tailscale wajib | Tidak ada app/VPN tambahan; ketahanan standby lebih baik |
+| Syarat tambahan | – | Rute `/ws/device` dan `/api/v1/device/*` dipisah dari dashboard/API admin (hostname atau jalur berbeda; admin tetap privat/allowlist); rate limit per IP dan per device; batas ukuran frame; pembatasan percobaan enroll; opsional mTLS atau pinning sertifikat di app; pemantauan reconnect abnormal |
+| Risiko utama | Konfigurasi ACL salah | `device_secret` menjadi satu-satunya penghalang; endpoint terbuka untuk pemindaian dan DoS |
+
+Pilih Profil B hanya bila keterbatasan satu-slot-VPN atau beban baterai Tailscale tidak dapat diterima. Perbedaan implementasi: nilai `ws_url` pada respons enroll, konfigurasi reverse proxy, dan pemeriksaan `tailscale_vpn_active` yang menjadi tidak relevan (tidak menurunkan status `degraded`). Lihat `docs/04` §7.
+
 ## 5. Rekomendasi stack
 
 ### 5.1 Aplikasi Android (client)

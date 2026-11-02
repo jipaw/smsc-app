@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://smsc.local/schemas/ws-v1.json",
+  "title": "SMSC device WebSocket protocol v1 — envelope + payload",
+  "type": "object",
+  "required": ["v", "type", "id", "ts", "payload"],
+  "properties": {
+    "v": { "const": 1 },
+    "type": { "type": "string" },
+    "id": { "$ref": "#/$defs/uuid" },
+    "ref": { "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+    "ts": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "hello" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/hello" } } } },
+    { "if": { "properties": { "type": { "const": "hello.ack" } } }, "then": { "required": ["ref"], "properties": { "ref": { "$ref": "#/$defs/uuid" }, "payload": { "$ref": "#/$defs/helloAck" } } } },
+    { "if": { "properties": { "type": { "const": "heartbeat" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/heartbeat" } } } },
+    { "if": { "properties": { "type": { "const": "sms.send" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/smsSend" } } } },
+    { "if": { "properties": { "type": { "const": "sms.cancel" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/smsCancel" } } } },
+    { "if": { "properties": { "type": { "const": "command.ack" } } }, "then": { "required": ["ref"], "properties": { "ref": { "$ref": "#/$defs/uuid" }, "payload": { "$ref": "#/$defs/commandAck" } } } },
+    { "if": { "properties": { "type": { "const": "sms.event" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/smsEvent" } } } },
+    { "if": { "properties": { "type": { "const": "event.ack" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/eventAck" } } } },
+    { "if": { "properties": { "type": { "const": "sim.report" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/simReport" } } } },
+    { "if": { "properties": { "type": { "const": "config.update" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/configUpdate" } } } },
+    { "if": { "properties": { "type": { "const": "device.command" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/deviceCommand" } } } },
+    { "if": { "properties": { "type": { "const": "device.command_result" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/deviceCommandResult" } } } },
+    { "if": { "properties": { "type": { "const": "error" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/error" } } } }
+  ],
+  "$defs": {
+    "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "e164": { "type": "string", "pattern": "^\\+[1-9][0-9]{6,14}$" },
+    "ts": { "type": "string", "format": "date-time" },
+    "errorCode": { "enum": ["invalid_destination","short_code_blocked","permission_denied","radio_off","no_service","generic_failure","null_pdu","os_rate_limited","sim_unavailable","delivery_failed","ack_timeout","sent_timeout","device_lost","device_revoked","expired","suppressed"] },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "default_sms_app": { "type": "boolean" },
+        "os_sms_limit_unlocked": { "type": "boolean" },
+        "battery_optimization_ignored": { "type": "boolean" },
+        "notifications_enabled": { "type": "boolean" },
+        "restricted_settings_allowed": { "type": "boolean" },
+        "tailscale_vpn_active": { "type": "boolean" }
+      }
+    },
+    "simRuntime": {
+      "type": "object",
+      "required": ["slot_index"],
+      "properties": {
+        "slot_index": { "type": "integer", "minimum": 0 },
+        "subscription_id": { "type": "integer" },
+        "carrier_name": { "type": ["string", "null"] },
+        "registered": { "type": "boolean" },
+        "signal_level": { "type": ["integer", "null"], "minimum": 0, "maximum": 4 },
+        "roaming": { "type": "boolean" }
+      }
+    },
+    "guardrails": {
+      "type": "object",
+      "properties": {
+        "min_gap_ms": { "type": "integer", "minimum": 0 },
+        "max_per_minute": { "type": ["integer", "null"], "minimum": 1 },
+        "os_sms_guard": {
+          "type": "object",
+          "properties": { "max_per_window": { "type": "integer", "minimum": 1 }, "window_sec": { "type": "integer", "minimum": 1 } }
+        }
+      }
+    },
+    "hello": {
+      "type": "object",
+      "required": ["app_version", "protocol", "config_version", "sims", "inflight", "pending_events"],
+      "properties": {
+        "app_version": { "type": "string" },
+        "protocol": { "const": 1 },
+        "config_version": { "type": "integer", "minimum": 0 },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "sims": { "type": "array", "items": { "$ref": "#/$defs/simRuntime" } },
+        "inflight": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["message_id", "attempt", "state"],
+            "properties": {
+              "message_id": { "$ref": "#/$defs/uuid" },
+              "attempt": { "type": "integer", "minimum": 1 },
+              "state": { "enum": ["accepted", "sending", "sent", "delivered", "failed"] },
+              "parts_total": { "type": "integer", "minimum": 1 },
+              "parts_sent": { "type": "integer", "minimum": 0 },
+              "parts_delivered": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "pending_events": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "helloAck": {
+      "type": "object",
+      "required": ["session_id", "heartbeat_interval_sec", "config_version", "reconcile"],
+      "properties": {
+        "session_id": { "$ref": "#/$defs/uuid" },
+        "heartbeat_interval_sec": { "type": "integer", "minimum": 5 },
+        "config_version": { "type": "integer" },
+        "config": { "type": "object", "properties": { "guardrails": { "$ref": "#/$defs/guardrails" } } },
+        "reconcile": {
+          "type": "object",
+          "required": ["drop", "keep"],
+          "properties": {
+            "drop": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
+            "keep": { "type": "array", "items": { "$ref": "#/$defs/uuid" } }
+          }
+        }
+      }
+    },
+    "heartbeat": {
+      "type": "object",
+      "required": ["battery", "network"],
+      "properties": {
+        "battery": {
+          "type": "object",
+          "required": ["level", "charging"],
+          "properties": { "level": { "type": "integer", "minimum": 0, "maximum": 100 }, "charging": { "type": "boolean" }, "temperature_c": { "type": "number" } }
+        },
+        "network": {
+          "type": "object",
+          "required": ["type", "tailscale_vpn_active"],
+          "properties": {
+            "type": { "enum": ["wifi", "cellular", "ethernet", "none"] },
+            "tailscale_vpn_active": { "type": "boolean" },
+            "rtt_ms": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "sims": { "type": "array", "items": { "$ref": "#/$defs/simRuntime" } },
+        "queue_depth_local": { "type": "integer", "minimum": 0 },
+        "clock_skew_ms": { "type": "integer" },
+        "uptime_sec": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "smsSend": {
+      "type": "object",
+      "required": ["message_id", "attempt", "sim", "to", "body", "delivery_report", "not_after"],
+      "properties": {
+        "message_id": { "$ref": "#/$defs/uuid" },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "sim": { "type": "object", "required": ["slot_index"], "properties": { "slot_index": { "type": "integer", "minimum": 0 }, "subscription_id_hint": { "type": "integer" } } },
+        "to": { "$ref": "#/$defs/e164" },
+        "body": { "type": "string", "minLength": 1, "maxLength": 1600 },
+        "delivery_report": { "type": "boolean" },
+        "not_after": { "$ref": "#/$defs/ts" },
+        "min_gap_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "smsCancel": { "type": "object", "required": ["message_id"], "properties": { "message_id": { "$ref": "#/$defs/uuid" } } },
+    "commandAck": {
+      "type": "object",
+      "required": ["accepted"],
+      "properties": {
+        "accepted": { "type": "boolean" },
+        "reason": { "oneOf": [{ "enum": ["duplicate", "expired", "sim_unavailable", "permission_denied", "busy", "invalid", "already_sending"] }, { "type": "null" }] }
+      },
+      "if": { "properties": { "accepted": { "const": false } } },
+      "then": { "required": ["reason"], "properties": { "reason": { "type": "string" } } }
+    },
+    "smsEvent": {
+      "type": "object",
+      "required": ["event_id", "message_id", "attempt", "state", "parts_total", "at"],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/uuid" },
+        "message_id": { "$ref": "#/$defs/uuid" },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "state": { "enum": ["sending", "part_sent", "sent", "part_delivered", "delivered", "failed"] },
+        "part_index": { "type": ["integer", "null"], "minimum": 0 },
+        "parts_total": { "type": "integer", "minimum": 1 },
+        "error_code": { "oneOf": [{ "$ref": "#/$defs/errorCode" }, { "type": "null" }] },
+        "android_result_code": { "type": ["integer", "null"] },
+        "at": { "$ref": "#/$defs/ts" }
+      },
+      "allOf": [
+        { "if": { "properties": { "state": { "const": "failed" } } }, "then": { "required": ["error_code"], "properties": { "error_code": { "$ref": "#/$defs/errorCode" } } } },
+        { "if": { "properties": { "state": { "enum": ["part_sent", "part_delivered"] } } }, "then": { "required": ["part_index"], "properties": { "part_index": { "type": "integer" } } } }
+      ]
+    },
+    "eventAck": { "type": "object", "required": ["event_ids"], "properties": { "event_ids": { "type": "array", "minItems": 1, "maxItems": 500, "items": { "$ref": "#/$defs/uuid" } } } },
+    "simReport": {
+      "type": "object",
+      "required": ["sims"],
+      "properties": {
+        "sims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["slot_index", "subscription_id"],
+            "properties": {
+              "slot_index": { "type": "integer", "minimum": 0 },
+              "subscription_id": { "type": "integer" },
+              "carrier_name": { "type": ["string", "null"] },
+              "display_name": { "type": ["string", "null"] },
+              "phone_number": { "type": ["string", "null"] },
+              "is_esim": { "type": "boolean" },
+              "signal_level": { "type": ["integer", "null"], "minimum": 0, "maximum": 4 },
+              "registered": { "type": "boolean" },
+              "roaming": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "configUpdate": {
+      "type": "object",
+      "required": ["config_version", "config"],
+      "properties": {
+        "config_version": { "type": "integer" },
+        "config": {
+          "type": "object",
+          "properties": { "heartbeat_interval_sec": { "type": "integer", "minimum": 5 }, "guardrails": { "$ref": "#/$defs/guardrails" } }
+        }
+      }
+    },
+    "deviceCommand": {
+      "type": "object",
+      "required": ["command_id", "action"],
+      "properties": { "command_id": { "$ref": "#/$defs/uuid" }, "action": { "enum": ["ping", "refresh_sims", "restart_service", "upload_logs", "rotate_credential"] } }
+    },
+    "deviceCommandResult": {
+      "type": "object",
+      "required": ["command_id", "ok"],
+      "properties": { "command_id": { "$ref": "#/$defs/uuid" }, "ok": { "type": "boolean" }, "detail": { "type": ["string", "null"] }, "new_secret": { "type": "string", "minLength": 32 } }
+    },
+    "error": {
+      "type": "object",
+      "required": ["code", "message", "fatal"],
+      "properties": { "code": { "type": "string" }, "message": { "type": "string" }, "fatal": { "type": "boolean" } }
+    }
+  }
+}

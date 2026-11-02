@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "type": "command.ack",
+  "id": "0192f3c0-7a1e-7c3e-9a55-000000000007",
+  "ref": "0192f3c0-7a1e-7c3e-9a55-000000000004",
+  "ts": "2026-11-01T10:15:30.123Z",
+  "payload": {
+    "accepted": false,
+    "reason": null
+  }
+}

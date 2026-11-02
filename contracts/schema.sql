@@ -1,0 +1,329 @@
+-- SMSC Gateway — skema PostgreSQL 16 (v1). Sumber kebenaran: docs/03 dan docs/spec/07.
+-- ID dibuat oleh aplikasi (UUIDv7). Semua waktu timestamptz (UTC).
+
+BEGIN;
+
+-- ---------- enum ----------
+CREATE TYPE device_status    AS ENUM ('pending','online','degraded','offline','revoked');
+CREATE TYPE sim_status       AS ENUM ('active','no_service','absent','disabled');
+CREATE TYPE message_status   AS ENUM ('queued','assigned','sending','sent','delivered','failed','cancelled','expired','unknown');
+CREATE TYPE message_source   AS ENUM ('dashboard','api','campaign');
+CREATE TYPE campaign_status  AS ENUM ('draft','scheduled','running','paused','completed','cancelled');
+CREATE TYPE user_role        AS ENUM ('admin','operator','viewer');
+CREATE TYPE sms_encoding     AS ENUM ('gsm7','ucs2');
+
+-- ---------- identitas & akses ----------
+CREATE TABLE users (
+  id            uuid PRIMARY KEY,
+  email         text NOT NULL,
+  password_hash text,
+  role          user_role NOT NULL DEFAULT 'viewer',
+  tailscale_login text,
+  disabled      boolean NOT NULL DEFAULT false,
+  failed_logins integer NOT NULL DEFAULT 0,
+  locked_until  timestamptz,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX users_email_uq ON users (lower(email));
+CREATE UNIQUE INDEX users_ts_login_uq ON users (tailscale_login) WHERE tailscale_login IS NOT NULL;
+
+CREATE TABLE sessions (
+  id          uuid PRIMARY KEY,
+  user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash  bytea NOT NULL UNIQUE,
+  csrf_token  text NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  expires_at  timestamptz NOT NULL,
+  last_seen_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX sessions_user_idx ON sessions (user_id);
+
+CREATE TABLE api_keys (
+  id           uuid PRIMARY KEY,
+  name         text NOT NULL,
+  prefix       text NOT NULL,
+  key_hash     bytea NOT NULL UNIQUE,
+  scopes       text[] NOT NULL DEFAULT '{}',
+  created_by   uuid REFERENCES users(id) ON DELETE SET NULL,
+  expires_at   timestamptz,
+  revoked_at   timestamptz,
+  last_used_at timestamptz,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- ---------- policy ----------
+CREATE TABLE dispatch_policies (
+  id                   uuid PRIMARY KEY,
+  name                 text NOT NULL UNIQUE,
+  is_default           boolean NOT NULL DEFAULT false,
+  min_delay_ms         integer CHECK (min_delay_ms >= 0),
+  max_delay_ms         integer CHECK (max_delay_ms >= 0),
+  burst_size           integer CHECK (burst_size >= 1),
+  burst_pause_ms       integer CHECK (burst_pause_ms >= 0),
+  max_inflight_per_sim integer CHECK (max_inflight_per_sim >= 1),
+  rate_per_minute      integer CHECK (rate_per_minute >= 1),
+  rate_per_hour        integer CHECK (rate_per_hour >= 1),
+  rate_per_day         integer CHECK (rate_per_day >= 1),
+  send_window          jsonb,
+  max_attempts         integer CHECK (max_attempts BETWEEN 1 AND 10),
+  retry_backoff_ms     integer CHECK (retry_backoff_ms >= 1000),
+  retry_backoff_max_ms integer,
+  message_ttl_seconds  integer CHECK (message_ttl_seconds >= 30),
+  track_delivery       boolean,
+  ack_timeout_ms       integer CHECK (ack_timeout_ms > 0),
+  sent_timeout_ms      integer CHECK (sent_timeout_ms > 0),
+  retry_on_unknown     boolean,
+  updated_at           timestamptz NOT NULL DEFAULT now(),
+  CHECK (min_delay_ms IS NULL OR max_delay_ms IS NULL OR max_delay_ms >= min_delay_ms),
+  -- policy default harus lengkap (tidak boleh null) supaya merge selalu terdefinisi
+  CHECK (NOT is_default OR (
+    min_delay_ms IS NOT NULL AND max_delay_ms IS NOT NULL AND burst_size IS NOT NULL AND
+    burst_pause_ms IS NOT NULL AND max_inflight_per_sim IS NOT NULL AND max_attempts IS NOT NULL AND
+    retry_backoff_ms IS NOT NULL AND retry_backoff_max_ms IS NOT NULL AND message_ttl_seconds IS NOT NULL AND
+    track_delivery IS NOT NULL AND ack_timeout_ms IS NOT NULL AND sent_timeout_ms IS NOT NULL AND
+    retry_on_unknown IS NOT NULL AND send_window IS NOT NULL))
+);
+CREATE UNIQUE INDEX dispatch_policies_one_default ON dispatch_policies ((true)) WHERE is_default;
+
+-- ---------- device & SIM ----------
+CREATE TABLE devices (
+  id              uuid PRIMARY KEY,
+  name            text NOT NULL,
+  status          device_status NOT NULL DEFAULT 'pending',
+  status_reason   text,
+  enabled         boolean NOT NULL DEFAULT true,
+  manufacturer    text,
+  model           text,
+  android_version text,
+  sdk_int         integer CHECK (sdk_int IS NULL OR sdk_int >= 29),
+  app_version     text,
+  install_id      uuid NOT NULL UNIQUE,
+  capabilities    jsonb NOT NULL DEFAULT '{}',
+  battery_level   smallint CHECK (battery_level BETWEEN 0 AND 100),
+  charging        boolean,
+  network_type    text,
+  tailscale_ip    inet,
+  policy_id       uuid REFERENCES dispatch_policies(id) ON DELETE SET NULL,
+  tags            text[] NOT NULL DEFAULT '{}',
+  config_version  integer NOT NULL DEFAULT 1,
+  last_seen_at    timestamptz,
+  connected_since timestamptz,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  revoked_at      timestamptz
+);
+CREATE INDEX devices_status_idx ON devices (status);
+
+CREATE TABLE device_credentials (
+  device_id         uuid PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+  secret_hash       bytea NOT NULL,
+  prev_secret_hash  bytea,
+  prev_valid_until  timestamptz,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  rotated_at        timestamptz
+);
+
+CREATE TABLE device_enrollments (
+  id                    uuid PRIMARY KEY,
+  token_hash            bytea NOT NULL UNIQUE,
+  short_code_hash       bytea NOT NULL UNIQUE,
+  device_name           text,
+  policy_id             uuid REFERENCES dispatch_policies(id) ON DELETE SET NULL,
+  created_by            uuid REFERENCES users(id) ON DELETE SET NULL,
+  failed_attempts       smallint NOT NULL DEFAULT 0,
+  expires_at            timestamptz NOT NULL,
+  consumed_at           timestamptz,
+  consumed_by_device_id uuid REFERENCES devices(id) ON DELETE SET NULL,
+  revoked_at            timestamptz,
+  created_at            timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE sims (
+  id               uuid PRIMARY KEY,
+  device_id        uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  slot_index       smallint NOT NULL CHECK (slot_index >= 0),
+  subscription_id  integer,
+  carrier_name     text,
+  display_name     text,
+  phone_number     text,
+  is_esim          boolean NOT NULL DEFAULT false,
+  label            text,
+  enabled          boolean NOT NULL DEFAULT true,
+  status           sim_status NOT NULL DEFAULT 'active',
+  signal_level     smallint CHECK (signal_level BETWEEN 0 AND 4),
+  registered       boolean,
+  roaming          boolean,
+  policy_id        uuid REFERENCES dispatch_policies(id) ON DELETE SET NULL,
+  next_eligible_at timestamptz,
+  burst_count      integer NOT NULL DEFAULT 0,
+  last_seen_at     timestamptz,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (device_id, slot_index)
+);
+CREATE INDEX sims_ready_idx ON sims (next_eligible_at) WHERE enabled AND status = 'active';
+
+-- ---------- konten ----------
+CREATE TABLE templates (
+  id         uuid PRIMARY KEY,
+  name       text NOT NULL UNIQUE,
+  body       text NOT NULL CHECK (char_length(body) <= 1600),
+  variables  text[] NOT NULL DEFAULT '{}',
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE campaigns (
+  id           uuid PRIMARY KEY,
+  name         text NOT NULL,
+  description  text,
+  status       campaign_status NOT NULL DEFAULT 'draft',
+  pause_reason text CHECK (pause_reason IN ('user','auto_failure_ratio','no_capacity')),
+  body         text,
+  template_id  uuid REFERENCES templates(id) ON DELETE RESTRICT,
+  sim_ids      uuid[] NOT NULL DEFAULT '{}',
+  policy_id    uuid REFERENCES dispatch_policies(id) ON DELETE SET NULL,
+  priority     smallint NOT NULL DEFAULT 3 CHECK (priority BETWEEN 0 AND 9),
+  start_at     timestamptz,
+  auto_pause   jsonb NOT NULL DEFAULT '{"enabled":true,"window":50,"max_failure_ratio":0.5}',
+  created_by   uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  started_at   timestamptz,
+  finished_at  timestamptz,
+  CHECK ((body IS NOT NULL) <> (template_id IS NOT NULL))
+);
+CREATE INDEX campaigns_status_idx ON campaigns (status);
+
+CREATE TABLE campaign_recipients (
+  id              uuid PRIMARY KEY,
+  campaign_id     uuid NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  row_no          integer NOT NULL,
+  to_raw          text NOT NULL,
+  to_e164         text NOT NULL,
+  vars            jsonb NOT NULL DEFAULT '{}',
+  client_ref      text,
+  materialized_at timestamptz
+);
+CREATE UNIQUE INDEX campaign_recipients_dedupe ON campaign_recipients (campaign_id, to_e164);
+CREATE INDEX campaign_recipients_pending ON campaign_recipients (campaign_id, row_no) WHERE materialized_at IS NULL;
+
+CREATE TABLE suppressions (
+  id          uuid PRIMARY KEY,
+  number_e164 text NOT NULL UNIQUE,
+  reason      text,
+  created_by  uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- ---------- antrean + transaksi ----------
+CREATE TABLE messages (
+  id               uuid PRIMARY KEY,
+  source           message_source NOT NULL,
+  campaign_id      uuid REFERENCES campaigns(id) ON DELETE SET NULL,
+  recipient_id     uuid REFERENCES campaign_recipients(id) ON DELETE SET NULL,
+  client_ref       text,
+  idempotency_key  text,
+  owner_id         uuid,                       -- users.id atau api_keys.id (pembuat)
+  to_e164          text NOT NULL,
+  body             text,                       -- dapat di-NULL-kan oleh retensi
+  encoding         sms_encoding NOT NULL,
+  parts            smallint NOT NULL CHECK (parts >= 1),
+  status           message_status NOT NULL DEFAULT 'queued',
+  attempt          smallint NOT NULL DEFAULT 0,
+  max_attempts     smallint NOT NULL DEFAULT 3,
+  error_code       text,
+  error_detail     text,
+  priority         smallint NOT NULL DEFAULT 5 CHECK (priority BETWEEN 0 AND 9),
+  route_sim_ids    uuid[] NOT NULL DEFAULT '{}',
+  route_device_ids uuid[] NOT NULL DEFAULT '{}',
+  policy_id        uuid REFERENCES dispatch_policies(id) ON DELETE SET NULL,
+  device_id        uuid REFERENCES devices(id) ON DELETE SET NULL,
+  sim_id           uuid REFERENCES sims(id) ON DELETE SET NULL,
+  not_before       timestamptz NOT NULL DEFAULT now(),
+  expires_at       timestamptz NOT NULL,
+  lease_expires_at timestamptz,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  assigned_at      timestamptz,
+  sent_at          timestamptz,
+  delivered_at     timestamptz,
+  finished_at      timestamptz,
+  CHECK (status <> 'assigned' OR (sim_id IS NOT NULL AND lease_expires_at IS NOT NULL))
+);
+CREATE INDEX messages_dispatch_idx   ON messages (priority DESC, not_before, id) WHERE status = 'queued';
+CREATE INDEX messages_lease_idx      ON messages (lease_expires_at) WHERE status = 'assigned';
+CREATE INDEX messages_inflight_idx   ON messages (device_id, status) WHERE status IN ('assigned','sending');
+CREATE INDEX messages_campaign_idx   ON messages (campaign_id, status);
+CREATE INDEX messages_created_idx    ON messages (created_at DESC, id DESC);
+CREATE INDEX messages_to_idx         ON messages (to_e164, created_at DESC);
+CREATE INDEX messages_sim_sent_idx   ON messages (sim_id, sent_at) WHERE sent_at IS NOT NULL;
+CREATE INDEX messages_expiry_idx     ON messages (expires_at) WHERE status IN ('queued','assigned');
+CREATE INDEX messages_unknown_idx    ON messages (assigned_at) WHERE status = 'sending';
+CREATE UNIQUE INDEX messages_idem_uq ON messages (owner_id, idempotency_key, to_e164) WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX messages_recipient_uq ON messages (recipient_id) WHERE recipient_id IS NOT NULL;
+CREATE UNIQUE INDEX messages_api_ref_uq ON messages (client_ref) WHERE source = 'api' AND client_ref IS NOT NULL;
+
+CREATE TABLE message_events (
+  id              uuid PRIMARY KEY,
+  message_id      uuid NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  attempt         smallint NOT NULL,
+  type            text NOT NULL,
+  at              timestamptz NOT NULL DEFAULT now(),
+  actor           text NOT NULL CHECK (actor IN ('system','device','user','api')),
+  sim_id          uuid REFERENCES sims(id) ON DELETE SET NULL,
+  error_code      text,
+  data            jsonb NOT NULL DEFAULT '{}',
+  device_event_id uuid UNIQUE
+);
+CREATE INDEX message_events_msg_idx ON message_events (message_id, at);
+
+-- ---------- fase 2 & operasional ----------
+CREATE TABLE webhooks (
+  id             uuid PRIMARY KEY,
+  url            text NOT NULL,
+  events         text[] NOT NULL,
+  signing_secret bytea NOT NULL,
+  enabled        boolean NOT NULL DEFAULT true,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE webhook_deliveries (
+  id           uuid PRIMARY KEY,
+  webhook_id   uuid NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+  event_type   text NOT NULL,
+  payload      jsonb NOT NULL,
+  attempts     smallint NOT NULL DEFAULT 0,
+  next_attempt_at timestamptz,
+  delivered_at timestamptz,
+  last_status  integer
+);
+CREATE INDEX webhook_deliveries_due ON webhook_deliveries (next_attempt_at) WHERE delivered_at IS NULL;
+
+CREATE TABLE audit_logs (
+  id          uuid PRIMARY KEY,
+  at          timestamptz NOT NULL DEFAULT now(),
+  actor       text NOT NULL,
+  action      text NOT NULL,
+  target_type text,
+  target_id   text,
+  data        jsonb NOT NULL DEFAULT '{}'
+);
+CREATE INDEX audit_logs_at_idx ON audit_logs (at DESC);
+
+CREATE TABLE settings (
+  key        text PRIMARY KEY,
+  value      jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Seed: policy default sesuai docs/03 §4
+INSERT INTO dispatch_policies (id, name, is_default, min_delay_ms, max_delay_ms, burst_size, burst_pause_ms,
+  max_inflight_per_sim, rate_per_minute, rate_per_hour, rate_per_day, send_window, max_attempts,
+  retry_backoff_ms, retry_backoff_max_ms, message_ttl_seconds, track_delivery, ack_timeout_ms,
+  sent_timeout_ms, retry_on_unknown)
+VALUES ('00000000-0000-7000-8000-000000000001', 'Default', true, 3000, 8000, 20, 60000, 1, 10, 300, 2000,
+  '{"timezone":"Asia/Jakarta","windows":[{"days":[1,2,3,4,5,6,7],"start":"08:00","end":"20:00"}]}',
+  3, 30000, 600000, 86400, true, 15000, 120000, false);
+INSERT INTO settings (key, value) VALUES
+  ('retention', '{"body_retention_days":90,"event_retention_days":180}'),
+  ('default_region', '"ID"'),
+  ('delivery_timeout_seconds', '86400'),
+  ('offline_after_seconds', '90');
+
+COMMIT;

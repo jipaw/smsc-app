@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "type": "device.command",
+  "id": "0192f3c0-7a1e-7c3e-9a55-00000000000e",
+  "ref": null,
+  "ts": "2026-11-01T10:15:30.123Z",
+  "payload": {
+    "command_id": "0192f3c0-7a1e-7c3e-9a55-000000000578",
+    "action": "restart_service"
+  }
+}

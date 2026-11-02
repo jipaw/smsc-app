@@ -362,7 +362,7 @@ paths:
                       properties:
                         index: {type: integer}
                         to: {type: string}
-                        reason: {type: string, enum: [invalid_number, suppressed, duplicate_client_ref]}
+                        reason: {type: string, enum: [invalid_number, suppressed, duplicate_client_ref, missing_variable]}
         '422': {$ref: '#/components/responses/ValidationError'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
   /messages/export:

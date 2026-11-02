@@ -1,5 +1,7 @@
 # 03 — Model Data, State Machine, dan Policy
 
+> DDL final yang diuji ada di `contracts/schema.sql` dan menang bila berbeda; keputusan fisik di `docs/spec/07`.
+
 Spesifikasi logis (bukan DDL final). Tipe: `uuid` = UUIDv7, `ts` = `timestamptz`.
 
 ## 1. ERD
@@ -47,7 +49,7 @@ erDiagram
 `id`, `campaign_id`, `row_no`, `to_raw`, `to_e164`, `vars jsonb`, `client_ref`, `materialized_at`. Unique `(campaign_id, to_e164)` bila `dedupe`.
 
 ### `messages` (antrean + transaksi)
-`id`, `source` (`dashboard|api|campaign`), `campaign_id`, `recipient_id`, `client_ref`, `idempotency_key`, `api_key_id`/`user_id`, `to_e164`, `body`, `encoding`, `parts`, `status`, `attempt`, `max_attempts`, `error_code`, `error_detail`, `priority`, `route_sim_ids uuid[]`, `route_device_ids uuid[]`, `policy_id` (override), `device_id`, `sim_id`, `not_before`, `expires_at`, `lease_expires_at`, `created_at`, `assigned_at`, `sent_at`, `delivered_at`, `finished_at`.
+`id`, `source` (`dashboard|api|campaign`), `campaign_id`, `recipient_id`, `client_ref`, `idempotency_key`, `owner_id` (user atau API key), `to_e164`, `body`, `encoding`, `parts`, `status`, `attempt`, `max_attempts`, `error_code`, `error_detail`, `priority`, `route_sim_ids uuid[]`, `route_device_ids uuid[]`, `policy_id` (override), `device_id`, `sim_id`, `not_before`, `expires_at`, `lease_expires_at`, `created_at`, `assigned_at`, `sent_at`, `delivered_at`, `finished_at`.
 
 Indeks kunci:
 
@@ -60,7 +62,7 @@ Indeks kunci:
 | `(created_at DESC, id DESC)` | Daftar transaksi / cursor |
 | `(to_e164, created_at DESC)` | Pencarian nomor |
 | `(sim_id, sent_at)` | Perhitungan rate limit |
-| unique `(idempotency_key, COALESCE(api_key_id,user_id))` | Idempotensi |
+| unique `(owner_id, idempotency_key, to_e164)` | Idempotensi (per penerima) |
 | unique `(source, client_ref)` WHERE `client_ref IS NOT NULL` AND `source='api'` | Anti-duplikat klien eksternal |
 
 Partisi bulanan pada `messages`/`message_events` direncanakan jika > ~10 juta baris; tidak perlu sejak awal.

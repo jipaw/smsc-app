@@ -111,3 +111,13 @@ Backup: `pg_dump` terjadwal (harian) + uji restore; `device_credentials` ter-has
 - **Alert awal:** semua device offline > 5 menit; antrean > ambang & tidak turun 10 menit; rasio gagal 15 menit > 30%; SIM `no_service` > 15 menit; baterai device < 15% tidak mengisi.
 - **Log device:** `device.command upload_logs` mengunggah ring buffer log terbatas (tanpa isi SMS) untuk diagnosa.
 - **Versi & update app:** `app_version` dilaporkan; server dapat menolak versi di bawah minimum (`4426`). Distribusi update APK (unduh dari server, install manual/MDM) dijadwalkan v1.1.
+
+## 7. Profil B — WSS publik tanpa Tailscale (referensi)
+
+Dipakai hanya bila Profil A tidak layak (lihat dok. 01 §4.3).
+
+- Dua hostname: `device.sms.example.com` (hanya `/ws/device` dan `/api/v1/device/*`) dan `admin.sms.example.com` (dashboard + API; tetap di tailnet/VPN kantor atau allowlist IP).
+- Reverse proxy: TLS 1.2+/HSTS, `proxy_read_timeout` > 2× ping interval, batas frame 64 KiB, rate limit koneksi per IP (mis. 10/menit) dan per `device_id` di aplikasi, tolak semua rute lain di hostname device.
+- Server menandai `tailscale_vpn_active` tidak relevan; ancaman scanning dibalas 404 seragam sebelum autentikasi.
+- Pertimbangkan mTLS (sertifikat klien per device diterbitkan saat enroll) atau pinning kunci publik server di app untuk mengurangi dampak kebocoran `device_secret`.
+- Aturan keamanan lain (secret ter-hash, token enroll sekali pakai, guardrail lokal) tetap sama.

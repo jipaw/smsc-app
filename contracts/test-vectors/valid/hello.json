@@ -1,0 +1,39 @@
+{
+  "v": 1,
+  "type": "hello",
+  "id": "0192f3c0-7a1e-7c3e-9a55-000000000001",
+  "ref": null,
+  "ts": "2026-11-01T10:15:30.123Z",
+  "payload": {
+    "app_version": "0.1.0",
+    "protocol": 1,
+    "config_version": 7,
+    "capabilities": {
+      "default_sms_app": false,
+      "os_sms_limit_unlocked": false,
+      "battery_optimization_ignored": true,
+      "tailscale_vpn_active": true
+    },
+    "sims": [
+      {
+        "slot_index": 0,
+        "subscription_id": 3,
+        "carrier_name": "Telkomsel",
+        "registered": true,
+        "signal_level": 3,
+        "roaming": false
+      }
+    ],
+    "inflight": [
+      {
+        "message_id": "0192f3c0-7a1e-7c3e-9a55-000000000064",
+        "attempt": 1,
+        "state": "sending",
+        "parts_total": 2,
+        "parts_sent": 1,
+        "parts_delivered": 0
+      }
+    ],
+    "pending_events": 4
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "type": "sms.send",
+  "id": "0192f3c0-7a1e-7c3e-9a55-000000000004",
+  "ref": null,
+  "ts": "2026-11-01T10:15:30.123Z",
+  "payload": {
+    "message_id": "0192f3c0-7a1e-7c3e-9a55-000000000064",
+    "attempt": 1,
+    "sim": {
+      "slot_index": 0,
+      "subscription_id_hint": 3
+    },
+    "to": "+6281234567890",
+    "body": "Halo Budi, tagihan Rp150.000 jatuh tempo 5 Nov.",
+    "delivery_report": true,
+    "not_after": "2026-11-01T12:15:30Z",
+    "min_gap_ms": 3000
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "type": "error",
+  "id": "0192f3c0-7a1e-7c3e-9a55-000000000010",
+  "ref": "0192f3c0-7a1e-7c3e-9a55-000000000004",
+  "ts": "2026-11-01T10:15:30.123Z",
+  "payload": {
+    "code": "invalid_payload",
+    "message": "to must be E.164",
+    "fatal": false
+  }
+}
