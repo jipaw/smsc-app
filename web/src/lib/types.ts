@@ -29,7 +29,8 @@ export interface MfaChallenge { mfa_required: true; mfa_token: string; expires_i
 export interface MfaStatus { enabled: boolean; enabled_at: string | null; recovery_codes_remaining: number }
 export interface SecuritySettings { require_2fa: 'off' | 'admin' | 'all'; users_missing_2fa: number }
 export interface UserItem { id: string; email: string; role: Role; mfa_enabled?: boolean; disabled: boolean; created_at: string }
-export interface Invitation { id: string; email: string; role: Role; status: 'pending' | 'accepted' | 'expired' | 'revoked'; created_by?: string | null; created_at: string; expires_at: string; accepted_at?: string | null; token?: string; invite_url?: string }
+export interface Invitation { id: string; email: string; role: Role; status: 'pending' | 'accepted' | 'expired' | 'revoked'; created_by?: string | null; created_at: string; expires_at: string; accepted_at?: string | null; token?: string; invite_url?: string; email_status?: 'queued' | 'sent' | 'failed' | 'cancelled' | null; email_error?: string | null }
+export interface EmailConfig { configured: boolean; host?: string; port?: number; mode?: string; from?: string; auth_enabled: boolean }
 export interface MfaSetup { secret: string; otpauth_uri: string }
 export interface Page<T> { items: T[]; next_cursor: string | null }
 export interface Overview {

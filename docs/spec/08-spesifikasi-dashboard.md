@@ -12,7 +12,7 @@ Campaigns ── wizard ── detail
 Kirim SMS
 Transaksi ── detail (drawer)
 Template
-Pengaturan ── Policy · Daftar blokir · API key · Pengguna · Webhook · Retensi · Keamanan · Audit
+Pengaturan ── Policy · Daftar blokir · API key · Pengguna · Webhook · Retensi · Keamanan · Email · Audit
 Akun (tautan email di header) ── Ganti password · 2FA
 ```
 
@@ -104,6 +104,7 @@ Daftar + editor: nama, isi, daftar variabel terdeteksi, penghitung segmen, tombo
 - **API key**: buat (nama, scope, kedaluwarsa) → secret tampil sekali dengan tombol salin; **Putar** (pilih masa tumpang tindih; kolom Rotasi menunjukkan sampai kapan secret lama sah); cabut.
 - **Pengguna**: tambah; ubah **peran** dari tabel (berlaku seketika); **Nonaktifkan/Aktifkan**; **Set password** (admin menetapkan, sesi pengguna dicabut); kolom **2FA** dan *Reset 2FA*. Baris akun sendiri tanpa kontrol ubah (server menolak, `user.self_change`).
 - **Undang pengguna** (di tab Pengguna): email + peran + masa berlaku → tautan tampil sekali (salin); daftar undangan (menunggu/diterima/kedaluwarsa/dicabut) dengan *Cabut*. Halaman publik `/invite/<token>`: tampilkan email & peran, penerima mengisi password (min. 12, diulang) → akun dibuat → ke halaman masuk. Token tidak valid → pesan seragam.
+- **Email undangan**: kotak centang *Kirim tautan ke email penerima* (nonaktif + keterangan bila SMTP belum dikonfigurasi); kolom *Email* (antre/terkirim/gagal/dibatalkan, tooltip alasan gagal; daftar menyegar sendiri selagi ada yang antre); *Kirim ulang* membuat undangan baru dan mengirimnya. Tab **Email**: ringkasan SMTP (tanpa kredensial), peringatan bila tanpa enkripsi, email uji.
 - **Hapus** (baris pengguna): hanya muncul untuk akun nonaktif, dengan konfirmasi.
 - **Keamanan**: kebijakan 2FA — Opsional (default) / Wajib untuk admin / Wajib untuk semua, dengan hitungan pengguna dalam cakupan yang belum memakai 2FA. Akun yang digerbang melihat shell minimal berisi halaman Akun + banner; dashboard terbuka tanpa login ulang begitu 2FA aktif dan kode pemulihan sudah disimpan.
 - **Webhook**: buat/uji/riwayat/kirim ulang; **Putar secret** dengan masa tumpang tindih.

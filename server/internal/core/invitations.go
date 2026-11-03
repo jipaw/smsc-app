@@ -30,20 +30,26 @@ type Invitation struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	ExpiresAt  time.Time  `json:"expires_at"`
 	AcceptedAt *time.Time `json:"accepted_at"`
-	Token      string     `json:"token,omitempty"`      // hanya pada respons pembuatan
-	InviteURL  string     `json:"invite_url,omitempty"` // idem
+	// status email undangan terakhir: null = tidak diminta; queued|sent|failed|cancelled
+	EmailStatus *string `json:"email_status"`
+	EmailError  *string `json:"email_error"`
+	Token       string  `json:"token,omitempty"`      // hanya pada respons pembuatan
+	InviteURL   string  `json:"invite_url,omitempty"` // idem
 }
 
 const invCols = `i.id, i.email, i.role::text, CASE WHEN i.accepted_at IS NOT NULL THEN 'accepted' WHEN i.revoked_at IS NOT NULL THEN 'revoked'
-	WHEN i.expires_at <= now() THEN 'expired' ELSE 'pending' END, (SELECT email FROM users u WHERE u.id=i.created_by), i.created_at, i.expires_at, i.accepted_at`
+	WHEN i.expires_at <= now() THEN 'expired' ELSE 'pending' END, (SELECT email FROM users u WHERE u.id=i.created_by), i.created_at, i.expires_at, i.accepted_at,
+	(SELECT CASE o.status WHEN 'pending' THEN 'queued' ELSE o.status END FROM email_outbox o WHERE o.invitation_id=i.id ORDER BY o.created_at DESC LIMIT 1),
+	(SELECT o.last_error FROM email_outbox o WHERE o.invitation_id=i.id ORDER BY o.created_at DESC LIMIT 1)`
 
 func scanInvitation(r pgx.Row) (Invitation, error) {
 	var v Invitation
-	err := r.Scan(&v.ID, &v.Email, &v.Role, &v.Status, &v.CreatedBy, &v.CreatedAt, &v.ExpiresAt, &v.AcceptedAt)
+	err := r.Scan(&v.ID, &v.Email, &v.Role, &v.Status, &v.CreatedBy, &v.CreatedAt, &v.ExpiresAt, &v.AcceptedAt, &v.EmailStatus, &v.EmailError)
 	return v, err
 }
 
-func (s *Service) CreateInvitation(ctx context.Context, by uuid.UUID, email, role string, ttlHours int) (Invitation, error) {
+// sendEmail: kirim tautan lewat SMTP (butuh SMTP terkonfigurasi, jika tidak 409 email.not_configured).
+func (s *Service) CreateInvitation(ctx context.Context, by uuid.UUID, inviterEmail, email, role string, ttlHours int, sendEmail bool) (Invitation, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	var errs []FieldError
 	if !strings.Contains(email, "@") || len(email) < 3 {
@@ -61,6 +67,9 @@ func (s *Service) CreateInvitation(ctx context.Context, by uuid.UUID, email, rol
 	if len(errs) > 0 {
 		return Invitation{}, Validation(errs...)
 	}
+	if sendEmail && !s.EmailEnabled() {
+		return Invitation{}, errEmailNotConfigured
+	}
 	var exists bool
 	if err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE lower(email)=$1)`, email).Scan(&exists); err != nil {
 		return Invitation{}, err
@@ -75,6 +84,9 @@ func (s *Service) CreateInvitation(ctx context.Context, by uuid.UUID, email, rol
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	// undangan baru menggantikan undangan tertunda untuk email yang sama (tautan lama tidak berlaku lagi)
+	if err := cancelInvitationEmails(ctx, tx, `lower(email)=$1 AND accepted_at IS NULL AND revoked_at IS NULL`, email); err != nil {
+		return Invitation{}, err
+	}
 	if _, err := tx.Exec(ctx, `UPDATE invitations SET revoked_at=now() WHERE lower(email)=$1 AND accepted_at IS NULL AND revoked_at IS NULL`, email); err != nil {
 		return Invitation{}, err
 	}
@@ -87,11 +99,19 @@ func (s *Service) CreateInvitation(ctx context.Context, by uuid.UUID, email, rol
 	if err != nil {
 		return Invitation{}, err
 	}
+	v.Token = token
+	v.InviteURL = s.Cfg.PublicBaseURL + "/invite/" + token
+	if sendEmail {
+		subj, body := invitationEmail(inviterEmail, role, v.InviteURL, v.ExpiresAt)
+		if err := s.enqueueEmail(ctx, tx, "invitation", email, subj, body, &id, by); err != nil {
+			return Invitation{}, err
+		}
+		queued := "queued"
+		v.EmailStatus = &queued
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Invitation{}, err
 	}
-	v.Token = token
-	v.InviteURL = s.Cfg.PublicBaseURL + "/invite/" + token
 	return v, nil
 }
 
@@ -108,6 +128,7 @@ func (s *Service) RevokeInvitation(ctx context.Context, id uuid.UUID) (string, e
 	var email string
 	err := s.Pool.QueryRow(ctx, `UPDATE invitations SET revoked_at=now() WHERE id=$1 AND accepted_at IS NULL AND revoked_at IS NULL RETURNING email`, id).Scan(&email)
 	if err == nil {
+		_ = cancelInvitationEmails(ctx, s.Pool, `id=$1`, id)
 		return email, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -168,6 +189,9 @@ func (s *Service) AcceptInvitation(ctx context.Context, token, password string) 
 		return User{}, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE invitations SET accepted_user_id=$2 WHERE id=$1`, invID, u.ID); err != nil {
+		return User{}, err
+	}
+	if err := cancelInvitationEmails(ctx, tx, `id=$1`, invID); err != nil {
 		return User{}, err
 	}
 	return u, tx.Commit(ctx)

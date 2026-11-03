@@ -14,10 +14,10 @@ npm run dev          # dev server; proxy /api & /ws ke 127.0.0.1:8080
 
 Produksi: hasil `dist/` disalin ke `server/internal/webui/dist` dan di-embed ke biner (`cd server && make web build`).
 
-## Halaman (fase 1–7)
+## Halaman (fase 1–8)
 Login · Overview (statistik, grafik 24 jam, kill switch, perlu perhatian) · Devices (QR enrollment + kode manual, deteksi otomatis HP masuk via SSE,
 detail, perintah, revoke) · SIM · Kirim SMS (penghitung segmen, template, rute SIM, jadwal, policy) · Transaksi (filter, live via SSE,
-timeline, retry/batal massal, ekspor CSV) · Template · **Campaigns** (daftar dengan progres, wizard 5 langkah dengan draft tersimpan otomatis, impor/unggah CSV + laporan baris bermasalah, pemeriksaan variabel, preview + estimasi, jadwal; detail dengan jeda/lanjut/batal, banner penyebab jeda, pesan campaign, ubah policy/SIM saat berjalan) · **Undangan** (publik `/invite/<token>`) · **Akun** (ganti password, 2FA: QR + kode pemulihan; login dua langkah) · Pengaturan (policy, daftar blokir, API key, **Webhook** — buat/uji/riwayat/kirim ulang, **Keamanan** — kewajiban 2FA, **Retensi** — masa simpan + ringkasan pembersihan terakhir, pengguna, audit).
+timeline, retry/batal massal, ekspor CSV) · Template · **Campaigns** (daftar dengan progres, wizard 5 langkah dengan draft tersimpan otomatis, impor/unggah CSV + laporan baris bermasalah, pemeriksaan variabel, preview + estimasi, jadwal; detail dengan jeda/lanjut/batal, banner penyebab jeda, pesan campaign, ubah policy/SIM saat berjalan) · **Undangan** (publik `/invite/<token>`) · **Akun** (ganti password, 2FA: QR + kode pemulihan; login dua langkah) · Pengaturan (policy, daftar blokir, API key, **Webhook** — buat/uji/riwayat/kirim ulang, **Keamanan** — kewajiban 2FA, **Email** — status SMTP + email uji, **Retensi** — masa simpan + ringkasan pembersihan terakhir, pengguna, audit).
 
 ## Catatan
 - Realtime: satu `EventSource`; perubahan di-coalesce 400 ms lalu meng-invalidate query terkait; `resync` → refetch semua.

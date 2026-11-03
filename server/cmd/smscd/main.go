@@ -97,6 +97,7 @@ func serve(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, log *slog
 		go svc.RunReaper(leaderCtx)
 		go svc.RunCampaigns(leaderCtx)
 		go svc.RunWebhooks(leaderCtx)
+		go svc.RunEmails(leaderCtx)
 		go svc.RunRetention(leaderCtx)
 	} else {
 		log.Warn("instance lain sudah menjadi leader; dispatcher/reaper tidak dijalankan di sini")

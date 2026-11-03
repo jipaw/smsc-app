@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (91 operasi)
+# Daftar endpoint (93 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -125,6 +125,8 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `GET` | `/invitations` | Daftar undangan (200 terbaru; tanpa token) | apiKey/sessionCookie | 200 |
 | `POST` | `/invitations` | Buat undangan pengguna (tautan sekali pakai) | apiKey/sessionCookie | 201,409,422 |
 | `DELETE` | `/invitations/{invitationId}` | Cabut undangan | apiKey/sessionCookie | 204,404,409 |
+| `GET` | `/settings/email` | Pengaturan SMTP yang sedang aktif (tanpa kredensial) | apiKey/sessionCookie | 200 |
+| `POST` | `/settings/email/test` | Kirim email uji (langsung, tanpa outbox) | apiKey/sessionCookie | 200,409,422,429,502 |
 | `GET` | `/settings/security` | Kebijakan wajib-2FA | apiKey/sessionCookie | 200 |
 | `PUT` | `/settings/security` | Ubah kebijakan wajib-2FA (default `off`) | apiKey/sessionCookie | 200,409,422 |
 | `GET` | `/audit-logs` | Jejak audit tindakan admin | apiKey/sessionCookie | 200 |

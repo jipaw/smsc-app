@@ -382,6 +382,13 @@ def run_checks(pw):
     if rs and rs.get("invitation_retention_days") != 30:
         problems.append("invitation_retention_days harus dipertahankan saat PUT tanpa field itu")
 
+    # email (fase 8) — SMTP tidak dikonfigurasi pada server kontrak
+    call("GET", "/api/v1/settings/email", expect=200)
+    call("POST", "/api/v1/settings/email/test", {"to": "x@ct.test"}, 409)
+    call("POST", "/api/v1/invitations", {"email": "kirim@ct.test", "role": "viewer", "send_email": True}, 409)
+    st, inv3 = call("POST", "/api/v1/invitations", {"email": "tanpa-email@ct.test", "role": "viewer", "send_email": False}, 201)
+    call("GET", "/api/v1/invitations", expect=200)
+
     # revoke di akhir
     call("DELETE", f"/api/v1/devices/{dev}", expect=204)
     call("POST", "/api/v1/auth/logout", expect=204)

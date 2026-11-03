@@ -1,11 +1,14 @@
 package config
 
 import (
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/jipaw/smsc-app/server/internal/mailer"
 	"time"
 )
 
@@ -41,6 +44,11 @@ type Config struct {
 	WebhookKeyPrev       []string        // kunci lama (WEBHOOK_ENC_KEY_PREVIOUS) untuk mendekripsi saat rotasi
 	WebhookWorkers       int
 	WebhookTick          time.Duration
+
+	// email (fase 8): kosong SMTP_HOST = pengiriman email nonaktif
+	Mail         mailer.Config
+	EmailBackoff []time.Duration // jeda sebelum percobaan ulang; len = jumlah retry
+	EmailTick    time.Duration
 
 	// retensi & metrik (fase 3)
 	RetentionInterval time.Duration
@@ -91,6 +99,8 @@ func Load() (Config, error) {
 		WebhookKey:           os.Getenv("WEBHOOK_ENC_KEY"),
 		WebhookWorkers:       8,
 		WebhookTick:          envDur("WEBHOOK_TICK", time.Second),
+		EmailBackoff:         []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute, 2 * time.Hour},
+		EmailTick:            envDur("EMAIL_TICK", 2*time.Second),
 		RetentionInterval:    envDur("RETENTION_INTERVAL", time.Hour),
 		MetricsAddr:          env("METRICS_ADDR", "127.0.0.1:9090"),
 	}
@@ -120,6 +130,41 @@ func Load() (Config, error) {
 		if len(bo) > 0 {
 			c.WebhookBackoff = bo
 		}
+	}
+	c.Mail = mailer.Config{
+		Host: os.Getenv("SMTP_HOST"), Username: os.Getenv("SMTP_USERNAME"), Password: os.Getenv("SMTP_PASSWORD"),
+		From: os.Getenv("SMTP_FROM"), Mode: strings.ToLower(env("SMTP_MODE", "starttls")), Timeout: envDur("SMTP_TIMEOUT", 15*time.Second),
+	}
+	defPort := map[string]int{"starttls": 587, "tls": 465, "none": 25}[c.Mail.Mode]
+	if v, err := strconv.Atoi(os.Getenv("SMTP_PORT")); err == nil {
+		c.Mail.Port = v
+	} else {
+		c.Mail.Port = defPort
+	}
+	if f := os.Getenv("SMTP_CA_FILE"); f != "" { // CA privat untuk relay internal
+		pem, err := os.ReadFile(f)
+		if err != nil {
+			return c, fmt.Errorf("SMTP_CA_FILE: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return c, fmt.Errorf("SMTP_CA_FILE: tidak ada sertifikat PEM yang valid")
+		}
+		c.Mail.RootCAs = pool
+	}
+	if v := os.Getenv("EMAIL_BACKOFF"); v != "" {
+		var bo []time.Duration
+		for _, part := range strings.Split(v, ",") {
+			if d, err := time.ParseDuration(strings.TrimSpace(part)); err == nil && d > 0 {
+				bo = append(bo, d)
+			}
+		}
+		if len(bo) > 0 {
+			c.EmailBackoff = bo
+		}
+	}
+	if err := c.Mail.Validate(); err != nil {
+		return c, err
 	}
 	c.SessionSecretPrev = splitList(os.Getenv("SESSION_SECRET_PREVIOUS"))
 	c.WebhookKeyPrev = splitList(os.Getenv("WEBHOOK_ENC_KEY_PREVIOUS"))

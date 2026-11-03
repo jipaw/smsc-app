@@ -3,11 +3,11 @@
 Go 1.24 + PostgreSQL 16. Satu biner: REST API, WebSocket device, SSE, dispatcher, reaper, dan dashboard (embed).
 Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 
-## Status (fase 1–7)
+## Status (fase 1–8)
 
 | Sudah | Belum (fase 4) |
 |---|---|
-| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | WebAuthn, SSO, email undangan |
+| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | WebAuthn, SSO |
 | Enrollment sekali pakai, registry device/SIM, revoke, perintah jarak jauh | Multi-instance (hanya leader tunggal via advisory lock) |
 | WS hub protokol v1 (hello + rekonsiliasi, heartbeat, sms.event idempoten, sim.report) | |
 | Kirim pesan (normalisasi E.164, GSM-7/UCS-2, template, suppression, Idempotency-Key, `client_ref`) | |
@@ -16,6 +16,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | Mesin status satu pintu, retry + backoff, cancel/retry manual, transaksi + timeline, ekspor CSV aman | |
 | Policy berlapis (global/device/SIM/pesan) + CRUD + tampilan efektif, SSE dengan replay, statistik, audit log | |
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
+| **Fase 8**: email undangan lewat SMTP (outbox terenkripsi, retry, STARTTLS/TLS), `GET /settings/email`, `POST /settings/email/test` | |
 | **Fase 7**: kebijakan password (daftar umum + pola + kemiripan email) di semua pintu masuk; retensi undangan | |
 | **Fase 6**: undangan pengguna (`/invitations`, tautan sekali pakai) dan `DELETE /users/{id}` (harus dinonaktifkan dahulu) | |
 | **Fase 5**: kewajiban 2FA (`off`/`admin`/`all`, default `off`) dengan gerbang 403 `auth.mfa_setup_required`; manajemen pengguna (`PATCH /users/{id}`, `POST /users/{id}/password`) | |
@@ -60,6 +61,21 @@ smscd secrets reencrypt                               # setelah mengganti WEBHOO
 ```
 
 Endpoint: `POST /auth/login` → (2FA aktif) `{mfa_required, mfa_token}` → `POST /auth/login/verify`; `/auth/2fa`, `/auth/2fa/{setup,enable,disable,recovery-codes}`, `/auth/password`, `/users/{id}/2fa` (admin), `/api-keys/{id}/rotate`, `/webhooks/{id}/rotate-secret`, perintah device `rotate_credential`. Runbook: `docs/spec/10` R-06.
+
+## Email lewat SMTP (fase 8)
+
+| Env | Default | Arti |
+|---|---|---|
+| `SMTP_HOST` | – | Kosong = email nonaktif |
+| `SMTP_PORT` | 587 / 465 / 25 menurut mode | |
+| `SMTP_MODE` | `starttls` | `starttls` (wajib STARTTLS), `tls` (implisit), `none` (tanpa enkripsi; relay lokal tepercaya saja) |
+| `SMTP_FROM` | – (wajib bila host diisi) | mis. `SMSC Gateway <smsc@contoh.id>` |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | – | AUTH PLAIN (hanya lewat TLS atau ke loopback); keduanya atau tidak sama sekali |
+| `SMTP_CA_FILE` | – | CA privat (PEM) untuk relay internal |
+| `SMTP_TIMEOUT` | `15s` | Batas waktu per pengiriman |
+| `EMAIL_BACKOFF` / `EMAIL_TICK` | `1m,5m,30m,2h` / `2s` | Jeda retry / interval outbox |
+
+`POST /invitations {..., send_email: true}`; status per undangan di `GET /invitations` (`email_status`: queued|sent|failed|cancelled). Runbook: `docs/spec/10` R-06b.
 
 ## Kebijakan password dan retensi undangan (fase 7)
 

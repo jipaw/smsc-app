@@ -1484,20 +1484,21 @@ func (a *API) setUserPassword(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) createInvitation(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Email    string `json:"email"`
-		Role     string `json:"role"`
-		TTLHours int    `json:"ttl_hours"`
+		Email     string `json:"email"`
+		Role      string `json:"role"`
+		TTLHours  int    `json:"ttl_hours"`
+		SendEmail bool   `json:"send_email"`
 	}
 	if !a.decode(w, r, &in) {
 		return
 	}
 	p := principalOf(r.Context())
-	v, err := a.Svc.CreateInvitation(r.Context(), p.user.ID, in.Email, in.Role, in.TTLHours)
+	v, err := a.Svc.CreateInvitation(r.Context(), p.user.ID, p.user.Email, in.Email, in.Role, in.TTLHours, in.SendEmail)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	a.Svc.Audit(r.Context(), actorOf(p), "invitation.create", "invitation", v.ID.String(), map[string]any{"email": v.Email, "role": v.Role})
+	a.Svc.Audit(r.Context(), actorOf(p), "invitation.create", "invitation", v.ID.String(), map[string]any{"email": v.Email, "role": v.Role, "email_requested": in.SendEmail})
 	a.writeJSON(w, http.StatusCreated, v)
 }
 
@@ -1571,4 +1572,24 @@ func (a *API) deleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	a.Svc.Audit(r.Context(), actorOf(p), "user.delete", "user", id.String(), map[string]any{"email": email})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) getEmailConfig(w http.ResponseWriter, r *http.Request) {
+	a.writeJSON(w, http.StatusOK, a.Svc.EmailConfig())
+}
+
+func (a *API) testEmail(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		To string `json:"to"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	p := principalOf(r.Context())
+	if err := a.Svc.SendTestEmail(r.Context(), in.To); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(p), "email.test", "settings", "email", nil) // alamat tujuan sengaja tidak dicatat
+	a.writeJSON(w, http.StatusOK, map[string]any{"sent": true})
 }

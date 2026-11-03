@@ -15,6 +15,8 @@ const PORT = 19000 + Math.floor(Math.random() * 900)
 const URL_ = `http://127.0.0.1:${PORT}`
 const MPORT = PORT + 1000, HPORT = PORT + 2000
 const http = require('http')
+const net = require('net')
+const SPORT = PORT + 3000
 const OUT = path.join(__dirname, 'out')
 const AXE = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8')
 const ADMIN = 'admin@e2e.test', PW = 'e2e-pagar-biru-melompat-1'
@@ -49,9 +51,32 @@ async function axeCheck(page, name) {
 }
 
 async function main() {
+  // server SMTP minimal (tanpa enkripsi, loopback) yang menyimpan email masuk
+  const mails = []
+  const smtp = net.createServer((sock) => {
+    let buf = '', data = null, cur = { from: '', to: '' }
+    sock.write('220 e2e\r\n')
+    sock.on('data', (d) => {
+      buf += d.toString('utf8')
+      let i
+      while ((i = buf.indexOf('\r\n')) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 2)
+        if (data !== null) { if (line === '.') { mails.push({ ...cur, data }); data = null; sock.write('250 ok\r\n') } else data += line.replace(/^\./, '') + '\n'; continue }
+        const up = line.toUpperCase()
+        if (up.startsWith('EHLO') || up.startsWith('HELO')) sock.write('250-e2e\r\n250 8BITMIME\r\n')
+        else if (up.startsWith('MAIL FROM:')) { cur.from = line.slice(10).replace(/[<>].*$/, '').replace(/^\s*</, ''); sock.write('250 ok\r\n') }
+        else if (up.startsWith('RCPT TO:')) { cur.to = (line.match(/<([^>]*)>/) || [])[1]; sock.write('250 ok\r\n') }
+        else if (up === 'DATA') { data = ''; sock.write('354 go\r\n') }
+        else if (up === 'QUIT') { sock.write('221 bye\r\n'); sock.end() }
+        else sock.write('250 ok\r\n')
+      }
+    })
+    sock.on('error', () => {})
+  })
+  await new Promise((r) => smtp.listen(SPORT, '127.0.0.1', r)); procs.push({ kill: () => smtp.close() })
   psql(`CREATE DATABASE ${DB}`)
   const env = { ...process.env, DATABASE_URL: BASE.replace('/postgres?', `/${DB}?`), PUBLIC_BASE_URL: URL_, SESSION_SECRET: 's'.repeat(40), HTTP_ADDR: `127.0.0.1:${PORT}`,
-    AUTO_MIGRATE: 'true', SECURE_COOKIES: 'false', REQUIRE_VPN: 'false', DISPATCH_TICK: '300ms', WEBHOOK_ALLOW_LOOPBACK: 'true', METRICS_ADDR: `127.0.0.1:${MPORT}`, WEBHOOK_TICK: '300ms', LOGIN_BURST: '60', LOGIN_RATE_PER_MIN: '600', REAPER_INTERVAL: '500ms' }
+    AUTO_MIGRATE: 'true', SECURE_COOKIES: 'false', REQUIRE_VPN: 'false', DISPATCH_TICK: '300ms', WEBHOOK_ALLOW_LOOPBACK: 'true', METRICS_ADDR: `127.0.0.1:${MPORT}`, WEBHOOK_TICK: '300ms', SMTP_HOST: '127.0.0.1', SMTP_PORT: String(SPORT), SMTP_MODE: 'none', SMTP_FROM: 'SMSC Gateway <smsc@e2e.test>', EMAIL_TICK: '300ms', LOGIN_BURST: '60', LOGIN_RATE_PER_MIN: '600', REAPER_INTERVAL: '500ms' }
   execFileSync(BIN, ['migrate'], { env })
   execFileSync(BIN, ['admin', 'create', '--email', ADMIN, '--password', PW], { env })
   const srv = spawn(BIN, ['serve'], { env, stdio: 'ignore' }); procs.push(srv)
@@ -488,7 +513,7 @@ async function main() {
   await axeCheck(page, 'pengaturan pengguna')
 
   // undangan: admin membuat tautan, penerima menetapkan password sendiri
-  await page.getByLabel('Email penerima').fill('undangan@e2e.test')
+  await page.getByLabel('Email penerima', { exact: true }).fill('undangan@e2e.test')
   await page.getByRole('button', { name: 'Buat undangan' }).click()
   const inviteUrl = (await page.getByTestId('invite-url').textContent()).trim()
   check(inviteUrl.startsWith(URL_ + '/invite/inv_'), 'undangan: tautan sekali tampil dibuat admin')
@@ -519,6 +544,42 @@ async function main() {
   await srow.getByRole('button', { name: 'Hapus' }).click()
   await until(async () => (await page.getByRole('row').filter({ hasText: 'staf@e2e.test' }).count()) === 0, 8000, 'baris staf hilang')
   check(true, 'hapus pengguna: akun nonaktif dihapus dari daftar')
+
+  // email undangan lewat SMTP
+  await page.getByLabel(/Kirim tautan ke email penerima/).check()
+  await page.getByLabel('Email penerima', { exact: true }).fill('lewat-email@e2e.test')
+  await page.getByRole('button', { name: 'Buat undangan' }).click()
+  const mailedUrl = (await page.getByTestId('invite-url').textContent()).trim()
+  await until(async () => mails.some((m) => m.to === 'lewat-email@e2e.test'), 15000, 'email undangan tiba')
+  const got = mails.find((m) => m.to === 'lewat-email@e2e.test')
+  const qpDecoded = got.data.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+  check(qpDecoded.includes(mailedUrl) && /Subject: .*(Undangan|=\?utf-8)/i.test(got.data), 'email: undangan terkirim lewat SMTP dan memuat tautan yang sama')
+  await page.getByRole('row').filter({ hasText: 'lewat-email@e2e.test' }).getByText('terkirim').waitFor({ timeout: 15000 })
+  check(true, 'email: status "terkirim" tampil di daftar undangan')
+  const mc = await browser.newContext(); const mp = await mc.newPage()
+  await mp.goto(mailedUrl)
+  await mp.getByLabel(/^Password baru/).fill('lewat-pagar-biru-melompat-9')
+  await mp.getByLabel('Ulangi password').fill('lewat-pagar-biru-melompat-9')
+  await mp.getByRole('button', { name: 'Buat akun' }).click()
+  await mp.getByText(/Akun dibuat/).waitFor()
+  check(true, 'email: tautan dari email dapat dipakai membuat akun')
+  await mc.close()
+  // kirim ulang membuat tautan baru dan mencabut yang lama
+  await page.getByLabel('Email penerima', { exact: true }).fill('ulang@e2e.test')
+  await page.getByRole('button', { name: 'Buat undangan' }).click()
+  await page.getByRole('row').filter({ hasText: 'ulang@e2e.test' }).getByRole('button', { name: 'Kirim ulang' }).click()
+  await until(async () => mails.filter((m) => m.to === 'ulang@e2e.test').length >= 1, 15000, 'email kirim ulang')
+  check(true, 'email: tombol Kirim ulang mengirim undangan baru')
+  // tab Email
+  await page.getByRole('tab', { name: 'Email' }).click()
+  await page.getByText('127.0.0.1:' + SPORT).waitFor()
+  check((await page.getByText(/TIDAK ADA/).count()) === 1, 'email: pengaturan menampilkan peringatan bila tanpa enkripsi')
+  await axeCheck(page, 'pengaturan email')
+  await page.getByLabel('Kirim email uji ke').fill('uji@e2e.test')
+  await page.getByRole('button', { name: 'Kirim email uji' }).click()
+  await until(async () => mails.some((m) => m.to === 'uji@e2e.test'), 15000, 'email uji')
+  check(true, 'email: email uji terkirim dari halaman Pengaturan')
+  await page.getByRole('tab', { name: 'Pengguna' }).click()
 
   // admin menyalakan 2FA untuk dirinya (lewat API), lalu kebijakan wajib-2FA lewat UI
   const es = await api('POST', '/api/v1/auth/2fa/setup', { password: NPW }, ck2, cs2)

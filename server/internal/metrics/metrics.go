@@ -33,6 +33,7 @@ type Metrics struct {
 	CampaignMaterialized prometheus.Counter
 
 	WebhookDeliveries *prometheus.CounterVec
+	EmailResults      *prometheus.CounterVec
 	WebhookDuration   prometheus.Histogram
 
 	RetentionRuns prometheus.Counter
@@ -58,13 +59,14 @@ func New(pool *pgxpool.Pool) *Metrics {
 	m.DispatchAssignments = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_dispatch_assignments_total", Help: "Pesan yang di-lease ke SIM."})
 	m.DispatchWait = prometheus.NewHistogram(prometheus.HistogramOpts{Name: "smsc_dispatch_wait_seconds", Help: "Waktu tunggu pesan di antrean sampai di-lease.", Buckets: []float64{.1, .5, 1, 5, 15, 60, 300, 900, 3600, 21600, 86400}})
 	m.CampaignMaterialized = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_campaign_materialized_total", Help: "Penerima campaign yang dijadikan pesan."})
+	m.EmailResults = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_email_total", Help: "Percobaan pengiriman email menurut hasil (sent|retry|failed)."}, []string{"result"})
 	m.WebhookDeliveries = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_webhook_deliveries_total", Help: "Percobaan pengiriman webhook menurut hasil (delivered|retry|failed)."}, []string{"result"})
 	m.WebhookDuration = prometheus.NewHistogram(prometheus.HistogramOpts{Name: "smsc_webhook_delivery_duration_seconds", Help: "Durasi satu percobaan pengiriman webhook.", Buckets: []float64{.01, .05, .1, .25, .5, 1, 2.5, 5, 10}})
 	m.RetentionRuns = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_retention_runs_total", Help: "Eksekusi job retensi."})
 	m.RetentionRows = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_retention_rows_total", Help: "Baris yang dibersihkan/dianonimkan retensi menurut jenis."}, []string{"kind"})
 	m.ScrapeErrors = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_scrape_errors_total", Help: "Kegagalan membaca metrik berbasis database saat scrape."})
 	for _, c := range []prometheus.Collector{m.HTTPRequests, m.HTTPDuration, m.MessagesCreated, m.Transitions, m.LeaseExpired, m.EventIngest, m.WSConnections, m.WSConnects, m.WSMessages,
-		m.DispatchAssignments, m.DispatchWait, m.CampaignMaterialized, m.WebhookDeliveries, m.WebhookDuration, m.RetentionRuns, m.RetentionRows, m.ScrapeErrors} {
+		m.DispatchAssignments, m.DispatchWait, m.CampaignMaterialized, m.WebhookDeliveries, m.EmailResults, m.WebhookDuration, m.RetentionRuns, m.RetentionRows, m.ScrapeErrors} {
 		f(c)
 	}
 	f(collectors.NewGoCollector())
@@ -85,22 +87,24 @@ type dbCollector struct {
 }
 
 var (
-	dDevices   = prometheus.NewDesc("smsc_devices", "Jumlah device menurut status.", []string{"status"}, nil)
-	dSims      = prometheus.NewDesc("smsc_sims", "Jumlah SIM menurut status.", []string{"status"}, nil)
-	dQueue     = prometheus.NewDesc("smsc_queue_depth", "Pesan berstatus queued menurut prioritas.", []string{"priority"}, nil)
-	dInflight  = prometheus.NewDesc("smsc_messages_inflight", "Pesan yang sedang diproses HP menurut status (assigned|sending).", []string{"status"}, nil)
-	dOldest    = prometheus.NewDesc("smsc_queue_oldest_age_seconds", "Umur pesan antre tertua yang sudah boleh dikirim (0 bila kosong).", nil, nil)
-	dLag       = prometheus.NewDesc("smsc_sim_next_eligible_lag_seconds", "Selisih terbesar antara sekarang dan next_eligible_at lane SIM online saat ada antrean (lane siap tetapi belum melepas pesan).", nil, nil)
-	dCampaigns = prometheus.NewDesc("smsc_campaigns", "Jumlah campaign menurut status.", []string{"status"}, nil)
-	dWHPending = prometheus.NewDesc("smsc_webhook_pending_deliveries", "Pengiriman webhook yang menunggu (belum berhasil/gagal final).", nil, nil)
-	dWHOldest  = prometheus.NewDesc("smsc_webhook_oldest_pending_age_seconds", "Umur pengiriman webhook tertunda tertua.", nil, nil)
-	dBattery   = prometheus.NewDesc("smsc_device_battery_percent", "Level baterai terakhir device online/degraded.", []string{"device", "name"}, nil)
-	dCharging  = prometheus.NewDesc("smsc_device_charging", "1 bila device sedang mengisi daya.", []string{"device", "name"}, nil)
-	dPool      = prometheus.NewDesc("smsc_db_pool_connections", "Koneksi pool database menurut state.", []string{"state"}, nil)
+	dDevices      = prometheus.NewDesc("smsc_devices", "Jumlah device menurut status.", []string{"status"}, nil)
+	dSims         = prometheus.NewDesc("smsc_sims", "Jumlah SIM menurut status.", []string{"status"}, nil)
+	dQueue        = prometheus.NewDesc("smsc_queue_depth", "Pesan berstatus queued menurut prioritas.", []string{"priority"}, nil)
+	dInflight     = prometheus.NewDesc("smsc_messages_inflight", "Pesan yang sedang diproses HP menurut status (assigned|sending).", []string{"status"}, nil)
+	dOldest       = prometheus.NewDesc("smsc_queue_oldest_age_seconds", "Umur pesan antre tertua yang sudah boleh dikirim (0 bila kosong).", nil, nil)
+	dLag          = prometheus.NewDesc("smsc_sim_next_eligible_lag_seconds", "Selisih terbesar antara sekarang dan next_eligible_at lane SIM online saat ada antrean (lane siap tetapi belum melepas pesan).", nil, nil)
+	dCampaigns    = prometheus.NewDesc("smsc_campaigns", "Jumlah campaign menurut status.", []string{"status"}, nil)
+	dWHPending    = prometheus.NewDesc("smsc_webhook_pending_deliveries", "Pengiriman webhook yang menunggu (belum berhasil/gagal final).", nil, nil)
+	dEmailPending = prometheus.NewDesc("smsc_email_pending", "Email di outbox yang menunggu dikirim.", nil, nil)
+	dEmailOldest  = prometheus.NewDesc("smsc_email_oldest_pending_age_seconds", "Umur email tertunda tertua di outbox.", nil, nil)
+	dWHOldest     = prometheus.NewDesc("smsc_webhook_oldest_pending_age_seconds", "Umur pengiriman webhook tertunda tertua.", nil, nil)
+	dBattery      = prometheus.NewDesc("smsc_device_battery_percent", "Level baterai terakhir device online/degraded.", []string{"device", "name"}, nil)
+	dCharging     = prometheus.NewDesc("smsc_device_charging", "1 bila device sedang mengisi daya.", []string{"device", "name"}, nil)
+	dPool         = prometheus.NewDesc("smsc_db_pool_connections", "Koneksi pool database menurut state.", []string{"state"}, nil)
 )
 
 func (c *dbCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, d := range []*prometheus.Desc{dDevices, dSims, dQueue, dInflight, dOldest, dLag, dCampaigns, dWHPending, dWHOldest, dBattery, dCharging, dPool} {
+	for _, d := range []*prometheus.Desc{dDevices, dSims, dQueue, dInflight, dOldest, dLag, dCampaigns, dWHPending, dWHOldest, dEmailPending, dEmailOldest, dBattery, dCharging, dPool} {
 		ch <- d
 	}
 }
@@ -192,5 +196,12 @@ func (c *dbCollector) query() []prometheus.Metric {
 	}
 	add(dWHPending, float64(pend))
 	add(dWHOldest, pendAge)
+	var ePend int64
+	var eAge float64
+	if err := c.pool.QueryRow(ctx, `SELECT count(*), COALESCE(extract(epoch FROM now() - min(created_at)), 0) FROM email_outbox WHERE status='pending'`).Scan(&ePend, &eAge); err != nil {
+		c.m.ScrapeErrors.Inc()
+	}
+	add(dEmailPending, float64(ePend))
+	add(dEmailOldest, eAge)
 	return out
 }

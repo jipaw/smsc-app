@@ -1251,7 +1251,8 @@ paths:
       tags: [Admin]
       summary: Buat undangan pengguna (tautan sekali pakai)
       description: |
-        Tidak ada pengiriman email: admin membagikan `invite_url` (tampil sekali). Penerima menetapkan passwordnya sendiri.
+        `invite_url` tampil sekali di respons ini; admin dapat membagikannya sendiri, atau meminta server mengirimnya lewat email (`send_email`).
+        Isi email di outbox disimpan terenkripsi dan dibuang begitu terkirim/gagal/dibatalkan. Penerima menetapkan passwordnya sendiri.
         Undangan baru untuk email yang sama mencabut yang lama. Email yang sudah menjadi pengguna → 409.
       requestBody:
         required: true
@@ -1264,13 +1265,14 @@ paths:
                 email: {type: string, format: email}
                 role: {$ref: '#/components/schemas/Role'}
                 ttl_hours: {type: integer, minimum: 1, maximum: 720, default: 168}
+                send_email: {type: boolean, default: false, description: 'Kirim tautan ke email penerima lewat SMTP (outbox + retry). Butuh SMTP terkonfigurasi, jika tidak 409 `email.not_configured`. Kegagalan email tidak membatalkan undangan; tautan tetap dapat dibagikan manual.'}
       responses:
         '201':
           description: Dibuat
           content:
             application/json:
               schema: {$ref: '#/components/schemas/InvitationCreated'}
-        '409': {description: 'Email sudah terdaftar', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '409': {description: 'Email sudah terdaftar, atau `email.not_configured`', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
   /invitations/{invitationId}:
     delete:
@@ -1339,6 +1341,44 @@ paths:
         '409': {description: 'Email sudah terdaftar', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+  /settings/email:
+    get:
+      tags: [Admin]
+      summary: Pengaturan SMTP yang sedang aktif (tanpa kredensial)
+      description: Konfigurasi SMTP berasal dari environment server (`SMTP_*`); tidak dapat diubah lewat API.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EmailConfig'}
+  /settings/email/test:
+    post:
+      tags: [Admin]
+      summary: Kirim email uji (langsung, tanpa outbox)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to: {type: string, format: email}
+      responses:
+        '200':
+          description: Terkirim
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sent]
+                properties:
+                  sent: {type: boolean}
+        '409': {description: 'SMTP belum dikonfigurasi (`email.not_configured`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {description: 'Alamat tujuan tidak valid', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '502': {description: 'Server SMTP menolak / tidak terjangkau (`email.send_failed`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
   /settings/security:
     get:
       tags: [Admin]
@@ -1775,6 +1815,8 @@ components:
         created_at: {type: string, format: date-time}
         expires_at: {type: string, format: date-time}
         accepted_at: {type: [string, 'null'], format: date-time}
+        email_status: {type: [string, 'null'], enum: [queued, sent, failed, cancelled, null], description: 'Status email undangan terakhir; null = email tidak diminta.'}
+        email_error: {type: [string, 'null'], description: 'Alasan kegagalan terakhir (percobaan ulang / gagal final).'}
     InvitationCreated:
       allOf:
         - $ref: '#/components/schemas/Invitation'
@@ -1790,6 +1832,16 @@ components:
         email: {type: string, format: email}
         role: {$ref: '#/components/schemas/Role'}
         expires_at: {type: string, format: date-time}
+    EmailConfig:
+      type: object
+      required: [configured, auth_enabled]
+      properties:
+        configured: {type: boolean}
+        host: {type: string}
+        port: {type: integer}
+        mode: {type: string, enum: [starttls, tls, none]}
+        from: {type: string}
+        auth_enabled: {type: boolean}
     SecuritySettings:
       type: object
       required: [require_2fa, users_missing_2fa]

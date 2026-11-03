@@ -157,6 +157,8 @@ func (a *API) Router() http.Handler {
 			r.With(admin).Post("/invitations", a.createInvitation)
 			r.With(admin).Delete("/invitations/{invitationId}", a.revokeInvitation)
 			r.With(admin).Post("/users/{userId}/password", a.setUserPassword)
+			r.With(admin).Get("/settings/email", a.getEmailConfig)
+			r.With(admin).With(a.limit(a.acctLimit, userKey)).Post("/settings/email/test", a.testEmail)
 			r.With(admin).Get("/settings/security", a.getSecurity)
 			r.With(admin).Put("/settings/security", a.setSecurity)
 			r.With(admin).Get("/audit-logs", a.listAudit)

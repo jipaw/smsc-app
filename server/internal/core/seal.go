@@ -16,6 +16,7 @@ import (
 const (
 	purposeWebhook = "smsc-webhook-secret-v1" // jangan diubah: kompatibel dengan data fase 3
 	purposeTOTP    = "smsc-totp-v1"
+	purposeEmail   = "smsc-email-v1" // isi email di outbox (memuat tautan undangan rahasia)
 )
 
 func deriveKey(base, purpose string) []byte {

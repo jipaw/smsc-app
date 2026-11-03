@@ -49,6 +49,7 @@ Opsi A (Compose + sidecar) dan catatan jaringan ada di `docs/04` §4. Verifikasi
 | `METRICS_ADDR` | `127.0.0.1:9090` | Endpoint `/metrics` terpisah |
 | `WEBHOOK_ENC_KEY` | turunan `SESSION_SECRET` | Kunci enkripsi secret webhook dan rahasia TOTP. Atur terpisah di produksi |
 | `SESSION_SECRET_PREVIOUS`, `WEBHOOK_ENC_KEY_PREVIOUS` | – | Kunci lama (koma) selama rotasi; lihat R-06 |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_MODE`, `SMTP_FROM`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_CA_FILE`, `SMTP_TIMEOUT`, `EMAIL_BACKOFF`, `EMAIL_TICK` | email nonaktif | Pengiriman email undangan; lihat `server/README.md`. Simpan kredensial di secret manager, bukan di repo |
 | `LOGIN_RATE_PER_MIN`, `LOGIN_BURST` | `5`, `5` | Batas login & verifikasi 2FA per IP (endpoint akun: 2× per pengguna). Naikkan bila banyak admin berbagi satu IP/NAT |
 | `DEVICE_ROTATE_GRACE` | `60s` | Masa secret device lama setelah rotasi |
 | `WEBHOOK_TIMEOUT`, `WEBHOOK_BACKOFF`, `WEBHOOK_TICK`, `RETENTION_INTERVAL` | lihat `server/README.md` | |
@@ -157,7 +158,7 @@ Menyalakan: pastikan **Anda** sudah memakai 2FA (Akun), lalu Pengaturan → Keam
 
 Kebijakan password baru berlaku di semua pintu (spec 09); bila admin menerima 422 `terlalu lemah`, pilih frasa panjang yang tidak memuat nama akun. Pengaturan → Retensi juga mengatur masa simpan undangan selesai (default 90 hari).
 
-Mengundang: Pengaturan → Pengguna → *Undang pengguna* → salin tautan (tampil sekali) → kirim ke penerima lewat jalur aman. Salah kirim / batal: *Cabut*. Tidak ada email otomatis. Pensiun akun: *Nonaktifkan* lalu (opsional) *Hapus*.
+Mengundang: Pengaturan → Pengguna → *Undang pengguna* → salin tautan (tampil sekali) dan kirim lewat jalur aman, atau centang *Kirim tautan ke email penerima* (butuh SMTP; uji dulu di Pengaturan → Email). Email gagal (kolom *Email* = gagal, arahkan kursor untuk alasan): periksa SMTP lalu *Kirim ulang* atau bagikan tautan manual. Salah kirim / batal: *Cabut* (email yang masih antre ikut dibatalkan). Pensiun akun: *Nonaktifkan* lalu (opsional) *Hapus*.
 
 Terkunci keluar (HP authenticator hilang, kebijakan menyala): admin lain → Pengguna → *Reset 2FA*; bila tidak ada admin lain: `smscd admin reset-2fa --email …` di server. Pengguna lalu menyiapkan 2FA baru (kebijakan tetap berlaku). Karyawan keluar: *Nonaktifkan* (sesi langsung dicabut) — jangan hapus agar jejak audit tetap bermakna. Lupa password: *Set password* atau `smscd admin reset-password`. Tidak bisa mengubah akun sendiri; minta admin lain.
 

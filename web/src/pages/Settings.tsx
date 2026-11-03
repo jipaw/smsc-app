@@ -3,10 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get, patch, post, put } from '../lib/api'
 import { fmtTime } from '../lib/format'
 import { isAdmin, useMe } from '../lib/session'
-import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, Invitation, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
+import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, Invitation, EmailConfig, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
 import { Empty, ErrorBox, errMsg, Field, Loading, Modal, useToast } from '../components/ui'
 
-const TABS = ['Policy', 'Daftar blokir', 'API key', 'Webhook', 'Retensi', 'Keamanan', 'Pengguna', 'Audit'] as const
+const TABS = ['Policy', 'Daftar blokir', 'API key', 'Webhook', 'Retensi', 'Keamanan', 'Email', 'Pengguna', 'Audit'] as const
 
 export function Settings() {
   const me = useMe()
@@ -16,7 +16,7 @@ export function Settings() {
     <div className="stack">
       <h1>Pengaturan</h1>
       <div className="tabs" role="tablist">{TABS.map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{t}</button>)}</div>
-      {tab === 'Policy' && <Policies />}{tab === 'Daftar blokir' && <Suppressions />}{tab === 'API key' && <ApiKeys />}{tab === 'Webhook' && <Webhooks />}{tab === 'Retensi' && <Retention />}{tab === 'Keamanan' && <Security />}{tab === 'Pengguna' && <Users />}{tab === 'Audit' && <Audit />}
+      {tab === 'Policy' && <Policies />}{tab === 'Daftar blokir' && <Suppressions />}{tab === 'API key' && <ApiKeys />}{tab === 'Webhook' && <Webhooks />}{tab === 'Retensi' && <Retention />}{tab === 'Keamanan' && <Security />}{tab === 'Email' && <EmailSettings />}{tab === 'Pengguna' && <Users />}{tab === 'Audit' && <Audit />}
     </div>
   )
 }
@@ -166,11 +166,15 @@ function Users() {
 function Invitations() {
   const qc = useQueryClient()
   const toast = useToast()
-  const [f, setF] = useState<{ email: string; role: Role; ttl: number }>({ email: '', role: 'operator', ttl: 168 })
+  const [f, setF] = useState<{ email: string; role: Role; ttl: number; mail: boolean }>({ email: '', role: 'operator', ttl: 168, mail: false })
   const [made, setMade] = useState<Invitation | null>(null)
-  const q = useQuery({ queryKey: ['invitations'], queryFn: () => get<{ items: Invitation[] }>('/invitations') })
+  const cfg = useQuery({ queryKey: ['email-config'], queryFn: () => get<EmailConfig>('/settings/email') })
+  const mailOk = !!cfg.data?.configured
+  const q = useQuery({ queryKey: ['invitations'], queryFn: () => get<{ items: Invitation[] }>('/invitations'),
+    refetchInterval: (query) => (query.state.data?.items.some((i) => i.email_status === 'queued') ? 2000 : false) }) // pantau email yang masih antre
   const refresh = () => qc.invalidateQueries({ queryKey: ['invitations'] })
-  const create = useMutation({ mutationFn: () => post<Invitation>('/invitations', { email: f.email, role: f.role, ttl_hours: f.ttl }), onSuccess: (v) => { setMade(v); setF({ ...f, email: '' }); refresh() } })
+  const create = useMutation({ mutationFn: () => post<Invitation>('/invitations', { email: f.email, role: f.role, ttl_hours: f.ttl, send_email: f.mail && mailOk }), onSuccess: (v) => { setMade(v); setF({ ...f, email: '' }); refresh() } })
+  const resend = useMutation({ mutationFn: (i: Invitation) => post<Invitation>('/invitations', { email: i.email, role: i.role, send_email: true }), onSuccess: (v) => { setMade(v); toast('Undangan baru dibuat dan dikirim ulang; tautan lama tidak berlaku'); refresh() }, onError: (e) => toast(errMsg(e), true) })
   const revoke = useMutation({ mutationFn: (id: string) => del(`/invitations/${id}`), onSuccess: refresh, onError: (e) => toast(errMsg(e), true) })
   return (
     <section className="card stack" aria-label="Undang pengguna">
@@ -181,16 +185,44 @@ function Invitations() {
         <Field label="Peran"><select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Role })}><option>admin</option><option>operator</option><option>viewer</option></select></Field>
         <Field label="Berlaku"><select value={f.ttl} onChange={(e) => setF({ ...f, ttl: Number(e.target.value) })}><option value={24}>1 hari</option><option value={168}>7 hari</option><option value={720}>30 hari</option></select></Field>
       </div>
+      <label className="row"><input type="checkbox" checked={f.mail && mailOk} disabled={!mailOk} onChange={(e) => setF({ ...f, mail: e.target.checked })} /> Kirim tautan ke email penerima{!mailOk && <span className="muted"> (SMTP belum dikonfigurasi di server — bagikan tautan secara manual)</span>}</label>
       <ErrorBox error={create.error} />
       <div><button className="primary" disabled={!f.email || create.isPending} onClick={() => create.mutate()}>Buat undangan</button></div>
       {made?.invite_url && <div className="okbox" role="status">Tautan undangan untuk {made.email} — salin sekarang, tidak akan ditampilkan lagi:<br /><span className="mono" data-testid="invite-url">{made.invite_url}</span> <button className="small" onClick={() => navigator.clipboard?.writeText(made.invite_url!)}>Salin</button></div>}
       {q.data && q.data.items.length > 0 && (
-        <div className="scroll-x"><table><thead><tr><th>Email</th><th>Peran</th><th>Status</th><th>Berlaku sampai</th><th /></tr></thead><tbody>
+        <div className="scroll-x"><table><thead><tr><th>Email</th><th>Peran</th><th>Status</th><th>Email</th><th>Berlaku sampai</th><th /></tr></thead><tbody>
           {q.data.items.map((i) => (
-            <tr key={i.id}><td>{i.email}</td><td>{i.role}</td><td>{{ pending: 'menunggu', accepted: 'diterima', expired: 'kedaluwarsa', revoked: 'dicabut' }[i.status]}</td><td className="muted">{fmtTime(i.expires_at)}</td>
-              <td className="right">{(i.status === 'pending' || i.status === 'expired') && <button className="small danger" onClick={() => revoke.mutate(i.id)}>Cabut</button>}</td></tr>))}
+            <tr key={i.id}><td>{i.email}</td><td>{i.role}</td><td>{{ pending: 'menunggu', accepted: 'diterima', expired: 'kedaluwarsa', revoked: 'dicabut' }[i.status]}</td><td title={i.email_error ?? undefined}>{i.email_status ? { queued: 'antre', sent: 'terkirim', failed: 'gagal', cancelled: 'dibatalkan' }[i.email_status] : '—'}</td><td className="muted">{fmtTime(i.expires_at)}</td>
+              <td className="right"><span className="row">{mailOk && (i.status === 'pending' || i.status === 'expired') && <button className="small" disabled={resend.isPending} onClick={() => window.confirm(`Buat undangan baru untuk ${i.email} dan kirim ulang? Tautan lama tidak berlaku lagi.`) && resend.mutate(i)}>Kirim ulang</button>}{(i.status === 'pending' || i.status === 'expired') && <button className="small danger" onClick={() => revoke.mutate(i.id)}>Cabut</button>}</span></td></tr>))}
         </tbody></table></div>)}
     </section>
+  )
+}
+
+function EmailSettings() {
+  const toast = useToast()
+  const q = useQuery({ queryKey: ['email-config'], queryFn: () => get<EmailConfig>('/settings/email') })
+  const [to, setTo] = useState('')
+  const test = useMutation({ mutationFn: () => post('/settings/email/test', { to }), onSuccess: () => toast('Email uji terkirim — periksa kotak masuk') })
+  if (q.isLoading) return <Loading what="pengaturan email" />
+  if (!q.data) return <ErrorBox error={q.error} />
+  const c = q.data
+  return (
+    <div className="card stack" aria-label="Pengaturan email">
+      <h2>Email (SMTP)</h2>
+      {!c.configured ? (
+        <p className="muted">SMTP belum dikonfigurasi. Atur <span className="mono">SMTP_HOST</span>, <span className="mono">SMTP_FROM</span> (dan <span className="mono">SMTP_USERNAME</span>/<span className="mono">SMTP_PASSWORD</span>) di server lalu restart. Sampai itu, tautan undangan dibagikan manual.</p>
+      ) : (
+        <>
+          <dl><dt>Server</dt><dd className="mono">{c.host}:{c.port}</dd><dt>Enkripsi</dt><dd>{c.mode === 'none' ? 'TIDAK ADA (hanya untuk relay lokal tepercaya)' : c.mode === 'tls' ? 'TLS implisit' : 'STARTTLS'}</dd>
+            <dt>Pengirim</dt><dd>{c.from}</dd><dt>Autentikasi</dt><dd>{c.auth_enabled ? 'ya' : 'tidak'}</dd></dl>
+          <Field label="Kirim email uji ke"><input type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder="anda@contoh.id" /></Field>
+          <ErrorBox error={test.error} />
+          <div><button className="primary" disabled={!to || test.isPending} onClick={() => test.mutate()}>{test.isPending ? 'Mengirim…' : 'Kirim email uji'}</button></div>
+        </>
+      )}
+      <p className="muted">Pengaturan SMTP berasal dari environment server dan tidak dapat diubah dari sini (kredensial tidak pernah ditampilkan).</p>
+    </div>
   )
 }
 

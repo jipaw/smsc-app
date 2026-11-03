@@ -88,3 +88,11 @@ groups:
         for: 1h
         labels: {severity: info}
         annotations: {summary: "Job retensi tidak berjalan > 26 jam (data pribadi tidak dibersihkan)"}
+      - alert: SmscEmailFailing
+        expr: increase(smsc_email_total{result="failed"}[1h]) > 0
+        labels: {severity: warning}
+        annotations: {summary: "Pengiriman email (undangan) gagal final — periksa Pengaturan > Email dan log SMTP"}
+      - alert: SmscEmailBacklog
+        expr: smsc_email_oldest_pending_age_seconds > 900
+        labels: {severity: warning}
+        annotations: {summary: "Email tertunda > 15 menit di outbox (SMTP bermasalah?)"}
