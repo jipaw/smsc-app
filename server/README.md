@@ -3,7 +3,7 @@
 Go 1.24 + PostgreSQL 16. Satu biner: REST API, WebSocket device, SSE, dispatcher, reaper, dan dashboard (embed).
 Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 
-## Status (fase 1–6)
+## Status (fase 1–7)
 
 | Sudah | Belum (fase 4) |
 |---|---|
@@ -16,6 +16,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | Mesin status satu pintu, retry + backoff, cancel/retry manual, transaksi + timeline, ekspor CSV aman | |
 | Policy berlapis (global/device/SIM/pesan) + CRUD + tampilan efektif, SSE dengan replay, statistik, audit log | |
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
+| **Fase 7**: kebijakan password (daftar umum + pola + kemiripan email) di semua pintu masuk; retensi undangan | |
 | **Fase 6**: undangan pengguna (`/invitations`, tautan sekali pakai) dan `DELETE /users/{id}` (harus dinonaktifkan dahulu) | |
 | **Fase 5**: kewajiban 2FA (`off`/`admin`/`all`, default `off`) dengan gerbang 403 `auth.mfa_setup_required`; manajemen pengguna (`PATCH /users/{id}`, `POST /users/{id}/password`) | |
 | **Fase 4**: 2FA TOTP (+ kode pemulihan, login dua tahap), ganti password, rotasi kredensial device / API key / secret webhook / `SESSION_SECRET` / kunci enkripsi | |
@@ -59,6 +60,10 @@ smscd secrets reencrypt                               # setelah mengganti WEBHOO
 ```
 
 Endpoint: `POST /auth/login` → (2FA aktif) `{mfa_required, mfa_token}` → `POST /auth/login/verify`; `/auth/2fa`, `/auth/2fa/{setup,enable,disable,recovery-codes}`, `/auth/password`, `/users/{id}/2fa` (admin), `/api-keys/{id}/rotate`, `/webhooks/{id}/rotate-secret`, perintah device `rotate_credential`. Runbook: `docs/spec/10` R-06.
+
+## Kebijakan password dan retensi undangan (fase 7)
+
+`internal/pwpolicy` (daftar umum di-embed, `go:embed`) dipanggil oleh service untuk: `POST /users`, `POST /auth/password`, `POST /users/{id}/password`, `POST /invitations/accept`, serta CLI `admin create|reset-password` (password acak CLI dicek dan diulang bila perlu). Tanpa env/konfigurasi. Retensi: `PUT /settings/retention` menerima `invitation_retention_days` (opsional, default 90).
 
 ## Undangan dan hapus pengguna (fase 6)
 

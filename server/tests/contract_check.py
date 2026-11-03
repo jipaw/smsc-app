@@ -149,7 +149,7 @@ def main():
     psql(f"CREATE DATABASE {DB}")
     env = dict(os.environ, DATABASE_URL=DSN, PUBLIC_BASE_URL="http://example.test", SESSION_SECRET="s" * 40,
                HTTP_ADDR=f"127.0.0.1:{PORT}", AUTO_MIGRATE="true", SECURE_COOKIES="false", REQUIRE_VPN="false", LOGIN_BURST="60", LOGIN_RATE_PER_MIN="600")
-    admin_pw = "kontrak-admin-12345"
+    admin_pw = "kontrak-pagar-biru-12"
     subprocess.run([BIN, "migrate"], env=env, check=True, capture_output=True)
     subprocess.run([BIN, "admin", "create", "--email", "admin@ct.test", "--password", admin_pw], env=env, check=True, capture_output=True)
     srv = subprocess.Popen([BIN, "serve"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -338,7 +338,7 @@ def run_checks(pw):
     call("GET", "/api/v1/settings/security", expect=200)
     call("PUT", "/api/v1/settings/security", {"require_2fa": "bukan"}, 422)
     call("PUT", "/api/v1/settings/security", {"require_2fa": "admin"}, 409)  # admin kontrak belum memakai 2FA
-    st, nu = call("POST", "/api/v1/users", {"email": "mgmt@ct.test", "role": "viewer", "password": "mgmt-pass-123456"}, 201)
+    st, nu = call("POST", "/api/v1/users", {"email": "mgmt@ct.test", "role": "viewer", "password": "kuda-melompat-pagar-77"}, 201)
     call("PATCH", f"/api/v1/users/{nu['id']}", {"role": "operator"}, 200)
     call("PATCH", f"/api/v1/users/{nu['id']}", {"disabled": True}, 200)
     call("PATCH", f"/api/v1/users/{nu['id']}", {}, 422)
@@ -360,8 +360,8 @@ def run_checks(pw):
     anon("POST", "/api/v1/invitations/lookup", {"token": inv["token"]}, 200)
     anon("POST", "/api/v1/invitations/lookup", {"token": "inv_salah"}, 404)
     anon("POST", "/api/v1/invitations/accept", {"token": inv["token"], "password": "pendek"}, 422)
-    anon("POST", "/api/v1/invitations/accept", {"token": inv["token"], "password": "tamu-password-1234"}, 201)
-    anon("POST", "/api/v1/invitations/accept", {"token": inv["token"], "password": "tamu-password-1234"}, 404)
+    anon("POST", "/api/v1/invitations/accept", {"token": inv["token"], "password": "pagar-biru-melompat-12"}, 201)
+    anon("POST", "/api/v1/invitations/accept", {"token": inv["token"], "password": "pagar-biru-melompat-12"}, 404)
     call("DELETE", f"/api/v1/invitations/{inv['id']}", expect=409)
     st, inv2 = call("POST", "/api/v1/invitations", {"email": "batal@ct.test", "role": "viewer"}, 201)
     call("DELETE", f"/api/v1/invitations/{inv2['id']}", expect=204)
@@ -369,8 +369,18 @@ def run_checks(pw):
     call("DELETE", f"/api/v1/users/{nu['id']}", expect=204)  # sudah dinonaktifkan di atas
     call("DELETE", f"/api/v1/users/{nu['id']}", expect=404)
     call("DELETE", f"/api/v1/users/{me['id']}", expect=409)
-    st, nu2 = call("POST", "/api/v1/users", {"email": "aktif@ct.test", "role": "viewer", "password": "aktif-password-1234"}, 201)
+    st, nu2 = call("POST", "/api/v1/users", {"email": "aktif@ct.test", "role": "viewer", "password": "bola-merah-menggelinding-5"}, 201)
     call("DELETE", f"/api/v1/users/{nu2['id']}", expect=409)  # belum dinonaktifkan
+
+    # kebijakan password + retensi undangan (fase 7)
+    call("POST", "/api/v1/users", {"email": "lemah@ct.test", "role": "viewer", "password": "Password123!!"}, 422)
+    call("POST", "/api/v1/users", {"email": "lemah@ct.test", "role": "viewer", "password": "lemah-kuda-biru-pagar-9"}, 422)  # memuat nama akun
+    call("PUT", "/api/v1/settings/retention", {"body_retention_days": 90, "event_retention_days": 180, "invitation_retention_days": 30}, 200)
+    call("PUT", "/api/v1/settings/retention", {"body_retention_days": 90, "event_retention_days": 180, "invitation_retention_days": 0}, 422)
+    call("PUT", "/api/v1/settings/retention", {"body_retention_days": 90, "event_retention_days": 180}, 200)
+    st, rs = call("GET", "/api/v1/settings/retention", expect=200)
+    if rs and rs.get("invitation_retention_days") != 30:
+        problems.append("invitation_retention_days harus dipertahankan saat PUT tanpa field itu")
 
     # revoke di akhir
     call("DELETE", f"/api/v1/devices/{dev}", expect=204)

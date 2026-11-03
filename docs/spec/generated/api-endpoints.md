@@ -117,7 +117,7 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `POST` | `/api-keys/{apiKeyId}/rotate` | Putar secret API key | apiKey/sessionCookie | 200,404,422 |
 | `DELETE` | `/api-keys/{apiKeyId}` | Cabut | apiKey/sessionCookie | 204 |
 | `GET` | `/users` | Daftar pengguna dashboard (admin) | apiKey/sessionCookie | 200 |
-| `POST` | `/users` | Buat pengguna | apiKey/sessionCookie | 201 |
+| `POST` | `/users` | Buat pengguna | apiKey/sessionCookie | 201,409,422 |
 | `DELETE` | `/users/{userId}` | Hapus pengguna (harus sudah dinonaktifkan) | apiKey/sessionCookie | 204,404,409 |
 | `PATCH` | `/users/{userId}` | Ubah peran / nonaktifkan pengguna lain | apiKey/sessionCookie | 200,404,409,422 |
 | `POST` | `/users/{userId}/password` | Admin menetapkan password baru untuk pengguna lain | apiKey/sessionCookie | 204,404,409,422 |

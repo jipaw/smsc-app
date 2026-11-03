@@ -24,6 +24,7 @@ import (
 	"github.com/jipaw/smsc-app/server/internal/core"
 	"github.com/jipaw/smsc-app/server/internal/db"
 	"github.com/jipaw/smsc-app/server/internal/hub"
+	"github.com/jipaw/smsc-app/server/internal/pwpolicy"
 )
 
 func main() {
@@ -167,9 +168,7 @@ func adminCmd(ctx context.Context, args []string, cfg config.Config, pool *pgxpo
 		_ = fs.Parse(args[1:])
 		generated := false
 		if *pw == "" {
-			raw := make([]byte, 15)
-			_, _ = rand.Read(raw)
-			*pw, generated = base64.RawURLEncoding.EncodeToString(raw), true
+			*pw, generated = randomPassword(), true
 		}
 		id, err := svc.SetPasswordByEmail(ctx, *email, *pw)
 		if err != nil {
@@ -193,9 +192,7 @@ func adminCmd(ctx context.Context, args []string, cfg config.Config, pool *pgxpo
 	_ = fs.Parse(args[1:])
 	generated := false
 	if *pw == "" {
-		raw := make([]byte, 15)
-		_, _ = rand.Read(raw)
-		*pw, generated = base64.RawURLEncoding.EncodeToString(raw), true
+		*pw, generated = randomPassword(), true
 	}
 	u, err := svc.CreateUser(ctx, *email, *pw, *role)
 	if err != nil {
@@ -205,6 +202,17 @@ func adminCmd(ctx context.Context, args []string, cfg config.Config, pool *pgxpo
 	fmt.Printf("pengguna dibuat: %s (%s)\n", u.Email, u.Role)
 	if generated {
 		fmt.Printf("password (tampil sekali): %s\n", *pw)
+	}
+}
+
+// randomPassword: 20 karakter acak; diulang bila kebetulan melanggar kebijakan (sangat jarang).
+func randomPassword() string {
+	for {
+		raw := make([]byte, 15)
+		_, _ = rand.Read(raw)
+		if p := base64.RawURLEncoding.EncodeToString(raw); len(pwpolicy.Check(p)) == 0 {
+			return p
+		}
 	}
 }
 

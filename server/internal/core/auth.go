@@ -68,8 +68,8 @@ func (s *Service) CreateUser(ctx context.Context, email, password, role string) 
 	if role != "admin" && role != "operator" && role != "viewer" {
 		return User{}, Validation(FieldError{"role", "harus admin, operator, atau viewer"})
 	}
-	if len(password) < 12 {
-		return User{}, Validation(FieldError{"password", "minimal 12 karakter"})
+	if err := checkPassword("password", password, email); err != nil {
+		return User{}, err
 	}
 	u := User{ID: newID(), Email: email, Role: role}
 	_, err := s.Pool.Exec(ctx, `INSERT INTO users(id,email,password_hash,role) VALUES ($1,$2,$3,$4)`, u.ID, email, HashPassword(password), role)

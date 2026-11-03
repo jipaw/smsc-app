@@ -1351,8 +1351,9 @@ func (a *API) getRetention(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) putRetention(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Body   *int `json:"body_retention_days"`
-		Events *int `json:"event_retention_days"`
+		Body    *int `json:"body_retention_days"`
+		Events  *int `json:"event_retention_days"`
+		Invites *int `json:"invitation_retention_days"`
 	}
 	if !a.decode(w, r, &in) {
 		return
@@ -1361,7 +1362,7 @@ func (a *API) putRetention(w http.ResponseWriter, r *http.Request) {
 		a.writeProblem(w, r, core.Validation(core.FieldError{Field: "body_retention_days", Message: "kedua nilai wajib diisi"}))
 		return
 	}
-	rs, err := a.Svc.SetRetention(r.Context(), *in.Body, *in.Events, actorOf(principalOf(r.Context())))
+	rs, err := a.Svc.SetRetention(r.Context(), *in.Body, *in.Events, in.Invites, actorOf(principalOf(r.Context())))
 	if err != nil {
 		a.fail(w, r, err)
 		return

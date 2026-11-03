@@ -147,8 +147,12 @@ func (s *Service) AdminSetPassword(ctx context.Context, actor, id uuid.UUID, pas
 	if id == actor {
 		return NewProblem(http.StatusConflict, "user.self_change", "Gunakan Ganti password", "ganti password sendiri lewat /auth/password")
 	}
-	if len(password) < 12 {
-		return Validation(FieldError{"new_password", "minimal 12 karakter"})
+	var email string
+	if err := s.Pool.QueryRow(ctx, `SELECT email FROM users WHERE id=$1`, id).Scan(&email); err != nil {
+		return NotFound("pengguna")
+	}
+	if err := checkPassword("new_password", password, email); err != nil {
+		return err
 	}
 	ct, err := s.Pool.Exec(ctx, `UPDATE users SET password_hash=$2, password_changed_at=now(), failed_logins=0, locked_until=NULL WHERE id=$1`, id, HashPassword(password))
 	if err != nil {

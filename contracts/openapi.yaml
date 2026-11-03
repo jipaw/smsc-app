@@ -100,7 +100,7 @@ paths:
     post:
       tags: [Auth]
       summary: Ganti password sendiri
-      description: Hanya sesi dashboard. Semua sesi lain milik pengguna dicabut; sesi saat ini tetap.
+      description: Hanya sesi dashboard. Semua sesi lain milik pengguna dicabut; sesi saat ini tetap. **Kebijakan password baru** — 12–256 karakter, bukan password umum (daftar ±47 rb entri + variasi sepele seperti `Password123!` / `p@ssw0rd`), bukan pola monoton/berurutan/jalur keyboard/blok berulang, dan tidak memuat nama akun (bagian email sebelum `@`, ≥ 4 huruf). Pelanggaran → 422 dengan pesan berawalan `terlalu lemah`. Password lama tidak dicabut.
       requestBody:
         required: true
         content:
@@ -1144,6 +1144,8 @@ paths:
     post:
       tags: [Admin]
       summary: Buat pengguna
+      description: |
+       **Kebijakan password baru** — 12–256 karakter, bukan password umum (daftar ±47 rb entri + variasi sepele seperti `Password123!` / `p@ssw0rd`), bukan pola monoton/berurutan/jalur keyboard/blok berulang, dan tidak memuat nama akun (bagian email sebelum `@`, ≥ 4 huruf). Pelanggaran → 422 dengan pesan berawalan `terlalu lemah`. Password lama tidak dicabut.
       requestBody:
         required: true
         content:
@@ -1157,6 +1159,8 @@ paths:
                 password: {type: string, format: password}
       responses:
         '201': {description: Dibuat}
+        '409': {description: 'Email sudah terdaftar', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {description: 'Validasi, termasuk kebijakan password', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
   /users/{userId}:
     delete:
       tags: [Admin]
@@ -1202,7 +1206,7 @@ paths:
     post:
       tags: [Admin]
       summary: Admin menetapkan password baru untuk pengguna lain
-      description: Semua sesi pengguna itu dicabut dan kunci akunnya direset. Untuk akun sendiri gunakan `/auth/password`. Password tidak dicatat di audit.
+      description: Semua sesi pengguna itu dicabut dan kunci akunnya direset. Untuk akun sendiri gunakan `/auth/password`. Password tidak dicatat di audit. **Kebijakan password baru** — 12–256 karakter, bukan password umum (daftar ±47 rb entri + variasi sepele seperti `Password123!` / `p@ssw0rd`), bukan pola monoton/berurutan/jalur keyboard/blok berulang, dan tidak memuat nama akun (bagian email sebelum `@`, ≥ 4 huruf). Pelanggaran → 422 dengan pesan berawalan `terlalu lemah`. Password lama tidak dicabut.
       parameters:
         - {name: userId, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -1567,6 +1571,7 @@ paths:
         `body_retention_days`: isi pesan (dan variabel/nomor mentah/client_ref penerima campaign yang sudah selesai) dibersihkan setelah N hari sejak pesan selesai;
         `0` = segera setelah selesai. Metadata (nomor E.164, status, waktu) dipertahankan. Pesan yang isinya sudah dibersihkan tidak dapat di-retry.
         `event_retention_days`: timeline event dihapus setelah N hari. Audit log tidak pernah dihapus otomatis.
+        `invitation_retention_days` (opsional; bila tidak dikirim nilai saat ini dipertahankan; default 90): undangan yang sudah diterima/dicabut/kedaluwarsa dihapus setelah N hari sejak peristiwa itu. Undangan yang masih tertunda tidak pernah dihapus.
       requestBody:
         required: true
         content:
@@ -1577,6 +1582,7 @@ paths:
               properties:
                 body_retention_days: {type: integer, minimum: 0, maximum: 3650}
                 event_retention_days: {type: integer, minimum: 1, maximum: 3650}
+                invitation_retention_days: {type: integer, minimum: 1, maximum: 3650}
       responses:
         '200':
           description: OK
@@ -2293,7 +2299,7 @@ components:
           additionalProperties: true
     RetentionRun:
       type: object
-      required: [at, bodies_purged, events_deleted, recipients_scrubbed, sessions_deleted, enrollments_deleted, deliveries_deleted]
+      required: [at, bodies_purged, events_deleted, recipients_scrubbed, sessions_deleted, enrollments_deleted, deliveries_deleted, invitations_deleted]
       properties:
         at: {type: string, format: date-time}
         bodies_purged: {type: integer}
@@ -2302,12 +2308,14 @@ components:
         sessions_deleted: {type: integer}
         enrollments_deleted: {type: integer}
         deliveries_deleted: {type: integer}
+        invitations_deleted: {type: integer}
     RetentionSettings:
       type: object
-      required: [body_retention_days, event_retention_days, last_run]
+      required: [body_retention_days, event_retention_days, invitation_retention_days, last_run]
       properties:
         body_retention_days: {type: integer, minimum: 0, maximum: 3650}
         event_retention_days: {type: integer, minimum: 1, maximum: 3650}
+        invitation_retention_days: {type: integer, minimum: 1, maximum: 3650}
         last_run: {oneOf: [{$ref: '#/components/schemas/RetentionRun'}, {type: 'null'}]}
 
     AuditLog:

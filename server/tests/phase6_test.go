@@ -121,7 +121,7 @@ func TestInvitationAcceptFlow(t *testing.T) {
 	if _, err := e.svc.CreateUser(context.Background(), "tamu@example.com", "password-panjang-123", "viewer"); err != nil {
 		t.Fatal(err)
 	}
-	if st := anon.do("POST", "/api/v1/invitations/accept", map[string]string{"token": v.Token, "password": "password-tamu-1234"}, nil); st != 409 {
+	if st := anon.do("POST", "/api/v1/invitations/accept", map[string]string{"token": v.Token, "password": "pagar-biru-melompat-12"}, nil); st != 409 {
 		t.Fatalf("konflik email: %d", st)
 	}
 	if adm.c.invStatus(v.ID) != "pending" {
@@ -130,10 +130,10 @@ func TestInvitationAcceptFlow(t *testing.T) {
 	e.sql(`DELETE FROM users WHERE email='tamu@example.com'`)
 
 	var out struct{ ID, Email, Role string }
-	if st := anon.do("POST", "/api/v1/invitations/accept", map[string]string{"token": v.Token, "password": "password-tamu-1234"}, &out); st != 201 || out.Role != "operator" {
+	if st := anon.do("POST", "/api/v1/invitations/accept", map[string]string{"token": v.Token, "password": "pagar-biru-melompat-12"}, &out); st != 201 || out.Role != "operator" {
 		t.Fatalf("accept: %d %+v", st, out)
 	}
-	if st := anon.do("POST", "/api/v1/invitations/accept", map[string]string{"token": v.Token, "password": "password-tamu-1234"}, nil); st != 404 {
+	if st := anon.do("POST", "/api/v1/invitations/accept", map[string]string{"token": v.Token, "password": "pagar-biru-melompat-12"}, nil); st != 404 {
 		t.Fatalf("undangan sekali pakai: %d", st)
 	}
 	if st := anon.do("POST", "/api/v1/invitations/lookup", map[string]string{"token": v.Token}, nil); st != 404 {
@@ -142,7 +142,7 @@ func TestInvitationAcceptFlow(t *testing.T) {
 	if adm.c.invStatus(v.ID) != "accepted" {
 		t.Fatal("status harus accepted")
 	}
-	guest := e.loginEmail("tamu@example.com", "password-tamu-1234") // password pilihan penerima
+	guest := e.loginEmail("tamu@example.com", "pagar-biru-melompat-12") // password pilihan penerima
 	if st := guest.do("POST", "/api/v1/templates", map[string]any{"name": "t1", "body": "x"}, nil); st != 201 {
 		t.Fatalf("peran operator berlaku: %d", st)
 	}

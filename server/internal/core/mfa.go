@@ -320,8 +320,10 @@ func (s *Service) ChangePassword(ctx context.Context, uid uuid.UUID, currentToke
 	if err := s.verifyPassword(ctx, uid, current); err != nil {
 		return err
 	}
-	if len(next) < 12 {
-		return Validation(FieldError{"new_password", "minimal 12 karakter"})
+	var email string
+	_ = s.Pool.QueryRow(ctx, `SELECT email FROM users WHERE id=$1`, uid).Scan(&email)
+	if err := checkPassword("new_password", next, email); err != nil {
+		return err
 	}
 	if next == current {
 		return Validation(FieldError{"new_password", "harus berbeda dari password saat ini"})
@@ -335,8 +337,8 @@ func (s *Service) ChangePassword(ctx context.Context, uid uuid.UUID, currentToke
 
 // SetPasswordByEmail: untuk CLI (lupa password). Semua sesi pengguna dicabut.
 func (s *Service) SetPasswordByEmail(ctx context.Context, email, password string) (uuid.UUID, error) {
-	if len(password) < 12 {
-		return uuid.Nil, Validation(FieldError{"password", "minimal 12 karakter"})
+	if err := checkPassword("password", password, email); err != nil {
+		return uuid.Nil, err
 	}
 	var id uuid.UUID
 	err := s.Pool.QueryRow(ctx, `UPDATE users SET password_hash=$2, password_changed_at=now(), failed_logins=0, locked_until=NULL WHERE lower(email)=lower($1) RETURNING id`,

@@ -74,6 +74,8 @@ Prioritas: **M** = MVP (fase 1), **S** = fase 2, **C** = fase 3. Kriteria peneri
 | FR-26 | Manajemen pengguna: ubah peran, nonaktifkan, admin menetapkan password | C | KP1 peran berlaku seketika · KP2 nonaktif mencabut sesi & menolak login · KP3 tidak bisa mengubah diri sendiri · KP4 semuanya diaudit |
 | FR-27 | Undangan pengguna: tautan sekali pakai, penerima menetapkan password sendiri | C | KP1 token tampil sekali, hanya hash disimpan · KP2 sekali pakai (aman terhadap penerimaan paralel) · KP3 kedaluwarsa/dicabut/digantikan → ditolak seragam · KP4 password pendek/email bentrok tidak menghabiskan undangan |
 | FR-28 | Hapus pengguna (harus dinonaktifkan dahulu) | C | KP1 sesi hilang, objek buatannya tetap ada · KP2 audit tetap memuat email pelaku · KP3 akun sendiri ditolak |
+| FR-30 | Pembersihan undangan lama (retensi dapat diatur) | C | KP1 hanya undangan selesai (diterima/dicabut/kedaluwarsa) yang lewat masa simpan · KP2 undangan tertunda & pengguna hasilnya tidak tersentuh · KP3 idempoten |
+| FR-29 | Kebijakan password baru (daftar password umum, pola, kemiripan email) | C | KP1 berlaku di semua pintu masuk · KP2 tidak retroaktif · KP3 penolakan menyebut alasan · KP4 undangan tidak hangus bila password ditolak |
 
 ## 4. Kebutuhan non-fungsional
 

@@ -306,9 +306,10 @@ function Retention() {
   const q = useQuery({ queryKey: ['retention'], queryFn: () => get<RetentionSettings>('/settings/retention') })
   const [body, setBody] = useState('')
   const [ev, setEv] = useState('')
+  const [inv, setInv] = useState('')
   const save = useMutation({
-    mutationFn: () => put<RetentionSettings>('/settings/retention', { body_retention_days: Number(body !== '' ? body : q.data?.body_retention_days), event_retention_days: Number(ev !== '' ? ev : q.data?.event_retention_days) }),
-    onSuccess: () => { toast('Retensi disimpan'); setBody(''); setEv(''); qc.invalidateQueries({ queryKey: ['retention'] }) },
+    mutationFn: () => put<RetentionSettings>('/settings/retention', { body_retention_days: Number(body !== '' ? body : q.data?.body_retention_days), event_retention_days: Number(ev !== '' ? ev : q.data?.event_retention_days), invitation_retention_days: Number(inv !== '' ? inv : q.data?.invitation_retention_days) }),
+    onSuccess: () => { toast('Retensi disimpan'); setBody(''); setEv(''); setInv(''); qc.invalidateQueries({ queryKey: ['retention'] }) },
   })
   if (q.isLoading) return <Loading what="pengaturan retensi" />
   if (!q.data) return <ErrorBox error={q.error} />
@@ -320,6 +321,7 @@ function Retention() {
         <div className="grid cols-4">
           <Field label="Simpan isi pesan (hari)" hint="0–3650"><input type="number" min={0} max={3650} value={body !== '' ? body : q.data.body_retention_days} onChange={(e) => setBody(e.target.value)} /></Field>
           <Field label="Simpan riwayat event (hari)" hint="1–3650"><input type="number" min={1} max={3650} value={ev !== '' ? ev : q.data.event_retention_days} onChange={(e) => setEv(e.target.value)} /></Field>
+          <Field label="Simpan undangan selesai (hari)" hint="1–3650; yang masih tertunda tak dihapus"><input type="number" min={1} max={3650} value={inv !== '' ? inv : q.data.invitation_retention_days} onChange={(e) => setInv(e.target.value)} /></Field>
         </div>
         <ErrorBox error={save.error} />
         <div><button className="primary" disabled={save.isPending} onClick={() => save.mutate()}>Simpan</button></div>
@@ -330,7 +332,7 @@ function Retention() {
           <dl><dt>Waktu</dt><dd>{fmtTime(r.at)}</dd>
             <dt>Isi pesan dibersihkan</dt><dd>{r.bodies_purged}</dd><dt>Event dihapus</dt><dd>{r.events_deleted}</dd>
             <dt>Penerima campaign dianonimkan</dt><dd>{r.recipients_scrubbed}</dd><dt>Sesi dihapus</dt><dd>{r.sessions_deleted}</dd>
-            <dt>Enrollment dihapus</dt><dd>{r.enrollments_deleted}</dd><dt>Riwayat webhook dihapus</dt><dd>{r.deliveries_deleted}</dd></dl>)}
+            <dt>Enrollment dihapus</dt><dd>{r.enrollments_deleted}</dd><dt>Riwayat webhook dihapus</dt><dd>{r.deliveries_deleted}</dd><dt>Undangan lama dihapus</dt><dd>{r.invitations_deleted}</dd></dl>)}
       </div>
     </div>
   )

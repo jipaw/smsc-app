@@ -60,7 +60,7 @@ func New(pool *pgxpool.Pool, cfg config.Config, log *slog.Logger, b *bus.Bus) *S
 	for _, r := range []string{"delivered", "retry", "failed"} {
 		m.WebhookDeliveries.WithLabelValues(r).Add(0)
 	}
-	for _, k := range []string{"message_bodies", "recipients", "message_events", "sessions", "enrollments", "webhook_deliveries"} {
+	for _, k := range []string{"message_bodies", "recipients", "message_events", "sessions", "enrollments", "webhook_deliveries", "invitations"} {
 		m.RetentionRows.WithLabelValues(k).Add(0)
 	}
 	for _, st := range []string{"sending", "part_sent", "sent", "part_delivered", "delivered", "failed"} {

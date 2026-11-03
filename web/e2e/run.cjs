@@ -17,7 +17,7 @@ const MPORT = PORT + 1000, HPORT = PORT + 2000
 const http = require('http')
 const OUT = path.join(__dirname, 'out')
 const AXE = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8')
-const ADMIN = 'admin@e2e.test', PW = 'e2e-admin-password-1'
+const ADMIN = 'admin@e2e.test', PW = 'e2e-pagar-biru-melompat-1'
 const results = []
 const procs = []
 
@@ -65,7 +65,7 @@ async function main() {
   const put = await api('PUT', `/api/v1/dispatch-policies/${def.id}`, { ...def, min_delay_ms: 500, max_delay_ms: 500,
     send_window: { timezone: 'UTC', windows: [{ days: [1, 2, 3, 4, 5, 6, 7], start: '00:00', end: '00:00' }] } }, cookie, csrf)
   check(put.status === 200, 'setup policy default via API', JSON.stringify(put.json))
-  await api('POST', '/api/v1/users', { email: 'viewer@e2e.test', role: 'viewer', password: 'viewer-password-12' }, cookie, csrf)
+  await api('POST', '/api/v1/users', { email: 'viewer@e2e.test', role: 'viewer', password: 'pagar-biru-pembaca-12' }, cookie, csrf)
 
   const browser = await chromium.launch()
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
@@ -363,7 +363,7 @@ async function main() {
   const vctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   const vp = await vctx.newPage()
   await vp.goto(URL_ + '/')
-  await vp.getByLabel('Email').fill('viewer@e2e.test'); await vp.getByLabel('Password').fill('viewer-password-12')
+  await vp.getByLabel('Email').fill('viewer@e2e.test'); await vp.getByLabel('Password').fill('pagar-biru-pembaca-12')
   await vp.getByRole('button', { name: 'Masuk' }).click()
   await vp.getByRole('heading', { name: 'Overview' }).waitFor()
   check((await vp.getByRole('button', { name: /Pause semua/ }).count()) === 0, 'viewer tidak melihat tombol kill switch')
@@ -444,6 +444,11 @@ async function main() {
   check(true, '2FA: dinonaktifkan dengan password + kode pemulihan')
   // ganti password (sesi saat ini tetap, sesi lain keluar)
   await page.getByLabel('Password saat ini').fill(PW)
+  await page.getByLabel(/^Password baru/).fill('Password123!!')
+  await page.getByLabel('Ulangi password baru').fill('Password123!!')
+  await page.getByRole('button', { name: 'Ganti password' }).click()
+  await page.getByRole('alert').filter({ hasText: /terlalu lemah/ }).waitFor()
+  check(true, 'password: password umum ditolak dengan alasan (kebijakan password)')
   await page.getByLabel(/^Password baru/).fill('e2e-password-baru-99')
   await page.getByLabel('Ulangi password baru').fill('beda-sekali-1234')
   check(await page.getByRole('button', { name: 'Ganti password' }).isDisabled(), 'password: konfirmasi yang tidak sama menonaktifkan tombol')
@@ -458,7 +463,7 @@ async function main() {
   const NPW = 'e2e-password-baru-99'
   const l2 = await api('POST', '/api/v1/auth/login', { email: ADMIN, password: NPW })
   const ck2 = l2.cookie.split(';')[0], cs2 = l2.json.csrf_token
-  await api('POST', '/api/v1/users', { email: 'staf@e2e.test', role: 'operator', password: 'staf-password-1234' }, ck2, cs2)
+  await api('POST', '/api/v1/users', { email: 'staf@e2e.test', role: 'operator', password: 'kuda-melompat-pagar-77' }, ck2, cs2)
   await page.goto(URL_ + '/settings')
   await page.getByRole('tab', { name: 'Pengguna' }).click()
   const row = page.getByRole('row').filter({ hasText: 'staf@e2e.test' })
@@ -469,17 +474,17 @@ async function main() {
   check((await page.getByRole('row').filter({ hasText: 'admin@e2e.test' }).getByRole('button', { name: 'Nonaktifkan' }).count()) === 0, 'pengguna: tidak ada tombol nonaktifkan untuk akun sendiri')
   await row.getByRole('button', { name: 'Nonaktifkan' }).click()
   await row.getByText('nonaktif').waitFor()
-  const dis = await api('POST', '/api/v1/auth/login', { email: 'staf@e2e.test', password: 'staf-password-1234' })
+  const dis = await api('POST', '/api/v1/auth/login', { email: 'staf@e2e.test', password: 'kuda-melompat-pagar-77' })
   check(dis.status === 401, 'pengguna: akun nonaktif tidak bisa login')
   await row.getByRole('button', { name: 'Aktifkan' }).click()
   await row.getByText('aktif', { exact: true }).first().waitFor()
   await row.getByRole('button', { name: 'Set password' }).click()
-  await page.getByRole('dialog').getByLabel(/Password baru/).fill('staf-password-5678')
+  await page.getByRole('dialog').getByLabel(/Password baru/).fill('kuda-melompat-pagar-88')
   await page.getByRole('dialog').getByRole('button', { name: 'Simpan password' }).click()
   await page.getByText(/sesi pengguna dikeluarkan/i).waitFor()
   await new Promise((r) => setTimeout(r, 400))
   // penghitung gagal dari percobaan login saat nonaktif di atas dibersihkan oleh set password
-  check((await api('POST', '/api/v1/auth/login', { email: 'staf@e2e.test', password: 'staf-password-5678' })).status === 200, 'pengguna: password baru dari admin berlaku')
+  check((await api('POST', '/api/v1/auth/login', { email: 'staf@e2e.test', password: 'kuda-melompat-pagar-88' })).status === 200, 'pengguna: password baru dari admin berlaku')
   await axeCheck(page, 'pengaturan pengguna')
 
   // undangan: admin membuat tautan, penerima menetapkan password sendiri
@@ -493,13 +498,13 @@ async function main() {
   await ip.goto(inviteUrl)
   await ip.getByText('undangan@e2e.test').waitFor()
   await axeCheck(ip, 'halaman undangan')
-  await ip.getByLabel(/^Password baru/).fill('undangan-password-1234')
+  await ip.getByLabel(/^Password baru/).fill('pagar-biru-melompat-12')
   await ip.getByLabel('Ulangi password').fill('beda-sekali-9999')
   check(await ip.getByRole('button', { name: 'Buat akun' }).isDisabled(), 'undangan: password tidak sama menonaktifkan tombol')
-  await ip.getByLabel('Ulangi password').fill('undangan-password-1234')
+  await ip.getByLabel('Ulangi password').fill('pagar-biru-melompat-12')
   await ip.getByRole('button', { name: 'Buat akun' }).click()
   await ip.getByText(/Akun dibuat/).waitFor()
-  check((await api('POST', '/api/v1/auth/login', { email: 'undangan@e2e.test', password: 'undangan-password-1234' })).status === 200, 'undangan: akun dapat login dengan password pilihan penerima')
+  check((await api('POST', '/api/v1/auth/login', { email: 'undangan@e2e.test', password: 'pagar-biru-melompat-12' })).status === 200, 'undangan: akun dapat login dengan password pilihan penerima')
   await ip.goto(inviteUrl)
   await ip.getByText(/Undangan tidak valid/).waitFor()
   check(true, 'undangan: tautan yang sudah dipakai ditolak')
@@ -526,11 +531,11 @@ async function main() {
   await page.getByText('Kebijakan keamanan disimpan').waitFor()
   check(true, 'keamanan: kebijakan "wajib untuk admin" disimpan')
   // admin kedua tanpa 2FA: hanya bisa membuka halaman Akun
-  await api('POST', '/api/v1/users', { email: 'admin2@e2e.test', role: 'admin', password: 'admin2-password-1234' }, ck2, cs2)
+  await api('POST', '/api/v1/users', { email: 'admin2@e2e.test', role: 'admin', password: 'bola-merah-menggelinding-5' }, ck2, cs2)
   const a2c = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   const a2 = await a2c.newPage()
   await a2.goto(URL_ + '/devices')
-  await a2.getByLabel('Email').fill('admin2@e2e.test'); await a2.getByLabel('Password').fill('admin2-password-1234')
+  await a2.getByLabel('Email').fill('admin2@e2e.test'); await a2.getByLabel('Password').fill('bola-merah-menggelinding-5')
   await a2.getByRole('button', { name: 'Masuk' }).click()
   await a2.getByRole('heading', { name: 'Akun' }).waitFor()
   await a2.getByRole('alert').filter({ hasText: /mewajibkan 2FA/ }).waitFor()
@@ -538,7 +543,7 @@ async function main() {
   await axeCheck(a2, 'akun (wajib 2FA)')
   const blocked = await fetch(URL_ + '/api/v1/devices', { headers: { Cookie: (await a2c.cookies()).map((c) => `${c.name}=${c.value}`).join('; ') } })
   check(blocked.status === 403 && (await blocked.json()).type === 'auth.mfa_setup_required', 'wajib 2FA: server memblok endpoint lain dengan 403 auth.mfa_setup_required')
-  await a2.locator('section[aria-label="Verifikasi 2 langkah"] input[type=password]').fill('admin2-password-1234')
+  await a2.locator('section[aria-label="Verifikasi 2 langkah"] input[type=password]').fill('bola-merah-menggelinding-5')
   await a2.getByRole('button', { name: 'Siapkan 2FA' }).click()
   const sec2 = (await a2.getByTestId('totp-secret').textContent()).trim()
   await a2.getByLabel('Kode 6 digit').fill(totpNode(sec2))

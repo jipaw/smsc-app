@@ -23,18 +23,21 @@ type RetentionRun struct {
 	SessionsDeleted    int       `json:"sessions_deleted"`
 	EnrollmentsDeleted int       `json:"enrollments_deleted"`
 	DeliveriesDeleted  int       `json:"deliveries_deleted"`
+	InvitationsDeleted int       `json:"invitations_deleted"`
 }
 
 type RetentionSettings struct {
-	BodyRetentionDays  int           `json:"body_retention_days"`
-	EventRetentionDays int           `json:"event_retention_days"`
-	LastRun            *RetentionRun `json:"last_run"`
+	BodyRetentionDays  int `json:"body_retention_days"`
+	EventRetentionDays int `json:"event_retention_days"`
+	// undangan yang sudah selesai (diterima/dicabut/kedaluwarsa) dihapus setelah sekian hari; undangan tertunda tak pernah dihapus
+	InvitationRetentionDays int           `json:"invitation_retention_days"`
+	LastRun                 *RetentionRun `json:"last_run"`
 }
 
 const retentionBatch = 5000
 
 func (s *Service) GetRetention(ctx context.Context) (RetentionSettings, error) {
-	r := RetentionSettings{BodyRetentionDays: 90, EventRetentionDays: 180}
+	r := RetentionSettings{BodyRetentionDays: 90, EventRetentionDays: 180, InvitationRetentionDays: 90}
 	var raw []byte
 	if err := s.Pool.QueryRow(ctx, `SELECT value FROM settings WHERE key='retention'`).Scan(&raw); err == nil {
 		_ = json.Unmarshal(raw, &r)
@@ -51,7 +54,16 @@ func (s *Service) GetRetention(ctx context.Context) (RetentionSettings, error) {
 	return r, nil
 }
 
-func (s *Service) SetRetention(ctx context.Context, body, events int, actor string) (RetentionSettings, error) {
+// invites nil = pertahankan nilai saat ini.
+func (s *Service) SetRetention(ctx context.Context, body, events int, invites *int, actor string) (RetentionSettings, error) {
+	cur, err := s.GetRetention(ctx)
+	if err != nil {
+		return RetentionSettings{}, err
+	}
+	inv := cur.InvitationRetentionDays
+	if invites != nil {
+		inv = *invites
+	}
 	var errs []FieldError
 	if body < 0 || body > 3650 {
 		errs = append(errs, FieldError{Field: "body_retention_days", Message: "0..3650 (0 = hapus segera setelah pesan selesai)"})
@@ -59,14 +71,17 @@ func (s *Service) SetRetention(ctx context.Context, body, events int, actor stri
 	if events < 1 || events > 3650 {
 		errs = append(errs, FieldError{Field: "event_retention_days", Message: "1..3650"})
 	}
+	if inv < 1 || inv > 3650 {
+		errs = append(errs, FieldError{Field: "invitation_retention_days", Message: "1..3650"})
+	}
 	if len(errs) > 0 {
 		return RetentionSettings{}, Validation(errs...)
 	}
-	val, _ := json.Marshal(map[string]int{"body_retention_days": body, "event_retention_days": events})
+	val, _ := json.Marshal(map[string]int{"body_retention_days": body, "event_retention_days": events, "invitation_retention_days": inv})
 	if _, err := s.Pool.Exec(ctx, `INSERT INTO settings(key,value) VALUES ('retention',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, val); err != nil {
 		return RetentionSettings{}, err
 	}
-	s.Audit(ctx, actor, "retention.update", "settings", "retention", map[string]any{"body_retention_days": body, "event_retention_days": events})
+	s.Audit(ctx, actor, "retention.update", "settings", "retention", map[string]any{"body_retention_days": body, "event_retention_days": events, "invitation_retention_days": inv})
 	return s.GetRetention(ctx)
 }
 
@@ -149,9 +164,15 @@ func (s *Service) RetentionOnce(ctx context.Context) (RetentionRun, error) {
 		WHERE COALESCE(delivered_at, failed_at) < now() - interval '30 days' LIMIT $1)`, retentionBatch); err != nil {
 		return run, err
 	}
+	// 5. undangan yang sudah selesai (diterima / dicabut / kedaluwarsa) lebih lama dari masa simpan; yang masih tertunda tidak disentuh
+	if run.InvitationsDeleted, err = s.batchExec(ctx, `DELETE FROM invitations WHERE id IN (SELECT id FROM invitations
+		WHERE COALESCE(accepted_at, revoked_at, expires_at) < now() - ($1::int * interval '1 day')
+		  AND (accepted_at IS NOT NULL OR revoked_at IS NOT NULL OR expires_at < now()) LIMIT $2)`, cfg.InvitationRetentionDays, retentionBatch); err != nil {
+		return run, err
+	}
 	s.M.RetentionRuns.Inc()
 	for kind, n := range map[string]int{"message_bodies": run.BodiesPurged, "recipients": run.RecipientsScrubbed, "message_events": run.EventsDeleted,
-		"sessions": run.SessionsDeleted, "enrollments": run.EnrollmentsDeleted, "webhook_deliveries": run.DeliveriesDeleted} {
+		"sessions": run.SessionsDeleted, "enrollments": run.EnrollmentsDeleted, "webhook_deliveries": run.DeliveriesDeleted, "invitations": run.InvitationsDeleted} {
 		s.M.RetentionRows.WithLabelValues(kind).Add(float64(n))
 	}
 	if raw, e := json.Marshal(run); e == nil {

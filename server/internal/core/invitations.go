@@ -140,8 +140,13 @@ func (s *Service) LookupInvitation(ctx context.Context, token string) (Invitatio
 // AcceptInvitation membuat pengguna dan menandai undangan terpakai dalam satu transaksi. Kegagalan validasi (mis. password
 // pendek) atau konflik email tidak menghabiskan undangan.
 func (s *Service) AcceptInvitation(ctx context.Context, token, password string) (User, error) {
-	if len(password) < 12 {
-		return User{}, Validation(FieldError{"password", "minimal 12 karakter"})
+	// validasi SEBELUM menghabiskan undangan; email undangan dipakai sebagai petunjuk kemiripan
+	info, err := s.LookupInvitation(ctx, token)
+	if err != nil {
+		return User{}, err
+	}
+	if err := checkPassword("password", password, info.Email); err != nil {
+		return User{}, err
 	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
