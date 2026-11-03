@@ -102,7 +102,7 @@ Metrik utama dan ambang awal (Prometheus/Alertmanager atau setara):
 | `DbDisk` | disk > 70% / 85% | Peringatan / Kritis |
 | `UnknownMessages` | ada pesan `unknown` > 1 jam | Info |
 
-Log JSON ke journald/stdout → pengumpul log pilihan (Loki/ELK). Dashboard Grafana contoh: device, antrean, laju kirim, rasio gagal, latensi dispatch.
+Log JSON ke journald/stdout → pengumpul log pilihan (Loki/ELK). Dashboard Grafana contoh: device, antrean, laju kirim, rasio gagal, latensi dispatch. Dashboard siap impor untuk SCIM dan rekonsiliasi grup: [`ops/grafana/smsc-scim.json`](../../ops/grafana/smsc-scim.json) (Grafana → Dashboards → Import → unggah JSON → pilih data source Prometheus); berisi status/umur/hasil run, jumlah peran dikoreksi, lalu lintas dan latensi `/scim/v2`. Ambang oranye/merah umur run mengikuti alert `SmscScimReconcileStale` (3 jam).
 
 ## 7. Runbook
 
