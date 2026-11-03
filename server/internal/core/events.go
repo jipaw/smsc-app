@@ -161,11 +161,10 @@ func (s *Service) OnSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.S
 
 // OnCommandAck: jawaban atas sms.send (ref = id envelope). accepted -> sending.
 func (s *Service) OnCommandAck(ctx context.Context, deviceID uuid.UUID, ref string, ack proto.CommandAck) {
-	v, ok := s.cmdRefs.LoadAndDelete(ref)
-	if !ok {
-		return
+	var mid uuid.UUID
+	if err := s.Pool.QueryRow(ctx, `DELETE FROM cmd_refs WHERE env_id=$1 RETURNING message_id`, ref).Scan(&mid); err != nil {
+		return // tidak dikenal (sudah diproses/kedaluwarsa)
 	}
-	mid := v.(uuid.UUID)
 	reason := ""
 	if ack.Reason != nil {
 		reason = *ack.Reason

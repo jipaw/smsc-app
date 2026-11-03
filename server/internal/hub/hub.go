@@ -25,12 +25,13 @@ const (
 )
 
 type session struct {
-	deviceID uuid.UUID
-	conn     *websocket.Conn
-	out      chan []byte
-	cancel   context.CancelFunc
-	pending  sync.Map // id envelope -> chan proto.Envelope (Request)
-	since    time.Time
+	deviceID  uuid.UUID
+	conn      *websocket.Conn
+	out       chan []byte
+	cancel    context.CancelFunc
+	pending   sync.Map // id envelope -> chan proto.Envelope (Request)
+	since     time.Time
+	sessionID uuid.UUID
 }
 
 type Hub struct {
@@ -38,24 +39,54 @@ type Hub struct {
 	log *slog.Logger
 	mu  sync.RWMutex
 	ses map[uuid.UUID]*session
+
+	// multi-instance (cluster.go)
+	instance uuid.UUID
+	rmu      sync.RWMutex
+	remote   map[uuid.UUID]uuid.UUID // device -> instance pemilik sesi (selain instance ini)
+	rpending sync.Map                // id envelope request -> chan balasan dari instance lain
+	kick     chan struct{}
+	busOut   chan string
+	wakeKick chan struct{}
 }
 
 func New(svc *core.Service, log *slog.Logger) *Hub {
-	h := &Hub{svc: svc, log: log, ses: map[uuid.UUID]*session{}}
+	h := &Hub{svc: svc, log: log, ses: map[uuid.UUID]*session{}, instance: uuid.New(), remote: map[uuid.UUID]uuid.UUID{},
+		kick: make(chan struct{}, 1), busOut: make(chan string, 1024), wakeKick: make(chan struct{}, 1)}
 	svc.SetLink(h)
 	return h
 }
 
 // ---- core.DeviceLink ----
 
-func (h *Hub) Connected(id uuid.UUID) bool {
+func (h *Hub) localConnected(id uuid.UUID) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	_, ok := h.ses[id]
 	return ok
 }
 
+// Connected: sesi di instance ini, atau di instance lain (menurut device_sessions yang segar).
+func (h *Hub) Connected(id uuid.UUID) bool {
+	if h.localConnected(id) {
+		return true
+	}
+	_, ok := h.remoteInstance(id)
+	return ok
+}
+
 func (h *Hub) Send(id uuid.UUID, env proto.Envelope) error {
+	if h.localConnected(id) {
+		return h.sendLocal(id, env)
+	}
+	to, ok := h.remoteInstance(id)
+	if !ok {
+		return core.ErrOffline
+	}
+	return h.enqueue(context.Background(), to, id, "send", &env, nil, nil, "")
+}
+
+func (h *Hub) sendLocal(id uuid.UUID, env proto.Envelope) error {
 	h.mu.RLock()
 	s, ok := h.ses[id]
 	h.mu.RUnlock()
@@ -77,6 +108,31 @@ func (h *Hub) Send(id uuid.UUID, env proto.Envelope) error {
 }
 
 func (h *Hub) Request(ctx context.Context, id uuid.UUID, env proto.Envelope, timeout time.Duration) (proto.Envelope, error) {
+	if !h.localConnected(id) {
+		to, ok := h.remoteInstance(id)
+		if !ok {
+			return proto.Envelope{}, core.ErrOffline
+		}
+		ch := make(chan proto.Envelope, 1)
+		h.rpending.Store(env.ID, ch)
+		defer h.rpending.Delete(env.ID)
+		self := h.instance
+		if err := h.enqueue(ctx, to, id, "request", &env, &self, nil, ""); err != nil {
+			return proto.Envelope{}, err
+		}
+		select {
+		case r := <-ch:
+			return r, nil
+		case <-time.After(timeout):
+			return proto.Envelope{}, errors.New("timeout")
+		case <-ctx.Done():
+			return proto.Envelope{}, ctx.Err()
+		}
+	}
+	return h.requestLocal(ctx, id, env, timeout)
+}
+
+func (h *Hub) requestLocal(ctx context.Context, id uuid.UUID, env proto.Envelope, timeout time.Duration) (proto.Envelope, error) {
 	h.mu.RLock()
 	s, ok := h.ses[id]
 	h.mu.RUnlock()
@@ -86,7 +142,7 @@ func (h *Hub) Request(ctx context.Context, id uuid.UUID, env proto.Envelope, tim
 	ch := make(chan proto.Envelope, 1)
 	s.pending.Store(env.ID, ch)
 	defer s.pending.Delete(env.ID)
-	if err := h.Send(id, env); err != nil {
+	if err := h.sendLocal(id, env); err != nil {
 		return proto.Envelope{}, err
 	}
 	select {
@@ -100,6 +156,16 @@ func (h *Hub) Request(ctx context.Context, id uuid.UUID, env proto.Envelope, tim
 }
 
 func (h *Hub) Close(id uuid.UUID, code int, reason string) {
+	if !h.localConnected(id) {
+		if to, ok := h.remoteInstance(id); ok {
+			_ = h.enqueue(context.Background(), to, id, "close", nil, nil, &code, reason)
+		}
+		return
+	}
+	h.closeLocal(id, code, reason)
+}
+
+func (h *Hub) closeLocal(id uuid.UUID, code int, reason string) {
 	h.mu.RLock()
 	s, ok := h.ses[id]
 	h.mu.RUnlock()
@@ -149,7 +215,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 func (h *Hub) run(parent context.Context, conn *websocket.Conn, deviceID uuid.UUID) {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	defer cancel()
-	s := &session{deviceID: deviceID, conn: conn, out: make(chan []byte, 256), cancel: cancel, since: time.Now()}
+	s := &session{deviceID: deviceID, conn: conn, out: make(chan []byte, 256), cancel: cancel, since: time.Now(), sessionID: uuid.New()}
 	log := h.log.With("device", deviceID)
 
 	// hello wajib pesan pertama (S2), batas 10 dtk
@@ -179,6 +245,7 @@ func (h *Hub) run(parent context.Context, conn *websocket.Conn, deviceID uuid.UU
 	}
 	h.ses[deviceID] = s
 	h.mu.Unlock()
+	registered := h.register(ctx, s)
 	h.svc.M.WSConnections.Inc()
 	h.svc.M.WSConnects.Inc()
 	defer func() {
@@ -189,6 +256,9 @@ func (h *Hub) run(parent context.Context, conn *websocket.Conn, deviceID uuid.UU
 			delete(h.ses, deviceID)
 		}
 		h.mu.Unlock()
+		if registered { // sesi sudah digantikan instance lain => jangan tandai device offline
+			current = h.unregister(s) && current
+		}
 		if current {
 			h.svc.OnDisconnected(context.Background(), deviceID)
 			log.Info("device terputus")

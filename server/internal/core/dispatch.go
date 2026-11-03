@@ -278,11 +278,14 @@ func (s *Service) sendToDevice(ctx context.Context, l lane, mid uuid.UUID, eff p
 		DeliveryReport: eff.TrackDelivery, NotAfter: m.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"), MinGapMs: &minGap,
 	}, nil)
 	if err == nil {
-		s.cmdRefs.Store(env.ID, mid)
-		err = s.link.Send(l.deviceID, env)
+		// di DB (bukan memori): command.ack bisa tiba di instance lain, atau setelah restart
+		_, err = s.Pool.Exec(ctx, `INSERT INTO cmd_refs(env_id, message_id) VALUES ($1,$2)`, env.ID, mid)
+		if err == nil {
+			err = s.link.Send(l.deviceID, env)
+		}
 	}
 	if err != nil { // device menghilang antara pengecekan dan kirim: kembalikan tanpa menambah attempt
-		s.cmdRefs.Delete(env.ID)
+		_, _ = s.Pool.Exec(ctx, `DELETE FROM cmd_refs WHERE env_id=$1`, env.ID)
 		s.Log.Warn("dispatcher: kirim ke device gagal, dikembalikan", "err", err, "message", mid)
 		_ = s.withTx(ctx, func(tx pgx.Tx) error {
 			c := "device_offline"

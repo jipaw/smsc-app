@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -18,6 +19,9 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, err
+	}
+	if !strings.Contains(url, "pool_max_conns") && cfg.MaxConns < 20 {
+		cfg.MaxConns = 20 // leader, listener hub, dan worker memegang koneksi tetap; default pgx (4) terlalu kecil
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

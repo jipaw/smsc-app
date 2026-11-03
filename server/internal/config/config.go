@@ -96,6 +96,7 @@ type Config struct {
 
 	// retensi & metrik (fase 3)
 	RetentionInterval     time.Duration
+	HubTick               time.Duration // poll cadangan/antar-instance WS Hub
 	LeaderTick            time.Duration // interval cek/ambil-alih lock leader
 	SCIMReconcileInterval time.Duration // 0 = hanya saat start
 	MetricsAddr           string        // listener terpisah; kosong = nonaktif
@@ -148,6 +149,7 @@ func Load() (Config, error) {
 		EmailBackoff:          []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute, 2 * time.Hour},
 		EmailTick:             envDur("EMAIL_TICK", 2*time.Second),
 		RetentionInterval:     envDur("RETENTION_INTERVAL", time.Hour),
+		HubTick:               envDur("HUB_TICK", time.Second),
 		LeaderTick:            envDur("LEADER_TICK", 5*time.Second),
 		SCIMReconcileInterval: envDur("SCIM_RECONCILE_INTERVAL", time.Hour),
 		MetricsAddr:           env("METRICS_ADDR", "127.0.0.1:9090"),

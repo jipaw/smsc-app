@@ -8,7 +8,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | Sudah | Belum (fase 4) |
 |---|---|
 | Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | back-channel logout, grup SCIM bersarang |
-| Enrollment sekali pakai, registry device/SIM, revoke, perintah jarak jauh | Multi-instance (hanya leader tunggal via advisory lock) |
+| Enrollment sekali pakai, registry device/SIM, revoke, perintah jarak jauh | Multi-instance: leader tunggal via advisory lock; sejak fase 20 sesi WS dapat tersebar di banyak instance (lihat fase 20) |
 | WS hub protokol v1 (hello + rekonsiliasi, heartbeat, sms.event idempoten, sim.report) | |
 | Kirim pesan (normalisasi E.164, GSM-7/UCS-2, template, suppression, Idempotency-Key, `client_ref`) | |
 | Dispatcher per-SIM: delay acak [min,max], burst, rate menit/jam/hari, jendela waktu, concurrency, kill switch | |
@@ -18,6 +18,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
 | **Fase 13**: SCIM `Group` → peran (`SCIM_ADMIN_GROUPS`/`SCIM_OPERATOR_GROUPS`/`SCIM_VIEWER_GROUPS`), peran efektif = tertinggi(roles, grup), rekonsiliasi saat start | |
 | **Fase 14–15**: rekonsiliasi grup SCIM berkala (`SCIM_RECONCILE_INTERVAL`); status run terakhir tersimpan di database (`settings.scim_reconcile_last`) dan tampil di Pengaturan → SCIM | |
+| **Fase 20**: WS Hub multi-instance (`device_sessions`, `hub_commands`, `cmd_refs`; relay perintah/Request/close, event SSE, dan wake lewat LISTEN/NOTIFY + poll cadangan; `HUB_TICK`) | |
 | **Fase 19**: pemantauan lock leader + pemilihan ulang/ambil-alih standby (`LEADER_TICK`), metrik `smsc_leader_changes_total`, 4 alert leader | |
 | **Fase 18**: anotasi restart/deploy/pergantian leader di Grafana, metrik `smsc_build_info` dan `smsc_leader`, alert `SmscRestartLoop` | |
 | **Fase 17**: dashboard Grafana SCIM + rekonsiliasi (`ops/grafana/smsc-scim.json`) | |
@@ -81,6 +82,7 @@ Endpoint: `POST /auth/login` → (2FA aktif) `{mfa_required, mfa_token}` → `PO
 | `SCIM_ALLOW_ADMIN_ROLE` | `false` | Izinkan SCIM memberi/mengubah peran admin |
 | `SCIM_ADOPT_EXISTING` | `false` | Pengguna lokal yang sudah ada terlihat dan dapat dikelola SCIM |
 | `SCIM_ADMIN_GROUPS` | – | Nama grup IdP → admin (butuh `SCIM_ALLOW_ADMIN_ROLE=true`, jika tidak gagal start) |
+| `HUB_TICK` | `1s` | Poll cadangan antar-instance WS Hub (drain `hub_commands`, segarkan sesi instance lain) |
 | `LEADER_TICK` | `5s` | Interval pemeriksaan lock leader / percobaan ambil alih oleh standby |
 | `SCIM_RECONCILE_INTERVAL` | `1h` | Rekonsiliasi berkala pemetaan grup → peran (leader); `0` = hanya saat start |
 | `SCIM_OPERATOR_GROUPS`, `SCIM_VIEWER_GROUPS` | – | Nama grup (dipisah koma, tak peka huruf) → operator / viewer; satu nama tidak boleh di dua peran |

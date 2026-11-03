@@ -79,6 +79,7 @@ func serve(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, log *slog
 	b := bus.New(5 * time.Minute)
 	svc := core.New(pool, cfg, log, b)
 	h := hub.New(svc, log)
+	go h.RunCluster(ctx) // WS Hub multi-instance: relay perintah, event, dan wake antar-instance
 	handler := api.New(svc, h, b, log).Router()
 
 	// Komponen leader (dispatcher/reaper/worker) hanya di satu instance: advisory lock (ADR, spec 02 §2).

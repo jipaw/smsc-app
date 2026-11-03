@@ -45,10 +45,10 @@ type Service struct {
 	Bus    *bus.Bus
 	M      *metrics.Metrics
 
-	link     DeviceLink
-	wake     chan struct{}
-	cmdRefs  sync.Map // id envelope sms.send -> uuid pesan
-	capSince sync.Map // campaign id -> waktu pertama tanpa SIM online (no_capacity)
+	link      DeviceLink
+	wake      chan struct{}
+	wakeRelay func()   // meneruskan Wake ke instance lain (fase 20)
+	capSince  sync.Map // campaign id -> waktu pertama tanpa SIM online (no_capacity)
 }
 
 func New(pool *pgxpool.Pool, cfg config.Config, log *slog.Logger, b *bus.Bus) *Service {
@@ -81,11 +81,22 @@ func (s *Service) SetLink(l DeviceLink) { s.link = l }
 
 // Wake membangunkan dispatcher tanpa memblokir.
 func (s *Service) Wake() {
+	s.WakeLocal()
+	if s.wakeRelay != nil {
+		s.wakeRelay()
+	}
+}
+
+// WakeLocal hanya membangunkan dispatcher di proses ini (dipakai penerima relay agar tidak berputar).
+func (s *Service) WakeLocal() {
 	select {
 	case s.wake <- struct{}{}:
 	default:
 	}
 }
+
+// SetWakeRelay memasang penerus Wake lintas instance.
+func (s *Service) SetWakeRelay(f func()) { s.wakeRelay = f }
 
 // Problem: error HTTP terstruktur (RFC 9457) yang dikembalikan lapisan domain.
 type Problem struct {

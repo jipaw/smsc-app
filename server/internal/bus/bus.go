@@ -21,6 +21,7 @@ type Bus struct {
 	ring   []Event
 	subs   map[chan Event]struct{}
 	replay time.Duration
+	relay  func(name string, raw []byte) // opsional: meneruskan event ke instance lain (fase 20)
 }
 
 func New(replay time.Duration) *Bus {
@@ -30,11 +31,20 @@ func New(replay time.Duration) *Bus {
 // Epoch membedakan proses; Last-Event-ID dari epoch lain harus memicu resync.
 func (b *Bus) Epoch() int64 { return b.epoch }
 
+// SetRelay memasang penerus event lintas instance; panggil sebelum Publish pertama.
+func (b *Bus) SetRelay(f func(name string, raw []byte)) { b.mu.Lock(); b.relay = f; b.mu.Unlock() }
+
+// Publish menyiarkan ke pelanggan lokal lalu (bila dipasang) meneruskan ke instance lain.
 func (b *Bus) Publish(name string, data any) {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return
 	}
+	b.PublishRaw(name, raw, true)
+}
+
+// PublishRaw menyiarkan event berbentuk JSON; relay=false untuk event yang berasal dari instance lain (cegah gema).
+func (b *Bus) PublishRaw(name string, raw []byte, relay bool) {
 	b.mu.Lock()
 	ev := Event{ID: b.next, Name: name, Data: raw, At: time.Now()}
 	b.next++
@@ -49,7 +59,11 @@ func (b *Bus) Publish(name string, data any) {
 		default: // pelanggan lambat: lewati (klien akan resync)
 		}
 	}
+	f := b.relay
 	b.mu.Unlock()
+	if relay && f != nil {
+		f(name, raw)
+	}
 }
 
 // Subscribe mengembalikan kanal, event replay sejak lastID (ok=false bila lastID terlalu lama -> klien harus resync), dan fungsi berhenti.

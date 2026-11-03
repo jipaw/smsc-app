@@ -129,3 +129,7 @@ groups:
         expr: increase(smsc_leader_changes_total{event="lost"}[15m]) > 0
         labels: {severity: warning}
         annotations: {summary: "Leader kehilangan lock advisory (koneksi DB bermasalah); pemilihan diulang otomatis — periksa stabilitas database/jaringan"}
+      - alert: SmscHubRelayDropped
+        expr: increase(smsc_hub_relay_total{result="dropped"}[10m]) > 0
+        labels: {severity: warning}
+        annotations: {summary: "Relay antar-instance WS Hub menjatuhkan pesan (DB bermasalah atau event > 7 KB) — perintah ke device di instance lain bisa tertunda/hilang"}

@@ -29,6 +29,8 @@ Batas kepercayaan: (1) browser ↔ server, (2) sistem eksternal ↔ server, (3) 
 | Dashboard | file statis di-embed pada `smscd` | – | – |
 | Aplikasi Android | HP | Room (job, outbox) | Satu per HP |
 
+**WS Hub multi-instance (fase 20).** Device boleh tersambung ke instance mana pun di belakang load balancer. Instance mencatat sesi di `device_sessions` (heartbeat 5 dtk; basi > 20 dtk dianggap hilang) dan memuat sesi instance lain ke cache tiap `HUB_TICK`. `Send/Request/Close` ke device di instance lain dititipkan ke `hub_commands` (durable) dan `NOTIFY smsc_hub` membangunkan penerima; penerima juga mem-poll tabel sehingga NOTIFY hilang tidak menghilangkan perintah. `command.ack` dikaitkan lewat `cmd_refs` (bukan memori). Event SSE (`Bus`) dan `Wake` diteruskan lewat `NOTIFY smsc_bus`/`smsc_wake` (payload > 7 KB dilewati dan dihitung `smsc_hub_relay_total{result="dropped"}`). Sesi baru di instance lain menutup yang lama (4409) tanpa menandai device offline. Tabel `UNLOGGED` (efemeral).
+
 **Leader election.** `smscd` mengambil `pg_try_advisory_lock(k)` pada koneksi khusus untuk menjalankan komponen leader (dispatcher, reaper, materializer, retensi). Sejak fase 19 lock dipantau tiap `LEADER_TICK` (default 5 dtk): bila hilang (koneksi putus/di-terminate, DB restart) worker dihentikan, `smsc_leader` turun ke 0, dan instance mana pun (termasuk yang sama) memilih ulang — standby mengambil alih tanpa restart. Dengan satu instance, selalu memenangkannya; memungkinkan rolling restart aman dan jalan menuju multi-instance (fase 4, butuh pub/sub antar-instance untuk WS Hub).
 
 ## 3. Keputusan arsitektur (ADR)
