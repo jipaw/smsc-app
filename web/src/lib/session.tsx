@@ -7,5 +7,7 @@ export const useMe = () => {
   if (!m) throw new Error('belum login')
   return m
 }
+export const MeRefreshContext = createContext<() => Promise<void>>(async () => {})
+export const useRefreshMe = () => useContext(MeRefreshContext)
 export const isAdmin = (m: Me) => m.role === 'admin'
 export const canOperate = (m: Me) => m.role === 'admin' || m.role === 'operator'

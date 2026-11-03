@@ -90,7 +90,7 @@ func (a *API) Router() http.Handler {
 
 		// dashboard / API key
 		r.Group(func(r chi.Router) {
-			r.Use(a.authenticate, a.csrf)
+			r.Use(a.authenticate, a.csrf, a.mfaGate)
 			r.Post("/auth/logout", a.logout)
 			r.Get("/auth/me", a.me)
 			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/password", a.changePassword)
@@ -149,6 +149,10 @@ func (a *API) Router() http.Handler {
 			r.With(admin).Get("/users", a.listUsers)
 			r.With(admin).Post("/users", a.createUser)
 			r.With(admin).Delete("/users/{userId}/2fa", a.resetUserMFA)
+			r.With(admin).Patch("/users/{userId}", a.patchUser)
+			r.With(admin).Post("/users/{userId}/password", a.setUserPassword)
+			r.With(admin).Get("/settings/security", a.getSecurity)
+			r.With(admin).Put("/settings/security", a.setSecurity)
 			r.With(admin).Get("/audit-logs", a.listAudit)
 
 			r.With(viewer).Get("/stats/overview", a.overview)
@@ -253,6 +257,24 @@ func (a *API) authenticate(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, keyPrincipal, p)))
+	})
+}
+
+// mfaGate: bila kebijakan mewajibkan 2FA dan pengguna belum memilikinya, hanya endpoint akun yang terbuka.
+// API key tidak terpengaruh (bukan pengguna).
+var mfaSetupPaths = map[string]bool{
+	"/api/v1/auth/me": true, "/api/v1/auth/logout": true, "/api/v1/auth/password": true,
+	"/api/v1/auth/2fa": true, "/api/v1/auth/2fa/setup": true, "/api/v1/auth/2fa/enable": true,
+}
+
+func (a *API) mfaGate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p := principalOf(r.Context()); p != nil && !p.isKey() && !mfaSetupPaths[r.URL.Path] && a.Svc.MFASetupRequired(r.Context(), *p.user) {
+			a.writeProblem(w, r, core.NewProblem(http.StatusForbidden, "auth.mfa_setup_required", "2FA wajib diaktifkan",
+				"kebijakan keamanan mewajibkan 2FA untuk akun Anda; aktifkan di halaman Akun"))
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

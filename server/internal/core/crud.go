@@ -35,6 +35,9 @@ func (s *Service) SaveTemplate(ctx context.Context, id *uuid.UUID, name, body st
 		return Template{}, Validation(errs...)
 	}
 	vars := sms.Variables(body)
+	if vars == nil { // kolom NOT NULL: template tanpa variabel harus menyimpan array kosong, bukan NULL
+		vars = []string{}
+	}
 	var t Template
 	var err error
 	if id == nil {

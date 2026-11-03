@@ -334,6 +334,23 @@ def run_checks(pw):
     call("DELETE", f"/api/v1/users/{uuid.uuid4()}/2fa", expect=404)
     call("POST", "/api/v1/auth/password", {"current_password": pw, "new_password": "kontrak-baru-12345"}, 204)
 
+    # manajemen pengguna + kebijakan wajib-2FA (fase 5)
+    call("GET", "/api/v1/settings/security", expect=200)
+    call("PUT", "/api/v1/settings/security", {"require_2fa": "bukan"}, 422)
+    call("PUT", "/api/v1/settings/security", {"require_2fa": "admin"}, 409)  # admin kontrak belum memakai 2FA
+    st, nu = call("POST", "/api/v1/users", {"email": "mgmt@ct.test", "role": "viewer", "password": "mgmt-pass-123456"}, 201)
+    call("PATCH", f"/api/v1/users/{nu['id']}", {"role": "operator"}, 200)
+    call("PATCH", f"/api/v1/users/{nu['id']}", {"disabled": True}, 200)
+    call("PATCH", f"/api/v1/users/{nu['id']}", {}, 422)
+    call("PATCH", f"/api/v1/users/{nu['id']}", {"role": "dewa"}, 422)
+    call("PATCH", f"/api/v1/users/{uuid.uuid4()}", {"role": "viewer"}, 404)
+    call("PATCH", f"/api/v1/users/{me['id']}", {"role": "viewer"}, 409)
+    call("POST", f"/api/v1/users/{nu['id']}/password", {"new_password": "baru-sekali-12345"}, 204)
+    call("POST", f"/api/v1/users/{nu['id']}/password", {"new_password": "pendek"}, 422)
+    call("POST", f"/api/v1/users/{me['id']}/password", {"new_password": "baru-sekali-12345"}, 409)
+    call("POST", f"/api/v1/users/{uuid.uuid4()}/password", {"new_password": "baru-sekali-12345"}, 404)
+    call("GET", "/api/v1/users", expect=200)
+
     # revoke di akhir
     call("DELETE", f"/api/v1/devices/{dev}", expect=204)
     call("POST", "/api/v1/auth/logout", expect=204)

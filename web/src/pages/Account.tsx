@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import QRCode from 'qrcode'
 import { get, post } from '../lib/api'
 import { fmtTime } from '../lib/format'
-import { useMe } from '../lib/session'
+import { useMe, useRefreshMe } from '../lib/session'
 import type { MfaSetup, MfaStatus } from '../lib/types'
 import { ErrorBox, Field, Loading, useToast } from '../components/ui'
 
@@ -13,6 +13,7 @@ export function Account() {
     <div className="stack gap-lg">
       <h1>Akun</h1>
       <div className="muted">{me.email} · {me.role}</div>
+      {me.mfa_setup_required && <div className="banner" role="alert">Kebijakan keamanan mewajibkan 2FA untuk akun Anda. Aktifkan di bawah ini untuk membuka dashboard.</div>}
       <Password />
       <TwoFactor />
     </div>
@@ -62,6 +63,7 @@ function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void 
 function TwoFactor() {
   const qc = useQueryClient()
   const toast = useToast()
+  const refreshMe = useRefreshMe()
   const q = useQuery({ queryKey: ['mfa'], queryFn: () => get<MfaStatus>('/auth/2fa') })
   const [pw, setPw] = useState('')
   const [code, setCode] = useState('')
@@ -81,7 +83,7 @@ function TwoFactor() {
   return (
     <section className="card stack" aria-label="Verifikasi 2 langkah">
       <h2>Verifikasi 2 langkah (TOTP)</h2>
-      {codes && <RecoveryCodes codes={codes} onDone={() => setCodes(null)} />}
+      {codes && <RecoveryCodes codes={codes} onDone={() => { setCodes(null); refreshMe() }} />}
       {!st.enabled && !setup && (
         <div className="stack">
           <p className="muted">Tambahkan lapisan kedua saat masuk dengan aplikasi authenticator (Google Authenticator, Aegis, 1Password, dll.). Disarankan untuk semua admin.</p>

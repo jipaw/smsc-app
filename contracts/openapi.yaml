@@ -1140,7 +1140,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  items: {type: array, items: {$ref: '#/components/schemas/Me'}}
+                  items: {type: array, items: {$ref: '#/components/schemas/UserItem'}}
     post:
       tags: [Admin]
       summary: Buat pengguna
@@ -1157,6 +1157,55 @@ paths:
                 password: {type: string, format: password}
       responses:
         '201': {description: Dibuat}
+  /users/{userId}:
+    patch:
+      tags: [Admin]
+      summary: Ubah peran / nonaktifkan pengguna lain
+      description: |
+        Berlaku seketika (peran dibaca setiap request). Menonaktifkan mencabut semua sesi pengguna itu dan menolak login.
+        Mengubah akun sendiri ditolak (`user.self_change`, 409) — itu sekaligus menjamin selalu ada admin aktif.
+      parameters:
+        - {name: userId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                role: {$ref: '#/components/schemas/Role'}
+                disabled: {type: boolean}
+      responses:
+        '200':
+          description: Pengguna setelah diubah
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserItem'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: 'Mengubah diri sendiri (`user.self_change`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  /users/{userId}/password:
+    post:
+      tags: [Admin]
+      summary: Admin menetapkan password baru untuk pengguna lain
+      description: Semua sesi pengguna itu dicabut dan kunci akunnya direset. Untuk akun sendiri gunakan `/auth/password`. Password tidak dicatat di audit.
+      parameters:
+        - {name: userId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_password]
+              properties:
+                new_password: {type: string, format: password, minLength: 12}
+      responses:
+        '204': {description: Diganti}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: 'Akun sendiri (`user.self_change`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
   /users/{userId}/2fa:
     delete:
       tags: [Admin]
@@ -1167,6 +1216,42 @@ paths:
       responses:
         '204': {description: Direset}
         '404': {$ref: '#/components/responses/NotFound'}
+  /settings/security:
+    get:
+      tags: [Admin]
+      summary: Kebijakan wajib-2FA
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SecuritySettings'}
+    put:
+      tags: [Admin]
+      summary: Ubah kebijakan wajib-2FA (default `off`)
+      description: |
+        `off` = 2FA opsional (default). `admin` = semua admin wajib. `all` = semua pengguna wajib.
+        Pengguna dalam cakupan yang belum punya 2FA tetap dapat login, tetapi semua endpoint selain akun
+        (`/auth/me`, `/auth/logout`, `/auth/password`, `/auth/2fa`, `/auth/2fa/setup`, `/auth/2fa/enable`) membalas
+        **403 `auth.mfa_setup_required`** sampai 2FA aktif. API key tidak terpengaruh.
+        Admin yang sendiri belum memakai 2FA tidak boleh menyalakannya (409 `security.enroll_first`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [require_2fa]
+              properties:
+                require_2fa: {type: string, enum: ['off', admin, all]}
+      responses:
+        '200':
+          description: Kebijakan baru
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SecuritySettings'}
+        '409': {description: 'Admin belum memakai 2FA (`security.enroll_first`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
   /audit-logs:
     get:
       tags: [Admin]
@@ -1542,8 +1627,23 @@ components:
         role: {$ref: '#/components/schemas/Role'}
         tailscale_login: {type: [string, 'null'], description: Terisi jika diautentikasi lewat identity header Tailscale Serve.}
         mfa_enabled: {type: boolean, description: 2FA TOTP aktif untuk akun ini.}
+        mfa_setup_required: {type: boolean, description: 'Kebijakan mewajibkan 2FA untuk akun ini tetapi belum aktif: hanya endpoint akun yang terbuka (403 `auth.mfa_setup_required` selainnya).'}
         csrf_token: {type: string, description: 'Hanya pada login/verify/me untuk sesi sendiri.'}
 
+    UserItem:
+      allOf:
+        - $ref: '#/components/schemas/Me'
+        - type: object
+          required: [disabled, created_at]
+          properties:
+            disabled: {type: boolean}
+            created_at: {type: string, format: date-time}
+    SecuritySettings:
+      type: object
+      required: [require_2fa, users_missing_2fa]
+      properties:
+        require_2fa: {type: string, enum: ['off', admin, all]}
+        users_missing_2fa: {type: integer, description: 'Pengguna aktif dalam cakupan yang belum punya 2FA.'}
     MfaChallenge:
       type: object
       required: [mfa_required, mfa_token]

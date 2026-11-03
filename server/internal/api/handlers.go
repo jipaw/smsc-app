@@ -21,9 +21,10 @@ func (a *API) setSession(w http.ResponseWriter, tok string) {
 		SameSite: http.SameSiteLaxMode, MaxAge: 7 * 24 * 3600})
 }
 
-func sessionBody(res core.LoginResult) map[string]any {
+func (a *API) sessionBody(r *http.Request, res core.LoginResult) map[string]any {
 	u := res.User
-	return map[string]any{"id": u.ID, "email": u.Email, "role": u.Role, "tailscale_login": u.TailscaleLogin, "mfa_enabled": u.MFAEnabled, "csrf_token": res.CSRF}
+	return map[string]any{"id": u.ID, "email": u.Email, "role": u.Role, "tailscale_login": u.TailscaleLogin, "mfa_enabled": u.MFAEnabled,
+		"mfa_setup_required": a.Svc.MFASetupRequired(r.Context(), u), "csrf_token": res.CSRF}
 }
 
 func (a *API) login(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +43,7 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setSession(w, res.Token)
 	a.Svc.Audit(r.Context(), "user:"+res.User.Email, "auth.login", "user", res.User.ID.String(), nil)
-	a.writeJSON(w, http.StatusOK, sessionBody(res))
+	a.writeJSON(w, http.StatusOK, a.sessionBody(r, res))
 }
 
 func (a *API) loginVerify(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +61,7 @@ func (a *API) loginVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setSession(w, res.Token)
 	a.Svc.Audit(r.Context(), "user:"+res.User.Email, "auth.login", "user", res.User.ID.String(), map[string]any{"mfa": true})
-	a.writeJSON(w, http.StatusOK, sessionBody(res))
+	a.writeJSON(w, http.StatusOK, a.sessionBody(r, res))
 }
 
 // sessionPrincipal: endpoint akun hanya untuk sesi dashboard (bukan API key).
@@ -212,7 +213,8 @@ func (a *API) me(w http.ResponseWriter, r *http.Request) {
 		a.writeProblem(w, r, core.NewProblem(http.StatusForbidden, "auth.forbidden", "Akses ditolak", "endpoint untuk sesi dashboard"))
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"id": p.user.ID, "email": p.user.Email, "role": p.user.Role, "tailscale_login": p.user.TailscaleLogin, "mfa_enabled": p.user.MFAEnabled, "csrf_token": p.csrf})
+	a.writeJSON(w, http.StatusOK, map[string]any{"id": p.user.ID, "email": p.user.Email, "role": p.user.Role, "tailscale_login": p.user.TailscaleLogin, "mfa_enabled": p.user.MFAEnabled,
+		"mfa_setup_required": a.Svc.MFASetupRequired(r.Context(), *p.user), "csrf_token": p.csrf})
 }
 
 // ---------- devices ----------
@@ -1407,4 +1409,74 @@ func (a *API) rotateWebhookSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	a.Svc.Audit(r.Context(), actorOf(principalOf(r.Context())), "webhook.rotate_secret", "webhook", id.String(), map[string]any{"grace_seconds": in.Grace})
 	a.writeJSON(w, http.StatusOK, wh)
+}
+
+func (a *API) getSecurity(w http.ResponseWriter, r *http.Request) {
+	st, err := a.Svc.GetSecurity(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, st)
+}
+
+func (a *API) setSecurity(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Require2FA string `json:"require_2fa"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	p := principalOf(r.Context())
+	st, err := a.Svc.SetSecurity(r.Context(), p.user.ID, in.Require2FA)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(p), "security.update", "settings", "security", map[string]any{"require_2fa": st.Require2FA})
+	a.writeJSON(w, http.StatusOK, st)
+}
+
+func (a *API) patchUser(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "userId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	var in struct {
+		Role     *string `json:"role"`
+		Disabled *bool   `json:"disabled"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	p := principalOf(r.Context())
+	u, change, err := a.Svc.UpdateUser(r.Context(), p.user.ID, id, core.UserPatch{Role: in.Role, Disabled: in.Disabled})
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(p), "user.update", "user", id.String(), change)
+	a.writeJSON(w, http.StatusOK, u)
+}
+
+func (a *API) setUserPassword(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "userId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	var in struct {
+		NewPassword string `json:"new_password"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	p := principalOf(r.Context())
+	if err := a.Svc.AdminSetPassword(r.Context(), p.user.ID, id, in.NewPassword); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(p), "user.password_reset", "user", id.String(), nil)
+	w.WriteHeader(http.StatusNoContent)
 }

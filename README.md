@@ -1,6 +1,6 @@
 # SMSC — SMS Gateway Android + Tailscale
 
-Paket desain (analisis, stack, kontrak, flow), server + dashboard (fase 1–4) yang teruji, dan skeleton PoC Android. Aplikasi Android produksi belum ada (menunggu hasil PoC).
+Paket desain (analisis, stack, kontrak, flow), server + dashboard (fase 1–5) yang teruji, dan skeleton PoC Android. Aplikasi Android produksi belum ada (menunggu hasil PoC).
 
 ## Ringkasan keputusan
 
@@ -48,13 +48,13 @@ Paket desain (analisis, stack, kontrak, flow), server + dashboard (fase 1–4) y
 
 | Path | Isi |
 |---|---|
-| [`openapi.yaml`](contracts/openapi.yaml) | REST, OpenAPI 3.1 (81 operasi) |
+| [`openapi.yaml`](contracts/openapi.yaml) | REST, OpenAPI 3.1 (85 operasi) |
 | [`ws-schema.json`](contracts/ws-schema.json) + [`test-vectors/`](contracts/test-vectors/) | Protokol WebSocket: JSON Schema, 17 contoh valid, 15 invalid |
 | [`device-ws-protocol.md`](contracts/device-ws-protocol.md) | Penjelasan protokol WebSocket |
 | [`schema.sql`](contracts/schema.sql) | DDL PostgreSQL 16 (diuji: dimuat bersih, constraint diverifikasi) |
 | [`tools/verify.sh`](contracts/tools/verify.sh) | Verifikasi kontrak (OpenAPI, vector, tabel endpoint) |
 
-**Server & dashboard (`server/`, `web/`)** — implementasi fase 1–4 (campaign, webhook, retensi, metrik, rotasi kredensial, 2FA), teruji (lihat [`docs/STATUS.md`](docs/STATUS.md))
+**Server & dashboard (`server/`, `web/`)** — implementasi fase 1–5 (campaign, webhook, retensi, metrik, rotasi kredensial, 2FA + kewajiban 2FA, manajemen pengguna), teruji (lihat [`docs/STATUS.md`](docs/STATUS.md))
 
 | Path | Isi |
 |---|---|

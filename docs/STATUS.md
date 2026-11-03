@@ -4,15 +4,15 @@ Per commit ini. "Teruji" menyebut bukti yang dijalankan, bukan klaim. Rujukan ke
 
 | Area | Status | Bukti |
 |---|---|---|
-| Kontrak REST (`openapi.yaml`, 81 operasi) | Valid; respons server dicocokkan ke skema | `server/tests/contract_check.py`: 111 respons, 0 ketidaksesuaian |
+| Kontrak REST (`openapi.yaml`, 85 operasi) | Valid; respons server dicocokkan ke skema | `server/tests/contract_check.py`: 124 respons, 0 ketidaksesuaian |
 | Protokol WS (`ws-schema.json`) | Skema + 17 vector valid / 15 invalid; model Kotlin & server memakainya | `contracts/tools/validate_vectors.py`, `android :core` ProtocolVectorsTest, `poc/server/selftest.py` |
 | DDL (`schema.sql`) | Snapshot akhir = migrasi 0001–0004, dibandingkan lewat `pg_dump` (uji positif dan negatif) | `server/tests/schema_sync.sh` |
-| **Server fase 1–4** (Go) | FR-01–22 ✔ + FR-03 rotasi kredensial device, rotasi API key / secret webhook / kunci server, 2FA TOTP + kode pemulihan, ganti password (lihat `server/README.md`) | 59 tes integrasi (20 inti + 13 campaign + 13 fase 3 + 13 fase 4) + 18 unit (termasuk vektor RFC 6238), lulus `-race`; mutasi disengaja pada 2FA/rotasi tertangkap |
-| **Dashboard fase 1–4** (React) | + Campaigns, Webhook, Retensi + halaman **Akun** (ganti password, 2FA dengan QR & kode pemulihan), login dua langkah, tombol Putar (API key, secret webhook, kredensial device), Reset 2FA | typecheck, 5 unit, **91 pemeriksaan E2E** di Chromium (axe terang/gelap, mobile 390px, RBAC, wizard, HMAC webhook, `/metrics`, alur 2FA lengkap dengan TOTP dihitung di Node) |
+| **Server fase 1–5** (Go) | FR-01–26 ✔: + rotasi kredensial, 2FA TOTP, **kewajiban 2FA (default nonaktif)**, manajemen pengguna (peran, nonaktifkan, admin set password) (lihat `server/README.md`) | 65 tes integrasi (20 inti + 13 campaign + 13 fase 3 + 13 fase 4 + 6 fase 5) + 18 unit (termasuk vektor RFC 6238), lulus `-race`; mutasi disengaja pada 2FA/rotasi/gerbang/self-change tertangkap |
+| **Dashboard fase 1–5** (React) | + Campaigns, Webhook, Retensi + tab **Keamanan** (kebijakan 2FA), manajemen pengguna di tabel, shell minimal bagi akun yang wajib 2FA, halaman **Akun** (ganti password, 2FA dengan QR & kode pemulihan), login dua langkah, tombol Putar (API key, secret webhook, kredensial device), Reset 2FA | typecheck, 5 unit, **105 pemeriksaan E2E** di Chromium (axe terang/gelap, mobile 390px, RBAC, wizard, HMAC webhook, `/metrics`, alur 2FA lengkap dengan TOTP dihitung di Node) |
 | **Android PoC** | Skeleton; belum dijalankan di HP | `:core` 26 tes, `:typecheck` 2 tes, `poc/README.md` |
 | Aplikasi Android produksi | **Belum** | menunggu hasil PoC (R1/R2/R3/R5/R6) |
 | Variabel per-penerima pada "Kirim SMS" cepat | **Belum** (gunakan campaign) | – |
-| Kewajiban 2FA untuk admin (enforcement), WebAuthn, SSO, daftar password umum, ubah peran/nonaktifkan pengguna, multi-instance | **Belum** | – |
+| WebAuthn/passkey, SSO, daftar password umum, hapus pengguna / undangan email, multi-instance | **Belum** | – |
 | Rotasi kredensial **di sisi HP** (menyimpan `new_secret` ke Keystore lalu membalas `ok`) | Server + protokol + vektor siap & teruji dengan simulator; **belum diimplementasikan di aplikasi Android** (PoC membalas `ok=false`, aman: secret lama tetap berlaku) | `TestDeviceCredentialRotation*` |
 | Alert Prometheus (`ops/prometheus/alerts.yml`) | Ditulis; setiap metrik yang dirujuk diverifikasi ada di `/metrics`. **Belum dijalankan di Prometheus/Alertmanager sungguhan** (ambang awal, perlu penyetelan) | `TestAlertRulesReferenceExistingMetrics` |
 
@@ -36,6 +36,12 @@ Per commit ini. "Teruji" menyebut bukti yang dijalankan, bukan klaim. Rujukan ke
 - **Hapus nomor** (`smscd privacy erase --number … [--suppress]`): anonimkan pesan, penerima, dan payload webhook untuk satu nomor; ditolak (`privacy.active_messages`) bila ada pesan aktif; audit hanya menyimpan hash.
 - **Metrik** di listener terpisah `METRICS_ADDR` (default `127.0.0.1:9090`, bukan di port publik). Label berkardinalitas kecil (pola rute, bukan URL), tanpa nomor/isi pesan. Gauge DB di-cache 5 dtk. Nama metrik implementasi (mis. `smsc_message_transitions_total`) menjadi acuan; tabel di spec 10 §Monitoring disesuaikan.
 - Bug yang tertangkap saat fase 3: `smsc_queue_depth` tidak punya seri saat antrean kosong (alert merujuk metrik yang tidak ada) → seri prioritas 0–9 selalu ada; retry delivery yang tak ada membalas 409 (kini 404); satu pemeriksaan E2E flaky (progress bar dihitung sebelum dirender).
+
+## Fase 5 — perilaku yang perlu diketahui
+- **Kewajiban 2FA default `off`**; menyala hanya bila admin memilih (`PUT /settings/security`). Berlaku seketika, termasuk untuk sesi yang sudah login; API key tidak terpengaruh. Admin harus sudah memakai 2FA sendiri untuk menyalakannya. Pembacaan kebijakan yang gagal → gerbang **fail-open** (keputusan sadar: lebih baik 2FA tidak ditegakkan sesaat daripada seluruh tim terkunci saat DB bermasalah). Cache kebijakan 2 dtk di memori (satu instance).
+- **Mengubah akun sendiri ditolak** (peran, nonaktif, set password lewat endpoint admin): menjamin selalu ada admin aktif tanpa logika "admin terakhir" yang rawan balapan.
+- Reset 2FA saat kebijakan menyala mengembalikan akun itu ke status digerbang (harus menyiapkan ulang) — disengaja.
+- **Bug lama yang tertangkap tes fase 5**: menyimpan template tanpa variabel (`Halo semuanya`) membalas 500 (array `NULL` melanggar `NOT NULL`) — sudah diperbaiki + tes regresi. Kontrak: nilai enum `off` harus dikutip di YAML (`'off'`), kalau tidak parser YAML 1.1 membacanya sebagai `false`.
 
 ## Fase 4 — perilaku yang perlu diketahui
 - **Rotasi secret device dua tahap**: server menyimpan secret baru sebagai *tertunda* dan mengirimnya (`device.command.new_secret`, WSS). Secret lama tetap sah; promosi terjadi saat HP membalas `ok=true` **atau** begitu secret baru dipakai untuk autentikasi (konfirmasi hilang di jalan tidak mengunci HP). `ok=false`, kedaluwarsa 10 mnt, atau device dicabut → secret tertunda tidak berlaku. Spec lama menaruh `new_secret` di hasil D→S; diubah (arah S→D, dan wajib/terlarang menurut `action` di JSON Schema) karena server yang menciptakan secret agar tidak ada status setengah-ganti.

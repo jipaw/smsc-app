@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (81 operasi)
+# Daftar endpoint (85 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -116,7 +116,11 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `DELETE` | `/api-keys/{apiKeyId}` | Cabut | apiKey/sessionCookie | 204 |
 | `GET` | `/users` | Daftar pengguna dashboard (admin) | apiKey/sessionCookie | 200 |
 | `POST` | `/users` | Buat pengguna | apiKey/sessionCookie | 201 |
+| `PATCH` | `/users/{userId}` | Ubah peran / nonaktifkan pengguna lain | apiKey/sessionCookie | 200,404,409,422 |
+| `POST` | `/users/{userId}/password` | Admin menetapkan password baru untuk pengguna lain | apiKey/sessionCookie | 204,404,409,422 |
 | `DELETE` | `/users/{userId}/2fa` | Reset 2FA pengguna (kehilangan authenticator) | apiKey/sessionCookie | 204,404 |
+| `GET` | `/settings/security` | Kebijakan wajib-2FA | apiKey/sessionCookie | 200 |
+| `PUT` | `/settings/security` | Ubah kebijakan wajib-2FA (default `off`) | apiKey/sessionCookie | 200,409,422 |
 | `GET` | `/audit-logs` | Jejak audit tindakan admin | apiKey/sessionCookie | 200 |
 | `GET` | `/settings/retention` | Pengaturan retensi data + ringkasan eksekusi terakhir | apiKey/sessionCookie | 200 |
 | `PUT` | `/settings/retention` | Ubah retensi | apiKey/sessionCookie | 200,422 |

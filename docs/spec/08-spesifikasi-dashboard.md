@@ -12,7 +12,7 @@ Campaigns ── wizard ── detail
 Kirim SMS
 Transaksi ── detail (drawer)
 Template
-Pengaturan ── Policy · Daftar blokir · API key · Pengguna · Webhook · Retensi · Audit
+Pengaturan ── Policy · Daftar blokir · API key · Pengguna · Webhook · Retensi · Keamanan · Audit
 Akun (tautan email di header) ── Ganti password · 2FA
 ```
 
@@ -102,7 +102,8 @@ Daftar + editor: nama, isi, daftar variabel terdeteksi, penghitung segmen, tombo
 - **Policy**: daftar dengan lencana *Default*; editor berbagi: Delay (min/max dengan slider + input ms), Burst, Rate (menit/jam/hari), Jendela waktu (grid hari × jam + zona), Retry (max attempts, backoff), TTL, tracking delivery, timeout, `retry_on_unknown`. Field kosong = "warisi". Panel kanan "Simulasi": estimasi throughput per SIM dan contoh jadwal 10 pesan. Validasi inline (`min ≤ max`, irisan jendela).
 - **Daftar blokir**: tabel + tambah/impor + hapus.
 - **API key**: buat (nama, scope, kedaluwarsa) → secret tampil sekali dengan tombol salin; **Putar** (pilih masa tumpang tindih; kolom Rotasi menunjukkan sampai kapan secret lama sah); cabut.
-- **Pengguna**: undang; kolom **2FA** dan tombol *Reset 2FA* (mencabut semua sesi pengguna itu). (Ubah peran/nonaktifkan: belum.)
+- **Pengguna**: tambah; ubah **peran** dari tabel (berlaku seketika); **Nonaktifkan/Aktifkan**; **Set password** (admin menetapkan, sesi pengguna dicabut); kolom **2FA** dan *Reset 2FA*. Baris akun sendiri tanpa kontrol ubah (server menolak, `user.self_change`).
+- **Keamanan**: kebijakan 2FA — Opsional (default) / Wajib untuk admin / Wajib untuk semua, dengan hitungan pengguna dalam cakupan yang belum memakai 2FA. Akun yang digerbang melihat shell minimal berisi halaman Akun + banner; dashboard terbuka tanpa login ulang begitu 2FA aktif dan kode pemulihan sudah disimpan.
 - **Webhook**: buat/uji/riwayat/kirim ulang; **Putar secret** dengan masa tumpang tindih.
 - **Webhook** (fase 3), **Audit log** (filter aktor/aksi/tanggal, read-only).
 

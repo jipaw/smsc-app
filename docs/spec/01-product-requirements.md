@@ -70,6 +70,8 @@ Prioritas: **M** = MVP (fase 1), **S** = fase 2, **C** = fase 3. Kriteria peneri
 | FR-22 | Retensi data | C | KP1 body dihapus setelah N hari · KP2 metadata tetap |
 | FR-23 | Autentikasi dua faktor (TOTP) untuk pengguna dashboard | C | KP1 password benar saja tidak memberi sesi · KP2 kode tak dapat dipakai ulang; 5 kegagalan → kunci · KP3 kode pemulihan sekali pakai; reset darurat oleh admin/CLI |
 | FR-24 | Rotasi kredensial tanpa downtime (device, API key, secret webhook, kunci server) | C | KP1 masa tumpang tindih: secret lama & baru sama-sama sah · KP2 rotasi device tidak dapat mengunci HP · KP3 secret baru tak pernah muncul di log/audit |
+| FR-25 | Kewajiban 2FA yang dapat dinyalakan admin (default nonaktif) | C | KP1 default `off` · KP2 akun dalam cakupan tanpa 2FA hanya mencapai endpoint akun, termasuk sesi yang sudah ada · KP3 admin tanpa 2FA tidak bisa menyalakannya · KP4 API key tidak terpengaruh |
+| FR-26 | Manajemen pengguna: ubah peran, nonaktifkan, admin menetapkan password | C | KP1 peran berlaku seketika · KP2 nonaktif mencabut sesi & menolak login · KP3 tidak bisa mengubah diri sendiri · KP4 semuanya diaudit |
 
 ## 4. Kebutuhan non-fungsional
 

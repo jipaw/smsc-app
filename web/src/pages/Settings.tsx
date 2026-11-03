@@ -3,10 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get, patch, post, put } from '../lib/api'
 import { fmtTime } from '../lib/format'
 import { isAdmin, useMe } from '../lib/session'
-import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, Suppression, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
+import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
 import { Empty, ErrorBox, errMsg, Field, Loading, Modal, useToast } from '../components/ui'
 
-const TABS = ['Policy', 'Daftar blokir', 'API key', 'Webhook', 'Retensi', 'Pengguna', 'Audit'] as const
+const TABS = ['Policy', 'Daftar blokir', 'API key', 'Webhook', 'Retensi', 'Keamanan', 'Pengguna', 'Audit'] as const
 
 export function Settings() {
   const me = useMe()
@@ -16,7 +16,7 @@ export function Settings() {
     <div className="stack">
       <h1>Pengaturan</h1>
       <div className="tabs" role="tablist">{TABS.map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{t}</button>)}</div>
-      {tab === 'Policy' && <Policies />}{tab === 'Daftar blokir' && <Suppressions />}{tab === 'API key' && <ApiKeys />}{tab === 'Webhook' && <Webhooks />}{tab === 'Retensi' && <Retention />}{tab === 'Pengguna' && <Users />}{tab === 'Audit' && <Audit />}
+      {tab === 'Policy' && <Policies />}{tab === 'Daftar blokir' && <Suppressions />}{tab === 'API key' && <ApiKeys />}{tab === 'Webhook' && <Webhooks />}{tab === 'Retensi' && <Retention />}{tab === 'Keamanan' && <Security />}{tab === 'Pengguna' && <Users />}{tab === 'Audit' && <Audit />}
     </div>
   )
 }
@@ -120,17 +120,71 @@ function ApiKeys() {
 
 function Users() {
   const qc = useQueryClient()
+  const me = useMe()
+  const toast = useToast()
   const [f, setF] = useState<{ email: string; role: Role; password: string }>({ email: '', role: 'operator', password: '' })
-  const q = useQuery({ queryKey: ['users'], queryFn: () => get<{ items: { id: string; email: string; role: string; mfa_enabled?: boolean }[] }>('/users') })
-  const reset = useMutation({ mutationFn: (id: string) => del(`/users/${id}/2fa`), onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }) })
-  const create = useMutation({ mutationFn: () => post('/users', f), onSuccess: () => { setF({ email: '', role: 'operator', password: '' }); qc.invalidateQueries({ queryKey: ['users'] }) } })
+  const [pwFor, setPwFor] = useState<UserItem | null>(null)
+  const [newPw, setNewPw] = useState('')
+  const q = useQuery({ queryKey: ['users'], queryFn: () => get<{ items: UserItem[] }>('/users') })
+  const refresh = () => qc.invalidateQueries({ queryKey: ['users'] })
+  const reset = useMutation({ mutationFn: (id: string) => del(`/users/${id}/2fa`), onSuccess: refresh })
+  const edit = useMutation({ mutationFn: (v: { id: string; body: { role?: Role; disabled?: boolean } }) => patch(`/users/${v.id}`, v.body), onSuccess: refresh, onError: (e) => toast(errMsg(e), true) })
+  const setPw = useMutation({ mutationFn: () => post(`/users/${pwFor!.id}/password`, { new_password: newPw }), onSuccess: () => { toast('Password diganti; sesi pengguna dikeluarkan'); setPwFor(null); setNewPw('') } })
+  const create = useMutation({ mutationFn: () => post('/users', f), onSuccess: () => { setF({ email: '', role: 'operator', password: '' }); refresh() } })
   return (
     <div className="stack">
       <div className="card stack"><div className="grid cols-4"><Field label="Email"><input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
         <Field label="Peran"><select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Role })}><option>admin</option><option>operator</option><option>viewer</option></select></Field>
         <Field label="Password" hint="min. 12 karakter"><input type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field></div>
         <ErrorBox error={create.error} /><div><button className="primary" disabled={create.isPending} onClick={() => create.mutate()}>Tambah pengguna</button></div></div>
-      <div className="card"><table><thead><tr><th>Email</th><th>Peran</th><th>2FA</th><th /></tr></thead><tbody>{q.data?.items.map((u) => <tr key={u.id}><td>{u.email}</td><td>{u.role}</td><td>{u.mfa_enabled ? 'aktif' : '—'}</td><td className="right">{u.mfa_enabled && <button className="small danger" onClick={() => window.confirm(`Reset 2FA ${u.email}? Semua sesinya dikeluarkan dan ia harus menyiapkan 2FA lagi.`) && reset.mutate(u.id)}>Reset 2FA</button>}</td></tr>)}</tbody></table></div>
+      <div className="card scroll-x"><table><thead><tr><th>Email</th><th>Peran</th><th>Status</th><th>2FA</th><th /></tr></thead><tbody>{q.data?.items.map((u) => {
+        const self = u.id === me.id
+        return (
+          <tr key={u.id}><td>{u.email}{self && <span className="muted"> (Anda)</span>}</td>
+            <td>{self ? u.role : <select aria-label={`Peran ${u.email}`} value={u.role} onChange={(e) => edit.mutate({ id: u.id, body: { role: e.target.value as Role } })}><option>admin</option><option>operator</option><option>viewer</option></select>}</td>
+            <td>{u.disabled ? 'nonaktif' : 'aktif'}</td><td>{u.mfa_enabled ? 'aktif' : '—'}</td>
+            <td className="right"><span className="row">
+              {!self && <button className="small" onClick={() => { setPwFor(u); setNewPw('') }}>Set password</button>}
+              {!self && <button className={`small${u.disabled ? '' : ' danger'}`} onClick={() => (u.disabled || window.confirm(`Nonaktifkan ${u.email}? Semua sesinya dikeluarkan.`)) && edit.mutate({ id: u.id, body: { disabled: !u.disabled } })}>{u.disabled ? 'Aktifkan' : 'Nonaktifkan'}</button>}
+              {u.mfa_enabled && <button className="small danger" onClick={() => window.confirm(`Reset 2FA ${u.email}? Semua sesinya dikeluarkan dan ia harus menyiapkan 2FA lagi.`) && reset.mutate(u.id)}>Reset 2FA</button>}</span></td></tr>)
+      })}</tbody></table></div>
+      <Modal open={!!pwFor} onClose={() => setPwFor(null)} title={`Set password — ${pwFor?.email ?? ''}`}>
+        <div className="stack">
+          <p className="muted">Semua sesi pengguna ini dikeluarkan dan kunci akunnya direset. Sampaikan password baru lewat jalur aman.</p>
+          <Field label="Password baru" hint="min. 12 karakter"><input type="password" autoComplete="new-password" value={newPw} onChange={(e) => setNewPw(e.target.value)} /></Field>
+          <ErrorBox error={setPw.error} />
+          <div><button className="primary" disabled={newPw.length < 12 || setPw.isPending} onClick={() => setPw.mutate()}>Simpan password</button></div>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+const LEVELS: [SecuritySettings['require_2fa'], string, string][] = [
+  ['off', 'Opsional (default)', 'Setiap pengguna boleh mengaktifkan 2FA sendiri.'],
+  ['admin', 'Wajib untuk admin', 'Admin tanpa 2FA hanya dapat membuka halaman Akun sampai 2FA aktif.'],
+  ['all', 'Wajib untuk semua pengguna', 'Berlaku juga untuk operator dan viewer.'],
+]
+
+function Security() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const q = useQuery({ queryKey: ['security'], queryFn: () => get<SecuritySettings>('/settings/security') })
+  const save = useMutation({ mutationFn: (v: string) => put<SecuritySettings>('/settings/security', { require_2fa: v }), onSuccess: () => { toast('Kebijakan keamanan disimpan'); qc.invalidateQueries({ queryKey: ['security'] }) } })
+  if (q.isLoading) return <Loading what="kebijakan keamanan" />
+  if (!q.data) return <ErrorBox error={q.error} />
+  return (
+    <div className="card stack">
+      <h2>Kewajiban 2FA</h2>
+      <p className="muted">Akun yang belum punya 2FA tetap bisa masuk, tetapi hanya dapat menyiapkan 2FA. API key tidak terpengaruh. Anda sendiri harus sudah memakai 2FA untuk menyalakannya; bila ada yang terkunci keluar: <span className="mono">smscd admin reset-2fa</span>.</p>
+      <fieldset className="stack" style={{ border: 0, padding: 0 }}><legend className="sr-only">Kebijakan</legend>
+        {LEVELS.map(([v, l, d]) => (
+          <label key={v} className="row" style={{ alignItems: 'flex-start' }}>
+            <input type="radio" name="require2fa" checked={q.data!.require_2fa === v} disabled={save.isPending} onChange={() => save.mutate(v)} />
+            <span><strong>{l}</strong><br /><span className="muted">{d}</span></span></label>))}
+      </fieldset>
+      <ErrorBox error={save.error} />
+      <div>{q.data.users_missing_2fa > 0 ? <span className="badge warn">{q.data.users_missing_2fa} pengguna dalam cakupan belum memakai 2FA</span> : <span className="badge ok">Semua pengguna dalam cakupan sudah memakai 2FA (atau kebijakan opsional)</span>}</div>
     </div>
   )
 }

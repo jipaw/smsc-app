@@ -239,13 +239,20 @@ func (s *Service) RevokeAPIKey(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-func (s *Service) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id,email,role,tailscale_login,totp_secret IS NOT NULL FROM users ORDER BY created_at`)
+// UserItem: baris daftar pengguna (admin).
+type UserItem struct {
+	User
+	Disabled  bool      `json:"disabled"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (s *Service) ListUsers(ctx context.Context) ([]UserItem, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT id,email,role,tailscale_login,totp_secret IS NOT NULL,disabled,created_at FROM users ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (User, error) {
-		var u User
-		return u, r.Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled)
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (UserItem, error) {
+		var u UserItem
+		return u, r.Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.Disabled, &u.CreatedAt)
 	})
 }

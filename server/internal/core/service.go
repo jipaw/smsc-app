@@ -36,6 +36,7 @@ type DeviceLink interface {
 }
 
 type Service struct {
+	sec  secCache // kebijakan keamanan (cache pendek)
 	Pool *pgxpool.Pool
 	Cfg  config.Config
 	Log  *slog.Logger
