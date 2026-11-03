@@ -39,11 +39,19 @@ type API struct {
 	enrollLimit *limiter
 	keyLimit    *limiter
 	userLimit   *limiter
+	acctLimit   *limiter // operasi sensitif akun (ganti password, 2FA), per pengguna
 }
 
 func New(svc *core.Service, h *hub.Hub, b *bus.Bus, log *slog.Logger) *API {
-	return &API{Svc: svc, Hub: h, Bus: b, Log: log,
-		loginLimit: newLimiter(5.0/60, 5), enrollLimit: newLimiter(10.0/60, 10), keyLimit: newLimiter(20, 40), userLimit: newLimiter(10, 20)}
+	lr, lb := svc.Cfg.LoginRatePerMin, svc.Cfg.LoginBurst
+	if lr <= 0 {
+		lr = 5
+	}
+	if lb <= 0 {
+		lb = 5
+	}
+	return &API{Svc: svc, Hub: h, Bus: b, Log: log, acctLimit: newLimiter(2*lr/60, 2*lb),
+		loginLimit: newLimiter(lr/60, lb), enrollLimit: newLimiter(10.0/60, 10), keyLimit: newLimiter(20, 40), userLimit: newLimiter(10, 20)}
 }
 
 func (a *API) Router() http.Handler {
@@ -70,6 +78,7 @@ func (a *API) Router() http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		// publik
 		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/login", a.login)
+		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/login/verify", a.loginVerify)
 		r.With(a.limit(a.enrollLimit, clientIP)).Post("/device/enroll", a.deviceEnroll)
 
 		// device agent
@@ -84,6 +93,12 @@ func (a *API) Router() http.Handler {
 			r.Use(a.authenticate, a.csrf)
 			r.Post("/auth/logout", a.logout)
 			r.Get("/auth/me", a.me)
+			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/password", a.changePassword)
+			r.Get("/auth/2fa", a.mfaStatus)
+			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/2fa/setup", a.mfaSetup)
+			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/2fa/enable", a.mfaEnable)
+			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/2fa/disable", a.mfaDisable)
+			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/2fa/recovery-codes", a.mfaRecoveryCodes)
 
 			viewer := a.authz(roleViewer, "")
 			operator := func(scope string) func(http.Handler) http.Handler { return a.authz(roleOperator, scope) }
@@ -130,8 +145,10 @@ func (a *API) Router() http.Handler {
 			r.With(admin).Get("/api-keys", a.listAPIKeys)
 			r.With(admin).Post("/api-keys", a.createAPIKey)
 			r.With(admin).Delete("/api-keys/{apiKeyId}", a.deleteAPIKey)
+			r.With(admin).Post("/api-keys/{apiKeyId}/rotate", a.rotateAPIKey)
 			r.With(admin).Get("/users", a.listUsers)
 			r.With(admin).Post("/users", a.createUser)
+			r.With(admin).Delete("/users/{userId}/2fa", a.resetUserMFA)
 			r.With(admin).Get("/audit-logs", a.listAudit)
 
 			r.With(viewer).Get("/stats/overview", a.overview)
@@ -158,6 +175,7 @@ func (a *API) Router() http.Handler {
 			r.With(admin).Patch("/webhooks/{webhookId}", a.patchWebhook)
 			r.With(admin).Delete("/webhooks/{webhookId}", a.deleteWebhook)
 			r.With(admin).Post("/webhooks/{webhookId}/test", a.testWebhook)
+			r.With(admin).Post("/webhooks/{webhookId}/rotate-secret", a.rotateWebhookSecret)
 			r.With(admin).Get("/webhooks/{webhookId}/deliveries", a.listDeliveries)
 			r.With(admin).Post("/webhooks/{webhookId}/deliveries/{deliveryId}/retry", a.retryDelivery)
 			r.With(admin).Get("/settings/retention", a.getRetention)

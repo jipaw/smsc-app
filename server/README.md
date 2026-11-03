@@ -3,11 +3,11 @@
 Go 1.24 + PostgreSQL 16. Satu biner: REST API, WebSocket device, SSE, dispatcher, reaper, dan dashboard (embed).
 Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 
-## Status (fase 1–3)
+## Status (fase 1–4)
 
 | Sudah | Belum (fase 4) |
 |---|---|
-| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | Rotasi kredensial, 2FA |
+| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | Enforcement 2FA admin, WebAuthn, SSO |
 | Enrollment sekali pakai, registry device/SIM, revoke, perintah jarak jauh | Multi-instance (hanya leader tunggal via advisory lock) |
 | WS hub protokol v1 (hello + rekonsiliasi, heartbeat, sms.event idempoten, sim.report) | |
 | Kirim pesan (normalisasi E.164, GSM-7/UCS-2, template, suppression, Idempotency-Key, `client_ref`) | |
@@ -16,6 +16,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | Mesin status satu pintu, retry + backoff, cancel/retry manual, transaksi + timeline, ekspor CSV aman | |
 | Policy berlapis (global/device/SIM/pesan) + CRUD + tampilan efektif, SSE dengan replay, statistik, audit log | |
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
+| **Fase 4**: 2FA TOTP (+ kode pemulihan, login dua tahap), ganti password, rotasi kredensial device / API key / secret webhook / `SESSION_SECRET` / kunci enkripsi | |
 | **Webhook (fase 3)**: outbox transaksional, HMAC-SHA256, retry/backoff, SSRF guard, riwayat + kirim ulang | |
 | **Retensi (fase 3)**: pembersihan terjadwal, `PUT /settings/retention`, `smscd privacy erase` | |
 | **Metrik (fase 3)**: `/metrics` di listener terpisah, `ops/prometheus/alerts.yml` | |
@@ -39,6 +40,23 @@ smscd privacy erase --number 08123456789 --suppress   # anonimkan semua jejak sa
 curl -s 127.0.0.1:9090/metrics | grep ^smsc_
 promtool check rules ../ops/prometheus/alerts.yml     # bila promtool tersedia
 ```
+
+## Rotasi kredensial dan 2FA (fase 4)
+
+| Env | Default | Arti |
+|---|---|---|
+| `SESSION_SECRET_PREVIOUS` | – | Rahasia sesi lama (koma); sesi tetap sah selama rotasi |
+| `WEBHOOK_ENC_KEY_PREVIOUS` | – | Kunci enkripsi lama (secret webhook & rahasia TOTP) untuk membaca selama rotasi |
+| `DEVICE_ROTATE_GRACE` | `60s` | Masa secret device lama setelah rotasi |
+| `LOGIN_RATE_PER_MIN` / `LOGIN_BURST` | `5` / `5` | Batas login & verifikasi 2FA per IP (akun: 2× per pengguna) |
+
+```bash
+smscd admin reset-2fa --email admin@contoh.id         # admin terkunci keluar (cabut 2FA + semua sesinya)
+smscd admin reset-password --email admin@contoh.id    # lupa password (acak, tampil sekali)
+smscd secrets reencrypt                               # setelah mengganti WEBHOOK_ENC_KEY (kunci lama di …_PREVIOUS)
+```
+
+Endpoint: `POST /auth/login` → (2FA aktif) `{mfa_required, mfa_token}` → `POST /auth/login/verify`; `/auth/2fa`, `/auth/2fa/{setup,enable,disable,recovery-codes}`, `/auth/password`, `/users/{id}/2fa` (admin), `/api-keys/{id}/rotate`, `/webhooks/{id}/rotate-secret`, perintah device `rotate_credential`. Runbook: `docs/spec/10` R-06.
 
 ## Campaign — perilaku yang perlu diketahui
 

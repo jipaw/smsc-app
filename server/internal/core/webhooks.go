@@ -3,10 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -38,7 +35,10 @@ type Webhook struct {
 	Enabled       bool      `json:"enabled"`
 	Description   *string   `json:"description"`
 	CreatedAt     time.Time `json:"created_at"`
-	SigningSecret string    `json:"signing_secret,omitempty"` // hanya pada respons pembuatan
+	SigningSecret string    `json:"signing_secret,omitempty"` // hanya pada respons pembuatan/rotasi
+	// rotasi secret: waktu terakhir, dan sampai kapan secret lama masih ikut menandatangani (null = tidak ada)
+	SecretRotatedAt          *time.Time `json:"secret_rotated_at"`
+	PreviousSecretValidUntil *time.Time `json:"previous_secret_valid_until"`
 }
 
 type WebhookDelivery struct {
@@ -53,45 +53,9 @@ type WebhookDelivery struct {
 	DeliveredAt   *time.Time `json:"delivered_at"`
 	FailedAt      *time.Time `json:"failed_at"`
 	CreatedAt     time.Time  `json:"created_at"`
-}
-
-// ---------- enkripsi secret (AES-256-GCM, kunci dari WEBHOOK_ENC_KEY / SESSION_SECRET) ----------
-
-func (s *Service) whKey() []byte {
-	h := sha256.Sum256([]byte(s.Cfg.WebhookKey + "|smsc-webhook-secret-v1"))
-	return h[:]
-}
-
-func (s *Service) encryptSecret(plain string) ([]byte, error) {
-	blk, err := aes.NewCipher(s.whKey())
-	if err != nil {
-		return nil, err
-	}
-	gcm, err := cipher.NewGCM(blk)
-	if err != nil {
-		return nil, err
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	return gcm.Seal(nonce, nonce, []byte(plain), nil), nil
-}
-
-func (s *Service) decryptSecret(blob []byte) (string, error) {
-	blk, err := aes.NewCipher(s.whKey())
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(blk)
-	if err != nil {
-		return "", err
-	}
-	if len(blob) < gcm.NonceSize() {
-		return "", errors.New("secret rusak")
-	}
-	out, err := gcm.Open(nil, blob[:gcm.NonceSize()], blob[gcm.NonceSize():], nil)
-	return string(out), err
+	// rotasi secret: waktu terakhir, dan sampai kapan secret lama masih ikut menandatangani (null = tidak ada)
+	SecretRotatedAt          *time.Time `json:"secret_rotated_at"`
+	PreviousSecretValidUntil *time.Time `json:"previous_secret_valid_until"`
 }
 
 // ---------- validasi URL + perlindungan SSRF ----------
@@ -172,11 +136,11 @@ func (s *Service) validateWebhookEvents(ev []string) *FieldError {
 
 // ---------- CRUD ----------
 
-const whCols = `id,url,events,enabled,description,created_at`
+const whCols = `id,url,events,enabled,description,created_at,secret_rotated_at,CASE WHEN prev_valid_until > now() THEN prev_valid_until END`
 
 func scanWebhook(r pgx.Row) (Webhook, error) {
 	var w Webhook
-	err := r.Scan(&w.ID, &w.URL, &w.Events, &w.Enabled, &w.Description, &w.CreatedAt)
+	err := r.Scan(&w.ID, &w.URL, &w.Events, &w.Enabled, &w.Description, &w.CreatedAt, &w.SecretRotatedAt, &w.PreviousSecretValidUntil)
 	if w.Events == nil {
 		w.Events = []string{}
 	}
@@ -201,6 +165,32 @@ func (s *Service) CreateWebhook(ctx context.Context, by uuid.UUID, rawURL string
 	}
 	w, err := scanWebhook(s.Pool.QueryRow(ctx, `INSERT INTO webhooks(id,url,events,signing_secret,description,created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING `+whCols,
 		newID(), rawURL, uniqueStrings(events), enc, nullStr(desc), by))
+	if err != nil {
+		return Webhook{}, err
+	}
+	w.SigningSecret = secret
+	return w, nil
+}
+
+// RotateWebhookSecret menerbitkan secret baru (tampil sekali). Selama graceSeconds, setiap pengiriman ditandatangani
+// dengan KEDUA secret (header berisi dua nilai) agar penerima bisa berganti tanpa kehilangan event.
+func (s *Service) RotateWebhookSecret(ctx context.Context, id uuid.UUID, graceSeconds int) (Webhook, error) {
+	if fe := graceOK(graceSeconds); fe != nil {
+		return Webhook{}, Validation(*fe)
+	}
+	secret := "whsec_" + randToken(32)
+	enc, err := s.encryptSecret(secret)
+	if err != nil {
+		return Webhook{}, err
+	}
+	w, err := scanWebhook(s.Pool.QueryRow(ctx, `UPDATE webhooks SET
+		  prev_signing_secret = CASE WHEN $3 > 0 THEN signing_secret END,
+		  prev_valid_until    = CASE WHEN $3 > 0 THEN now() + make_interval(secs => $3) END,
+		  signing_secret=$2, secret_rotated_at=now(), updated_at=now()
+		WHERE id=$1 RETURNING `+whCols, id, enc, graceSeconds))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Webhook{}, NotFound("webhook")
+	}
 	if err != nil {
 		return Webhook{}, err
 	}
@@ -453,8 +443,8 @@ func Sign(secret, timestamp string, body []byte) string {
 
 func (s *Service) deliver(ctx context.Context, client *http.Client, d claimedDelivery) {
 	var target string
-	var enc []byte
-	if err := s.Pool.QueryRow(ctx, `SELECT url, signing_secret FROM webhooks WHERE id=$1`, d.webhookID).Scan(&target, &enc); err != nil {
+	var enc, encPrev []byte
+	if err := s.Pool.QueryRow(ctx, `SELECT url, signing_secret, CASE WHEN prev_valid_until > now() THEN prev_signing_secret END FROM webhooks WHERE id=$1`, d.webhookID).Scan(&target, &enc, &encPrev); err != nil {
 		return
 	}
 	secret, err := s.decryptSecret(enc)
@@ -474,7 +464,13 @@ func (s *Service) deliver(ctx context.Context, client *http.Client, d claimedDel
 	req.Header.Set("X-SMSC-Event", d.event)
 	req.Header.Set("X-SMSC-Delivery", d.id.String())
 	req.Header.Set("X-SMSC-Timestamp", ts)
-	req.Header.Set("X-SMSC-Signature", Sign(secret, ts, body))
+	sig := Sign(secret, ts, body)
+	if encPrev != nil { // masa rotasi: tanda tangan ganda "sha256=<baru>,sha256=<lama>"; penerima menerima bila salah satu cocok
+		if old, err := s.decryptSecret(encPrev); err == nil {
+			sig += "," + Sign(old, ts, body)
+		}
+	}
+	req.Header.Set("X-SMSC-Signature", sig)
 	start := time.Now()
 	resp, err := client.Do(req)
 	dur := time.Since(start)

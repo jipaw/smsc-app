@@ -4,15 +4,16 @@ Per commit ini. "Teruji" menyebut bukti yang dijalankan, bukan klaim. Rujukan ke
 
 | Area | Status | Bukti |
 |---|---|---|
-| Kontrak REST (`openapi.yaml`, 71 operasi) | Valid; respons server dicocokkan ke skema | `server/tests/contract_check.py`: 82 respons, 0 ketidaksesuaian |
-| Protokol WS (`ws-schema.json`) | Skema + 16 vector valid / 13 invalid; model Kotlin & server memakainya | `contracts/tools/validate_vectors.py`, `android :core` ProtocolVectorsTest, `poc/server/selftest.py` |
-| DDL (`schema.sql`) | Snapshot akhir = migrasi 0001+0002+0003, dibandingkan lewat `pg_dump` (uji positif dan negatif) | `server/tests/schema_sync.sh` |
-| **Server fase 1–3** (Go) | FR-01, 02, 04–22 ✔: + webhook (FR-21), retensi + hapus-nomor (FR-22), metrik Prometheus + 16 alert (lihat `server/README.md`) | 46 tes integrasi (20 inti + 13 campaign + 13 fase 3) + 15 unit, lulus `-race`; 4 mutasi disengaja tertangkap (fase 2) |
-| **Dashboard fase 1–3** (React) | + Campaigns (wizard, kontrol) + Pengaturan > Webhook (buat, uji, riwayat, kirim ulang) dan Retensi | typecheck, 5 unit, **73 pemeriksaan E2E** di Chromium (axe terang/gelap, mobile 390px, RBAC, wizard, penerima webhook lokal memverifikasi HMAC, `/metrics`) |
+| Kontrak REST (`openapi.yaml`, 81 operasi) | Valid; respons server dicocokkan ke skema | `server/tests/contract_check.py`: 111 respons, 0 ketidaksesuaian |
+| Protokol WS (`ws-schema.json`) | Skema + 17 vector valid / 15 invalid; model Kotlin & server memakainya | `contracts/tools/validate_vectors.py`, `android :core` ProtocolVectorsTest, `poc/server/selftest.py` |
+| DDL (`schema.sql`) | Snapshot akhir = migrasi 0001–0004, dibandingkan lewat `pg_dump` (uji positif dan negatif) | `server/tests/schema_sync.sh` |
+| **Server fase 1–4** (Go) | FR-01–22 ✔ + FR-03 rotasi kredensial device, rotasi API key / secret webhook / kunci server, 2FA TOTP + kode pemulihan, ganti password (lihat `server/README.md`) | 59 tes integrasi (20 inti + 13 campaign + 13 fase 3 + 13 fase 4) + 18 unit (termasuk vektor RFC 6238), lulus `-race`; mutasi disengaja pada 2FA/rotasi tertangkap |
+| **Dashboard fase 1–4** (React) | + Campaigns, Webhook, Retensi + halaman **Akun** (ganti password, 2FA dengan QR & kode pemulihan), login dua langkah, tombol Putar (API key, secret webhook, kredensial device), Reset 2FA | typecheck, 5 unit, **91 pemeriksaan E2E** di Chromium (axe terang/gelap, mobile 390px, RBAC, wizard, HMAC webhook, `/metrics`, alur 2FA lengkap dengan TOTP dihitung di Node) |
 | **Android PoC** | Skeleton; belum dijalankan di HP | `:core` 26 tes, `:typecheck` 2 tes, `poc/README.md` |
 | Aplikasi Android produksi | **Belum** | menunggu hasil PoC (R1/R2/R3/R5/R6) |
 | Variabel per-penerima pada "Kirim SMS" cepat | **Belum** (gunakan campaign) | – |
-| Rotasi kredensial, 2FA, multi-instance | **Belum** (fase 4) | – |
+| Kewajiban 2FA untuk admin (enforcement), WebAuthn, SSO, daftar password umum, ubah peran/nonaktifkan pengguna, multi-instance | **Belum** | – |
+| Rotasi kredensial **di sisi HP** (menyimpan `new_secret` ke Keystore lalu membalas `ok`) | Server + protokol + vektor siap & teruji dengan simulator; **belum diimplementasikan di aplikasi Android** (PoC membalas `ok=false`, aman: secret lama tetap berlaku) | `TestDeviceCredentialRotation*` |
 | Alert Prometheus (`ops/prometheus/alerts.yml`) | Ditulis; setiap metrik yang dirujuk diverifikasi ada di `/metrics`. **Belum dijalankan di Prometheus/Alertmanager sungguhan** (ambang awal, perlu penyetelan) | `TestAlertRulesReferenceExistingMetrics` |
 
 ## Pengukuran beban campaign (`make load`, 1 mesin, PG16 lokal, tanpa HP online)
@@ -35,6 +36,14 @@ Per commit ini. "Teruji" menyebut bukti yang dijalankan, bukan klaim. Rujukan ke
 - **Hapus nomor** (`smscd privacy erase --number … [--suppress]`): anonimkan pesan, penerima, dan payload webhook untuk satu nomor; ditolak (`privacy.active_messages`) bila ada pesan aktif; audit hanya menyimpan hash.
 - **Metrik** di listener terpisah `METRICS_ADDR` (default `127.0.0.1:9090`, bukan di port publik). Label berkardinalitas kecil (pola rute, bukan URL), tanpa nomor/isi pesan. Gauge DB di-cache 5 dtk. Nama metrik implementasi (mis. `smsc_message_transitions_total`) menjadi acuan; tabel di spec 10 §Monitoring disesuaikan.
 - Bug yang tertangkap saat fase 3: `smsc_queue_depth` tidak punya seri saat antrean kosong (alert merujuk metrik yang tidak ada) → seri prioritas 0–9 selalu ada; retry delivery yang tak ada membalas 409 (kini 404); satu pemeriksaan E2E flaky (progress bar dihitung sebelum dirender).
+
+## Fase 4 — perilaku yang perlu diketahui
+- **Rotasi secret device dua tahap**: server menyimpan secret baru sebagai *tertunda* dan mengirimnya (`device.command.new_secret`, WSS). Secret lama tetap sah; promosi terjadi saat HP membalas `ok=true` **atau** begitu secret baru dipakai untuk autentikasi (konfirmasi hilang di jalan tidak mengunci HP). `ok=false`, kedaluwarsa 10 mnt, atau device dicabut → secret tertunda tidak berlaku. Spec lama menaruh `new_secret` di hasil D→S; diubah (arah S→D, dan wajib/terlarang menurut `action` di JSON Schema) karena server yang menciptakan secret agar tidak ada status setengah-ganti.
+- **2FA**: lihat spec 09. Kode TOTP yang dipakai saat aktivasi tidak bisa dipakai lagi untuk login (langkah yang sama), jadi login pertama setelah aktivasi butuh kode langkah berikutnya (≤ 30 dtk) — perilaku anti-replay, bukan bug. Hanya sesi dashboard yang bisa mengelola akun; API key → 403.
+- **Rotasi API key** menjaga id/nama/scope; `prefix` berganti. **Rotasi secret webhook** default masa tumpang tindih 24 jam, header tanda tangan ganda.
+- **Kunci server**: `SESSION_SECRET_PREVIOUS` membuat rotasi tanpa logout massal; `WEBHOOK_ENC_KEY_PREVIOUS` + `smscd secrets reencrypt` untuk kunci enkripsi (menutup catatan fase 3). Kunci yang salah gagal dengan jelas, bukan diam-diam.
+- Pembatas laju login kini dapat dikonfigurasi (`LOGIN_RATE_PER_MIN`, `LOGIN_BURST`) karena banyak admin di balik satu NAT akan saling memblokir pada default 5/menit/IP.
+- Bug yang tertangkap saat fase 4: tes menunjukkan kode TOTP aktivasi memang tidak boleh dipakai ulang (asumsi tes salah, bukan server); mutasi "tanpa sidik jari password" dan "tanpa promosi saat pemakaian pertama" tertangkap tes.
 
 ## Perilaku yang berbeda dari spesifikasi / keputusan yang diambil saat membangun
 - Kill switch global ditambahkan ke kontrak (`GET/PUT /settings/dispatch-pause`); sebelumnya hanya disebut di spec 09/10.

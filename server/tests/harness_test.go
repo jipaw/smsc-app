@@ -74,6 +74,7 @@ func newEnvOpts(t *testing.T, opts ...func(*config.Config)) *env {
 		HeartbeatIntervalSec: 30, EnrollTTL: 15 * time.Minute, RequireVPN: false,
 		CampaignTick: 150 * time.Millisecond, CampaignQueueCap: 20000, NoCapacityAfter: 10 * time.Minute,
 		WebhookTimeout: 2 * time.Second, WebhookBackoff: []time.Duration{300 * time.Millisecond, 400 * time.Millisecond, 500 * time.Millisecond}, WebhookAllowLoopback: true,
+		LoginRatePerMin: 6000, LoginBurst: 1000, DeviceRotateGrace: 1500 * time.Millisecond,
 		WebhookKey: strings.Repeat("k", 40), WebhookWorkers: 4, WebhookTick: 100 * time.Millisecond, RetentionInterval: time.Hour}
 	for _, o := range opts {
 		o(&cfg)
@@ -204,7 +205,10 @@ type Sim struct {
 	Acks     []string // event_id yang di-ack server
 	// perilaku (dapat diubah per tes)
 	OnSend func(s *Sim, env proto.Envelope, cmd proto.SmsSend)
-	Closed chan websocket.CloseError
+	// device.command dari server (rotasi kredensial dll.); bila nil, command diabaikan
+	Commands  []proto.DeviceCommand
+	OnCommand func(s *Sim, env proto.Envelope, cmd proto.DeviceCommand)
+	Closed    chan websocket.CloseError
 }
 
 type sendRec struct {
@@ -316,6 +320,16 @@ func (s *Sim) loop() {
 			s.mu.Unlock()
 			if s.OnSend != nil {
 				s.OnSend(s, env, cmd)
+			}
+		case proto.TypeDeviceCommand:
+			var c proto.DeviceCommand
+			_ = json.Unmarshal(env.Payload, &c)
+			s.mu.Lock()
+			s.Commands = append(s.Commands, c)
+			s.mu.Unlock()
+			s.Ack(env, true, "")
+			if s.OnCommand != nil {
+				s.OnCommand(s, env, c)
 			}
 		case proto.TypeSmsCancel:
 			var c proto.SmsCancel
@@ -429,4 +443,23 @@ func (c *client) waitStatus(id string, want string, d time.Duration) msgView {
 	var m msgView
 	waitFor(c.e.t, d, fmt.Sprintf("pesan %s -> %s", id[:8], want), func() bool { m = c.msg(id); return m.Status == want })
 	return m
+}
+
+// Result membalas device.command dengan device.command_result.
+func (s *Sim) Result(cmd proto.DeviceCommand, ok bool, detail string) {
+	var d *string
+	if detail != "" {
+		d = &detail
+	}
+	r, _ := proto.New(proto.TypeCommandResult, proto.CommandResult{CommandID: cmd.CommandID, OK: ok, Detail: d}, nil)
+	s.write(r)
+}
+
+func (s *Sim) LastCommand() (proto.DeviceCommand, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Commands) == 0 {
+		return proto.DeviceCommand{}, false
+	}
+	return s.Commands[len(s.Commands)-1], true
 }

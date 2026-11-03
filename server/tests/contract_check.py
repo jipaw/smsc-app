@@ -120,10 +120,35 @@ def call(method, path, body=None, expect=None, headers=None, raw=False):
     return status, parsed
 
 
+
+def totp_code(secret, offset=0):
+    import base64, hashlib, hmac, struct
+    key = base64.b32decode(secret + "=" * (-len(secret) % 8))
+    d = hmac.new(key, struct.pack(">Q", int(time.time()) // 30 + offset), hashlib.sha1).digest()
+    o = d[-1] & 15
+    return "%06d" % ((struct.unpack(">I", d[o:o + 4])[0] & 0x7fffffff) % 1000000)
+
+
+def anon(method, path, body=None, expect=None):
+    """Permintaan tanpa cookie (sesi terpisah) yang tetap divalidasi terhadap kontrak."""
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(URL + path, data=data, method=method, headers={"Content-Type": "application/json"})
+    try:
+        r = urllib.request.build_opener().open(req, timeout=15)
+        status, ct, payload = r.status, r.headers.get("Content-Type", ""), r.read()
+    except urllib.error.HTTPError as e:
+        status, ct, payload = e.code, e.headers.get("Content-Type", ""), e.read()
+    parsed = json.loads(payload) if payload and "json" in ct else None
+    if expect is not None and status != expect:
+        problems.append(f"{method} {path}: status {status}, diharapkan {expect}: {payload[:200]!r}")
+    validate_response(method, path, status, parsed, ct)
+    return status, parsed
+
+
 def main():
     psql(f"CREATE DATABASE {DB}")
     env = dict(os.environ, DATABASE_URL=DSN, PUBLIC_BASE_URL="http://example.test", SESSION_SECRET="s" * 40,
-               HTTP_ADDR=f"127.0.0.1:{PORT}", AUTO_MIGRATE="true", SECURE_COOKIES="false", REQUIRE_VPN="false")
+               HTTP_ADDR=f"127.0.0.1:{PORT}", AUTO_MIGRATE="true", SECURE_COOKIES="false", REQUIRE_VPN="false", LOGIN_BURST="60", LOGIN_RATE_PER_MIN="600")
     admin_pw = "kontrak-admin-12345"
     subprocess.run([BIN, "migrate"], env=env, check=True, capture_output=True)
     subprocess.run([BIN, "admin", "create", "--email", "admin@ct.test", "--password", admin_pw], env=env, check=True, capture_output=True)
@@ -268,6 +293,46 @@ def run_checks(pw):
     st, rt = call("GET", "/api/v1/settings/retention", expect=200)
     call("PUT", "/api/v1/settings/retention", {"body_retention_days": 90, "event_retention_days": 180}, 200)
     call("PUT", "/api/v1/settings/retention", {"body_retention_days": -1, "event_retention_days": 180}, 422)
+
+    # rotasi kredensial + 2FA + ganti password (fase 4)
+    st, k2 = call("POST", "/api/v1/api-keys", {"name": "rotasi", "scopes": ["messages:read"]}, 201)
+    call("POST", f"/api/v1/api-keys/{k2['id']}/rotate", {"grace_seconds": 60}, 200)
+    call("POST", f"/api/v1/api-keys/{k2['id']}/rotate", {"grace_seconds": -5}, 422)
+    call("POST", f"/api/v1/api-keys/{uuid.uuid4()}/rotate", {}, 404)
+    call("GET", "/api/v1/api-keys", expect=200)
+    st, wh2 = call("POST", "/api/v1/webhooks", {"url": "http://100.64.0.9:9/hook", "events": ["message.failed"]}, 201)
+    call("POST", f"/api/v1/webhooks/{wh2['id']}/rotate-secret", {"grace_seconds": 60}, 200)
+    call("POST", f"/api/v1/webhooks/{wh2['id']}/rotate-secret", {"grace_seconds": 99999999}, 422)
+    call("POST", f"/api/v1/webhooks/{uuid.uuid4()}/rotate-secret", {}, 404)
+    call("GET", f"/api/v1/webhooks/{wh2['id']}", expect=200)
+    call("DELETE", f"/api/v1/webhooks/{wh2['id']}", expect=204)
+    call("POST", f"/api/v1/devices/{dev}/commands", {"action": "rotate_credential"}, 409)  # offline
+
+    call("GET", "/api/v1/auth/2fa", expect=200)
+    call("POST", "/api/v1/auth/password", {"current_password": "salah-salah-1234", "new_password": "kontrak-baru-12345"}, 401)
+    call("POST", "/api/v1/auth/password", {"current_password": pw, "new_password": "pendek"}, 422)
+    call("POST", "/api/v1/auth/2fa/setup", {"password": "salah-salah-1234"}, 401)
+    st, setup = call("POST", "/api/v1/auth/2fa/setup", {"password": pw}, 200)
+    call("POST", "/api/v1/auth/2fa/enable", {"code": "000000"}, 422)
+    st, rc = call("POST", "/api/v1/auth/2fa/enable", {"code": totp_code(setup["secret"])}, 200)
+    call("POST", "/api/v1/auth/2fa/setup", {"password": pw}, 409)
+    call("GET", "/api/v1/auth/2fa", expect=200)
+    call("GET", "/api/v1/users", expect=200)
+    st, ch = anon("POST", "/api/v1/auth/login", {"email": "admin@ct.test", "password": pw}, 200)
+    if not ch or not ch.get("mfa_required"):
+        problems.append("login dengan 2FA aktif harus mengembalikan tantangan")
+    else:
+        anon("POST", "/api/v1/auth/login/verify", {"mfa_token": ch["mfa_token"], "code": "000000"}, 401)
+        anon("POST", "/api/v1/auth/login/verify", {"mfa_token": "sampah", "code": "000000"}, 401)
+        anon("POST", "/api/v1/auth/login/verify", {"mfa_token": ch["mfa_token"], "code": rc["recovery_codes"][0]}, 200)
+    st, rc2 = call("POST", "/api/v1/auth/2fa/recovery-codes", {"password": pw, "code": rc["recovery_codes"][1]}, 200)
+    call("POST", "/api/v1/auth/2fa/disable", {"password": pw, "code": "000000"}, 401)
+    call("POST", "/api/v1/auth/2fa/disable", {"password": pw, "code": rc2["recovery_codes"][0]}, 204)
+    call("POST", "/api/v1/auth/2fa/disable", {"password": pw, "code": "123456"}, 409)
+    st, op = call("POST", "/api/v1/users", {"email": "op2@ct.test", "role": "operator", "password": "operator-pass-1234"}, 201)
+    call("DELETE", f"/api/v1/users/{op['id']}/2fa", expect=204)
+    call("DELETE", f"/api/v1/users/{uuid.uuid4()}/2fa", expect=404)
+    call("POST", "/api/v1/auth/password", {"current_password": pw, "new_password": "kontrak-baru-12345"}, 204)
 
     # revoke di akhir
     call("DELETE", f"/api/v1/devices/{dev}", expect=204)

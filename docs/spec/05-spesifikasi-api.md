@@ -11,7 +11,7 @@ Sumber kebenaran skema: [`contracts/openapi.yaml`](../../contracts/openapi.yaml)
 | Autentikasi | Dashboard: cookie `smsc_session` + header `X-CSRF-Token` untuk `POST/PUT/PATCH/DELETE`. Sistem eksternal: `Authorization: Bearer smsc_live_…`. Device: `Authorization: Bearer <device_secret>` (hanya `/device/*`, `/ws/device`) |
 | Pagination | `limit` (1–200, default 50) + `cursor` opak; respons `{items, next_cursor}`. Urutan `created_at DESC, id DESC` kecuali dinyatakan lain |
 | Idempotensi | Header `Idempotency-Key` (≤ 128 char) pada `POST /messages` dan `POST /campaigns`; kunci disimpan 24 jam per pemilik; permintaan ulang dengan body berbeda → 409 `idempotency.conflict`; dengan body sama → respons asal |
-| Rate limit | API key: 20 permintaan/dtk, burst 40; sesi dashboard: 10/dtk; `POST /auth/login`: 5/menit/IP. Terlampaui → 429 + `Retry-After` |
+| Rate limit | API key: 20 permintaan/dtk, burst 40; sesi dashboard: 10/dtk; `POST /auth/login` dan `/auth/login/verify`: 5/menit/IP (`LOGIN_RATE_PER_MIN`); endpoint akun (password, 2FA): 10/menit/pengguna. Terlampaui → 429 + `Retry-After` |
 | Versi | Prefix `/v1`. Perubahan kompatibel (field baru opsional, enum baru pada respons) tidak menaikkan versi; klien wajib mengabaikan field/enum tak dikenal. Perubahan merusak → `/v2` dengan masa tumpang tindih ≥ 6 bulan, `Deprecation`/`Sunset` header |
 | Ukuran | Body JSON ≤ 5 MiB; CSV ≤ 20 MiB |
 | Field null | Mengirim `null` pada PATCH berarti "hapus/warisi"; field yang tidak dikirim tidak berubah |
@@ -36,6 +36,11 @@ Sumber kebenaran skema: [`contracts/openapi.yaml`](../../contracts/openapi.yaml)
 | `auth.unauthenticated` | 401 | Tidak ada/invalid kredensial |
 | `auth.invalid_credentials` | 401 | Email/password salah (pesan seragam) |
 | `auth.locked` | 423 | Akun terkunci sementara |
+| `auth.invalid_code` | 401 | Kode 2FA / kode pemulihan salah |
+| `auth.mfa_expired` | 401 | Tantangan 2FA kedaluwarsa/tidak valid; ulangi login |
+| `mfa.already_enabled` | 409 | 2FA sudah aktif |
+| `mfa.not_enabled` | 409 | 2FA belum aktif |
+| `mfa.no_pending_setup` | 409 | Belum ada penyiapan 2FA yang menunggu konfirmasi |
 | `auth.forbidden` | 403 | Peran/scope tidak cukup |
 | `auth.csrf` | 403 | Token CSRF hilang/salah |
 | `validation.failed` | 422 | Validasi field (lihat `errors[]`) |
@@ -67,6 +72,15 @@ curl -sS -X POST https://smsc.example.ts.net/api/v1/device-enrollments \
 ```
 
 App memanggil `POST /device/enroll` dengan `token`, `install_id`, `device_info`, `sims`; respons memuat `device_id`, `device_secret` (sekali tampil), `ws_url`, `config`.
+
+### 3.1b Login dengan 2FA
+
+```text
+POST /auth/login {email,password}         -> 200 {mfa_required:true, mfa_token, expires_in:300}   (TANPA cookie sesi)
+POST /auth/login/verify {mfa_token,code}  -> 200 profil + csrf_token, cookie sesi di-set           (code = TOTP 6 digit atau kode pemulihan)
+```
+
+Tanpa 2FA, `POST /auth/login` langsung mengembalikan profil + cookie seperti biasa. Kelola 2FA: `GET /auth/2fa`, `POST /auth/2fa/setup|enable|disable|recovery-codes`; ganti password: `POST /auth/password`; admin: `DELETE /users/{id}/2fa`. Endpoint akun hanya untuk sesi (API key → 403).
 
 ### 3.2 Kirim non-campaign (API key)
 
@@ -147,7 +161,7 @@ data: {}
 ## 5. Webhook
 
 Request `POST` ke URL terdaftar, `Content-Type: application/json`, header:
-`X-SMSC-Event`, `X-SMSC-Delivery` (uuid), `X-SMSC-Timestamp` (epoch detik), `X-SMSC-Signature: sha256=<hex>` = HMAC-SHA256(secret, `timestamp + "." + body`). Penerima wajib menolak timestamp > 5 menit. Retry: 30 dtk, 2 mnt, 10 mnt, 1 jam, 6 jam setelah percobaan pertama (6 percobaan total, dapat dikonfigurasi) pada non-2xx/timeout 10 dtk; kemudian ditandai `failed` dan dapat dikirim ulang manual. `X-SMSC-Delivery` sama pada semua percobaan — penerima wajib dedup (at-least-once). Redirect tidak diikuti. Event: `message.sent|delivered|failed`, `campaign.completed|paused`, `device.offline`; `webhook.test` hanya dari endpoint uji. Isi SMS tidak pernah disertakan. Secret (`whsec_…`) hanya ada pada respons pembuatan. Payload:
+`X-SMSC-Event`, `X-SMSC-Delivery` (uuid), `X-SMSC-Timestamp` (epoch detik), `X-SMSC-Signature: sha256=<hex>` = HMAC-SHA256(secret, `timestamp + "." + body`). Penerima wajib menolak timestamp > 5 menit. **Selama rotasi secret** header berisi dua nilai dipisah koma (`sha256=<baru>,sha256=<lama>`); terima bila salah satu cocok. Retry: 30 dtk, 2 mnt, 10 mnt, 1 jam, 6 jam setelah percobaan pertama (6 percobaan total, dapat dikonfigurasi) pada non-2xx/timeout 10 dtk; kemudian ditandai `failed` dan dapat dikirim ulang manual. `X-SMSC-Delivery` sama pada semua percobaan — penerima wajib dedup (at-least-once). Redirect tidak diikuti. Event: `message.sent|delivered|failed`, `campaign.completed|paused`, `device.offline`; `webhook.test` hanya dari endpoint uji. Isi SMS tidak pernah disertakan. Secret (`whsec_…`) hanya ada pada respons pembuatan. Payload:
 
 ```json
 { "event":"message.delivered", "delivery_id":"0192…", "at":"…",

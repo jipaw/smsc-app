@@ -103,13 +103,17 @@ function ApiKeys() {
   const q = useQuery({ queryKey: ['apikeys'], queryFn: () => get<{ items: ApiKey[] }>('/api-keys') })
   const create = useMutation({ mutationFn: () => post<ApiKey & { secret: string }>('/api-keys', { name, scopes }), onSuccess: (k) => { setSecret(k.secret); setName(''); qc.invalidateQueries({ queryKey: ['apikeys'] }) } })
   const rm = useMutation({ mutationFn: (id: string) => del(`/api-keys/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['apikeys'] }) })
+  const [grace, setGrace] = useState(3600)
+  const rotate = useMutation({ mutationFn: (id: string) => post<ApiKey & { secret: string }>(`/api-keys/${id}/rotate`, { grace_seconds: grace }), onSuccess: (k) => { setSecret(k.secret); qc.invalidateQueries({ queryKey: ['apikeys'] }) } })
   return (
     <div className="stack">
       <div className="card stack"><Field label="Nama key"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="sistem-billing" /></Field>
         <div className="row">{['messages:send', 'messages:read'].map((s) => <label key={s} className="row"><input type="checkbox" checked={scopes.includes(s)} onChange={(e) => setScopes((p) => e.target.checked ? [...p, s] : p.filter((x) => x !== s))} />{s}</label>)}</div>
         <ErrorBox error={create.error} /><div><button className="primary" disabled={!name || create.isPending} onClick={() => create.mutate()}>Buat API key</button></div>
+        <div className="row"><label className="row">Masa tumpang tindih saat memutar <select aria-label="Masa tumpang tindih secret lama" value={grace} onChange={(e) => setGrace(Number(e.target.value))}><option value={0}>langsung matikan</option><option value={3600}>1 jam</option><option value={86400}>24 jam</option><option value={604800}>7 hari</option></select></label></div>
+        <ErrorBox error={rotate.error} />
         {secret && <div className="okbox" role="status">Salin sekarang, tidak akan ditampilkan lagi:<br /><span className="mono">{secret}</span> <button className="small" onClick={() => navigator.clipboard?.writeText(secret)}>Salin</button></div>}</div>
-      {q.data && <div className="card"><table><thead><tr><th>Nama</th><th>Prefix</th><th>Scope</th><th>Terakhir dipakai</th><th /></tr></thead><tbody>{q.data.items.map((k) => <tr key={k.id}><td>{k.name}</td><td className="mono">{k.prefix}</td><td>{k.scopes.join(', ')}</td><td className="muted">{fmtTime(k.last_used_at)}</td><td className="right"><button className="small danger" onClick={() => window.confirm(`Cabut key "${k.name}"?`) && rm.mutate(k.id)}>Cabut</button></td></tr>)}</tbody></table></div>}
+      {q.data && <div className="card"><table><thead><tr><th>Nama</th><th>Prefix</th><th>Scope</th><th>Terakhir dipakai</th><th>Rotasi</th><th /></tr></thead><tbody>{q.data.items.map((k) => <tr key={k.id}><td>{k.name}</td><td className="mono">{k.prefix}</td><td>{k.scopes.join(', ')}</td><td className="muted">{fmtTime(k.last_used_at)}</td><td className="muted">{k.rotated_at ? fmtTime(k.rotated_at) : '—'}{k.previous_valid_until && <div>secret lama sah s.d. {fmtTime(k.previous_valid_until)}</div>}</td><td className="right"><button className="small" disabled={rotate.isPending} onClick={() => window.confirm(`Putar secret key "${k.name}"? Secret baru tampil sekali; secret lama tetap sah selama masa tumpang tindih yang dipilih.`) && rotate.mutate(k.id)}>Putar</button> <button className="small danger" onClick={() => window.confirm(`Cabut key "${k.name}"?`) && rm.mutate(k.id)}>Cabut</button></td></tr>)}</tbody></table></div>}
     </div>
   )
 }
@@ -117,7 +121,8 @@ function ApiKeys() {
 function Users() {
   const qc = useQueryClient()
   const [f, setF] = useState<{ email: string; role: Role; password: string }>({ email: '', role: 'operator', password: '' })
-  const q = useQuery({ queryKey: ['users'], queryFn: () => get<{ items: { id: string; email: string; role: string }[] }>('/users') })
+  const q = useQuery({ queryKey: ['users'], queryFn: () => get<{ items: { id: string; email: string; role: string; mfa_enabled?: boolean }[] }>('/users') })
+  const reset = useMutation({ mutationFn: (id: string) => del(`/users/${id}/2fa`), onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }) })
   const create = useMutation({ mutationFn: () => post('/users', f), onSuccess: () => { setF({ email: '', role: 'operator', password: '' }); qc.invalidateQueries({ queryKey: ['users'] }) } })
   return (
     <div className="stack">
@@ -125,7 +130,7 @@ function Users() {
         <Field label="Peran"><select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Role })}><option>admin</option><option>operator</option><option>viewer</option></select></Field>
         <Field label="Password" hint="min. 12 karakter"><input type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field></div>
         <ErrorBox error={create.error} /><div><button className="primary" disabled={create.isPending} onClick={() => create.mutate()}>Tambah pengguna</button></div></div>
-      <div className="card"><table><thead><tr><th>Email</th><th>Peran</th></tr></thead><tbody>{q.data?.items.map((u) => <tr key={u.id}><td>{u.email}</td><td>{u.role}</td></tr>)}</tbody></table></div>
+      <div className="card"><table><thead><tr><th>Email</th><th>Peran</th><th>2FA</th><th /></tr></thead><tbody>{q.data?.items.map((u) => <tr key={u.id}><td>{u.email}</td><td>{u.role}</td><td>{u.mfa_enabled ? 'aktif' : '—'}</td><td className="right">{u.mfa_enabled && <button className="small danger" onClick={() => window.confirm(`Reset 2FA ${u.email}? Semua sesinya dikeluarkan dan ia harus menyiapkan 2FA lagi.`) && reset.mutate(u.id)}>Reset 2FA</button>}</td></tr>)}</tbody></table></div>
     </div>
   )
 }
@@ -152,6 +157,8 @@ function Webhooks() {
   const create = useMutation({ mutationFn: () => post<WebhookCreated>('/webhooks', { url, events }), onSuccess: (w) => { setSecret(w.signing_secret); setUrl(''); refresh() } })
   const toggle = useMutation({ mutationFn: (w: Webhook) => patch(`/webhooks/${w.id}`, { enabled: !w.enabled }), onSuccess: refresh })
   const rm = useMutation({ mutationFn: (id: string) => del(`/webhooks/${id}`), onSuccess: () => { setOpen(null); refresh() } })
+  const [graceW, setGraceW] = useState(86400)
+  const rotateW = useMutation({ mutationFn: (id: string) => post<WebhookCreated>(`/webhooks/${id}/rotate-secret`, { grace_seconds: graceW }), onSuccess: (w) => { setSecret(w.signing_secret); refresh() } })
   const test = useMutation({ mutationFn: (id: string) => post(`/webhooks/${id}/test`, {}), onSuccess: () => { toast('Event uji dikirim'); qc.invalidateQueries({ queryKey: ['deliveries'] }) } })
   return (
     <div className="stack">
@@ -162,7 +169,8 @@ function Webhooks() {
         <fieldset className="row" style={{ border: 0, padding: 0 }}><legend className="muted">Event</legend>
           {EVENTS.map((ev) => <label key={ev} className="row"><input type="checkbox" checked={events.includes(ev)} onChange={(e) => setEvents((p) => e.target.checked ? [...p, ev] : p.filter((x) => x !== ev))} />{ev}</label>)}
         </fieldset>
-        <ErrorBox error={create.error} />
+        <ErrorBox error={create.error} /><ErrorBox error={rotateW.error} />
+        <label className="row">Masa tumpang tindih saat memutar secret <select aria-label="Masa tumpang tindih secret webhook" value={graceW} onChange={(e) => setGraceW(Number(e.target.value))}><option value={0}>langsung ganti</option><option value={3600}>1 jam</option><option value={86400}>24 jam</option><option value={604800}>7 hari</option></select></label>
         <div><button className="primary" disabled={!url || events.length === 0 || create.isPending} onClick={() => create.mutate()}>Tambah webhook</button></div>
         {secret && <div className="okbox" role="status">Secret penandatangan — salin sekarang, tidak akan ditampilkan lagi:<br /><span className="mono">{secret}</span> <button className="small" onClick={() => navigator.clipboard?.writeText(secret)}>Salin</button></div>}
       </div>
@@ -172,10 +180,11 @@ function Webhooks() {
       {q.data && q.data.items.length > 0 && (
         <div className="card scroll-x"><table><thead><tr><th>URL</th><th>Event</th><th>Status</th><th /></tr></thead><tbody>
           {q.data.items.map((w) => (
-            <tr key={w.id}><td className="mono">{w.url}</td><td>{w.events.join(', ')}</td><td>{w.enabled ? 'aktif' : 'nonaktif'}</td>
+            <tr key={w.id}><td className="mono">{w.url}</td><td>{w.events.join(', ')}</td><td>{w.enabled ? 'aktif' : 'nonaktif'}{w.previous_secret_valid_until && <div className="muted">dua tanda tangan s.d. {fmtTime(w.previous_secret_valid_until)}</div>}</td>
               <td className="right"><span className="row">
                 <button className="small" onClick={() => setOpen(w)}>Riwayat</button>
                 <button className="small" disabled={test.isPending} onClick={() => test.mutate(w.id)}>Uji</button>
+                <button className="small" disabled={rotateW.isPending} onClick={() => window.confirm(`Putar secret penandatangan ${w.url}? Selama masa tumpang tindih, pengiriman membawa dua tanda tangan.`) && rotateW.mutate(w.id)}>Putar secret</button>
                 <button className="small" onClick={() => toggle.mutate(w)}>{w.enabled ? 'Nonaktifkan' : 'Aktifkan'}</button>
                 <button className="small danger" onClick={() => window.confirm(`Hapus webhook ${w.url}?`) && rm.mutate(w.id)}>Hapus</button></span></td></tr>))}
         </tbody></table></div>)}

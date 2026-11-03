@@ -487,9 +487,21 @@ func (s *Service) AuthDevice(ctx context.Context, secret string) (uuid.UUID, err
 	err := s.Pool.QueryRow(ctx, `SELECT c.device_id FROM device_credentials c JOIN devices d ON d.id=c.device_id
 		WHERE d.status<>'revoked' AND (c.secret_hash=$1 OR (c.prev_secret_hash=$1 AND c.prev_valid_until > now()))`, sha(secret)).Scan(&id)
 	if err != nil {
+		// device sudah memakai secret baru dari rotasi sebelum konfirmasi tiba (ack hilang): promosikan sekarang
+		if ok, did := s.promoteDeviceSecretByHash(ctx, secret); ok {
+			return did, nil
+		}
 		return uuid.Nil, NewProblem(http.StatusUnauthorized, "auth.unauthenticated", "Tidak terautentikasi", "kredensial device tidak valid")
 	}
 	return id, nil
+}
+
+func (s *Service) promoteDeviceSecretByHash(ctx context.Context, secret string) (bool, uuid.UUID) {
+	ok, id := s.promoteDeviceSecret(ctx, `pending_secret_hash=$1 AND device_id IN (SELECT id FROM devices WHERE status<>'revoked')`, sha(secret))
+	if ok {
+		s.Audit(ctx, "device:"+id.String(), "device.credential_rotated", "device", id.String(), map[string]any{"via": "first_use"})
+	}
+	return ok, id
 }
 
 // ---------- status runtime ----------

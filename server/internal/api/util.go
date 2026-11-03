@@ -220,3 +220,11 @@ func principalOf(ctx context.Context) *principal {
 	p, _ := ctx.Value(keyPrincipal).(*principal)
 	return p
 }
+
+// userKey: kunci pembatas per pengguna (sesi) untuk endpoint akun; API key tidak boleh mencapainya.
+func userKey(r *http.Request) string {
+	if p := principalOf(r.Context()); p != nil && p.user != nil {
+		return "u:" + p.user.ID.String()
+	}
+	return "ip:" + clientIP(r)
+}

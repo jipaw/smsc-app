@@ -68,6 +68,8 @@ Prioritas: **M** = MVP (fase 1), **S** = fase 2, **C** = fase 3. Kriteria peneri
 | FR-20 | Audit log tindakan admin | S | KP1 semua mutasi sensitif tercatat (siapa/apa/kapan) · KP2 tidak ikut retensi pesan |
 | FR-21 | Webhook status | C | KP1 HMAC-SHA256 · KP2 retry eksponensial |
 | FR-22 | Retensi data | C | KP1 body dihapus setelah N hari · KP2 metadata tetap |
+| FR-23 | Autentikasi dua faktor (TOTP) untuk pengguna dashboard | C | KP1 password benar saja tidak memberi sesi · KP2 kode tak dapat dipakai ulang; 5 kegagalan → kunci · KP3 kode pemulihan sekali pakai; reset darurat oleh admin/CLI |
+| FR-24 | Rotasi kredensial tanpa downtime (device, API key, secret webhook, kunci server) | C | KP1 masa tumpang tindih: secret lama & baru sama-sama sah · KP2 rotasi device tidak dapat mengunci HP · KP3 secret baru tak pernah muncul di log/audit |
 
 ## 4. Kebutuhan non-fungsional
 

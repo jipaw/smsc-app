@@ -206,7 +206,7 @@ Device menghapus event dari outbox hanya setelah menerima ini. Server idempoten 
 { "command_id": "0192...", "ok": true, "detail": null }
 ```
 
-`rotate_credential` membuat device meminta secret baru lewat WS: server mengirim `{"new_secret": "..."}` pada `device.command_result` jawaban; secret lama berlaku 60 detik (grace) lalu mati.
+`rotate_credential` (dua tahap, tanpa risiko terkunci): server membuat secret baru dan mengirimnya dalam `device.command` sebagai `new_secret` (wajib untuk aksi ini, dilarang untuk aksi lain). Secret lama **tetap sah**. Device wajib menyimpan secret baru ke penyimpanan aman **sebelum** membalas `device.command_result` `ok=true`; bila gagal menyimpan, balas `ok=false` dan server membuang secret baru. Setelah `ok=true` (atau begitu secret baru dipakai untuk autentikasi, mis. bila hasil hilang di jalan) server memromosikan secret baru; secret lama masih berlaku 60 dtk (grace, `DEVICE_ROTATE_GRACE`) lalu mati. Secret tertunda kedaluwarsa dalam 10 menit. `new_secret` tidak boleh dicatat di log mana pun.
 
 ### 3.11 `error`
 

@@ -218,12 +218,19 @@
     "deviceCommand": {
       "type": "object",
       "required": ["command_id", "action"],
-      "properties": { "command_id": { "$ref": "#/$defs/uuid" }, "action": { "enum": ["ping", "refresh_sims", "restart_service", "upload_logs", "rotate_credential"] } }
+      "properties": {
+        "command_id": { "$ref": "#/$defs/uuid" },
+        "action": { "enum": ["ping", "refresh_sims", "restart_service", "upload_logs", "rotate_credential"] },
+        "new_secret": { "type": "string", "minLength": 32, "description": "Hanya untuk rotate_credential: secret baru yang HARUS disimpan device sebelum membalas ok=true." }
+      },
+      "if": { "properties": { "action": { "const": "rotate_credential" } }, "required": ["action"] },
+      "then": { "required": ["new_secret"] },
+      "else": { "not": { "required": ["new_secret"] } }
     },
     "deviceCommandResult": {
       "type": "object",
       "required": ["command_id", "ok"],
-      "properties": { "command_id": { "$ref": "#/$defs/uuid" }, "ok": { "type": "boolean" }, "detail": { "type": ["string", "null"] }, "new_secret": { "type": "string", "minLength": 32 } }
+      "properties": { "command_id": { "$ref": "#/$defs/uuid" }, "ok": { "type": "boolean" }, "detail": { "type": ["string", "null"] } }
     },
     "error": {
       "type": "object",

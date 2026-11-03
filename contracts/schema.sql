@@ -22,10 +22,23 @@ CREATE TABLE users (
   disabled      boolean NOT NULL DEFAULT false,
   failed_logins integer NOT NULL DEFAULT 0,
   locked_until  timestamptz,
-  created_at    timestamptz NOT NULL DEFAULT now()
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  totp_secret         bytea,
+  totp_pending        bytea,
+  totp_enabled_at     timestamptz,
+  totp_last_step      bigint NOT NULL DEFAULT 0,
+  password_changed_at timestamptz
 );
 CREATE UNIQUE INDEX users_email_uq ON users (lower(email));
 CREATE UNIQUE INDEX users_ts_login_uq ON users (tailscale_login) WHERE tailscale_login IS NOT NULL;
+
+CREATE TABLE user_recovery_codes (
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash  bytea NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  used_at    timestamptz,
+  PRIMARY KEY (user_id, code_hash)
+);
 
 CREATE TABLE sessions (
   id          uuid PRIMARY KEY,
@@ -48,7 +61,10 @@ CREATE TABLE api_keys (
   expires_at   timestamptz,
   revoked_at   timestamptz,
   last_used_at timestamptz,
-  created_at   timestamptz NOT NULL DEFAULT now()
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  prev_key_hash    bytea,
+  prev_valid_until timestamptz,
+  rotated_at       timestamptz
 );
 
 -- ---------- policy ----------
@@ -119,7 +135,10 @@ CREATE TABLE device_credentials (
   prev_secret_hash  bytea,
   prev_valid_until  timestamptz,
   created_at        timestamptz NOT NULL DEFAULT now(),
-  rotated_at        timestamptz
+  rotated_at        timestamptz,
+  pending_secret_hash bytea,
+  pending_command_id  uuid,
+  pending_expires_at  timestamptz
 );
 
 CREATE TABLE device_enrollments (
@@ -288,7 +307,10 @@ CREATE TABLE webhooks (
   created_at     timestamptz NOT NULL DEFAULT now(),
   description    text,
   created_by     uuid REFERENCES users(id) ON DELETE SET NULL,
-  updated_at     timestamptz NOT NULL DEFAULT now()
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+  prev_signing_secret bytea,
+  prev_valid_until    timestamptz,
+  secret_rotated_at   timestamptz
 );
 
 CREATE TABLE webhook_deliveries (

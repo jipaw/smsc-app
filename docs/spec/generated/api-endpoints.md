@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (71 operasi)
+# Daftar endpoint (81 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -7,7 +7,14 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 
 | Method | Path | Fungsi | Auth | Status |
 |---|---|---|---|---|
-| `POST` | `/auth/login` | Login dashboard | publik | 200,401,429 |
+| `POST` | `/auth/login` | Login dashboard | publik | 200,401,423,429 |
+| `POST` | `/auth/login/verify` | Selesaikan login dengan kode 2FA | publik | 200,401,423,429 |
+| `POST` | `/auth/password` | Ganti password sendiri | apiKey/sessionCookie | 204,401,403,422,429 |
+| `GET` | `/auth/2fa` | Status 2FA akun saya | apiKey/sessionCookie | 200,403 |
+| `POST` | `/auth/2fa/setup` | Mulai penyiapan 2FA (TOTP) | apiKey/sessionCookie | 200,401,409,429 |
+| `POST` | `/auth/2fa/enable` | Konfirmasi kode pertama dan aktifkan 2FA | apiKey/sessionCookie | 200,409,422,429 |
+| `POST` | `/auth/2fa/disable` | Nonaktifkan 2FA (butuh password + kode) | apiKey/sessionCookie | 204,401,409,429 |
+| `POST` | `/auth/2fa/recovery-codes` | Terbitkan ulang kode pemulihan (kode lama hangus) | apiKey/sessionCookie | 200,401,409,429 |
 | `POST` | `/auth/logout` | Logout | apiKey/sessionCookie | 204 |
 | `GET` | `/auth/me` | Profil + peran pengguna saat ini | apiKey/sessionCookie | 200 |
 
@@ -105,9 +112,11 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 |---|---|---|---|---|
 | `GET` | `/api-keys` | Daftar API key (tanpa secret) | apiKey/sessionCookie | 200 |
 | `POST` | `/api-keys` | Buat API key. Secret hanya tampil sekali. | apiKey/sessionCookie | 201 |
+| `POST` | `/api-keys/{apiKeyId}/rotate` | Putar secret API key | apiKey/sessionCookie | 200,404,422 |
 | `DELETE` | `/api-keys/{apiKeyId}` | Cabut | apiKey/sessionCookie | 204 |
 | `GET` | `/users` | Daftar pengguna dashboard (admin) | apiKey/sessionCookie | 200 |
 | `POST` | `/users` | Buat pengguna | apiKey/sessionCookie | 201 |
+| `DELETE` | `/users/{userId}/2fa` | Reset 2FA pengguna (kehilangan authenticator) | apiKey/sessionCookie | 204,404 |
 | `GET` | `/audit-logs` | Jejak audit tindakan admin | apiKey/sessionCookie | 200 |
 | `GET` | `/settings/retention` | Pengaturan retensi data + ringkasan eksekusi terakhir | apiKey/sessionCookie | 200 |
 | `PUT` | `/settings/retention` | Ubah retensi | apiKey/sessionCookie | 200,422 |
@@ -121,6 +130,7 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `GET` | `/webhooks/{webhookId}` | Detail webhook | apiKey/sessionCookie | 200,404 |
 | `PATCH` | `/webhooks/{webhookId}` | Ubah url, events, enabled, atau description. Webhook nonaktif tidak menerima event baru; pengiriman tertunda menunggu sampai diaktifkan. | apiKey/sessionCookie | 200,404,422 |
 | `DELETE` | `/webhooks/{webhookId}` | Hapus webhook beserta riwayat pengirimannya | apiKey/sessionCookie | 204,404 |
+| `POST` | `/webhooks/{webhookId}/rotate-secret` | Putar secret penandatangan | apiKey/sessionCookie | 200,404,422 |
 | `POST` | `/webhooks/{webhookId}/test` | Kirim event uji `webhook.test` (tanpa memedulikan langganan event) | apiKey/sessionCookie | 202,404 |
 | `GET` | `/webhooks/{webhookId}/deliveries` | Riwayat pengiriman (terbaru dulu) | apiKey/sessionCookie | 200,404 |
 | `POST` | `/webhooks/{webhookId}/deliveries/{deliveryId}/retry` | Kirim ulang pengiriman berstatus `failed` (percobaan dimulai dari nol) | apiKey/sessionCookie | 204,404,409 |

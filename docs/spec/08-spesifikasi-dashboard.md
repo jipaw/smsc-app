@@ -12,7 +12,8 @@ Campaigns ── wizard ── detail
 Kirim SMS
 Transaksi ── detail (drawer)
 Template
-Pengaturan ── Policy · Daftar blokir · API key · Pengguna · Webhook · Audit
+Pengaturan ── Policy · Daftar blokir · API key · Pengguna · Webhook · Retensi · Audit
+Akun (tautan email di header) ── Ganti password · 2FA
 ```
 
 Layout: sidebar kiri (ikon + label, tersembunyi di bawah 768 px menjadi drawer), header dengan indikator koneksi SSE (hijau/kuning/merah), pencarian global nomor/ID, menu pengguna. Peringatan kritis (semua device offline, SIM bermasalah) ditampilkan sebagai banner di atas konten.
@@ -100,9 +101,16 @@ Daftar + editor: nama, isi, daftar variabel terdeteksi, penghitung segmen, tombo
 
 - **Policy**: daftar dengan lencana *Default*; editor berbagi: Delay (min/max dengan slider + input ms), Burst, Rate (menit/jam/hari), Jendela waktu (grid hari × jam + zona), Retry (max attempts, backoff), TTL, tracking delivery, timeout, `retry_on_unknown`. Field kosong = "warisi". Panel kanan "Simulasi": estimasi throughput per SIM dan contoh jadwal 10 pesan. Validasi inline (`min ≤ max`, irisan jendela).
 - **Daftar blokir**: tabel + tambah/impor + hapus.
-- **API key**: buat (nama, scope, kedaluwarsa) → secret tampil sekali dengan tombol salin; cabut.
-- **Pengguna**: undang/ubah peran/nonaktifkan.
+- **API key**: buat (nama, scope, kedaluwarsa) → secret tampil sekali dengan tombol salin; **Putar** (pilih masa tumpang tindih; kolom Rotasi menunjukkan sampai kapan secret lama sah); cabut.
+- **Pengguna**: undang; kolom **2FA** dan tombol *Reset 2FA* (mencabut semua sesi pengguna itu). (Ubah peran/nonaktifkan: belum.)
+- **Webhook**: buat/uji/riwayat/kirim ulang; **Putar secret** dengan masa tumpang tindih.
 - **Webhook** (fase 3), **Audit log** (filter aktor/aksi/tanggal, read-only).
+
+### 4.9 Akun (semua peran)
+
+- **Ganti password**: password saat ini + baru (≥ 12, diulang). Sesi lain dikeluarkan.
+- **Verifikasi 2 langkah**: Siapkan (minta password) → QR + kunci manual → kode 6 digit untuk mengaktifkan → 10 kode pemulihan tampil **sekali** (salin/unduh). Saat aktif: tanggal, sisa kode pemulihan (peringatan ≤ 2), *Terbitkan ulang kode*, *Nonaktifkan* (butuh password + kode).
+- **Login**: bila 2FA aktif, setelah password muncul langkah kedua (kode TOTP atau kode pemulihan); Kembali membatalkan.
 
 ## 5. Wireframe (ASCII)
 

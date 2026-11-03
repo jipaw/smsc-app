@@ -137,7 +137,14 @@ data class SmsEvent(
 data class EventAck(@SerialName("event_ids") val eventIds: List<String>)
 
 @Serializable
-data class DeviceCommand(@SerialName("command_id") val commandId: String, val action: String)
+data class DeviceCommand(
+    @SerialName("command_id") val commandId: String,
+    val action: String,
+    /** Hanya untuk rotate_credential; jangan pernah dicatat di log. */
+    @SerialName("new_secret") val newSecret: String? = null,
+) {
+    override fun toString() = "DeviceCommand(commandId=$commandId, action=$action, newSecret=${if (newSecret != null) "***" else "null"})"
+}
 
 @Serializable
 data class DeviceCommandResult(

@@ -101,7 +101,7 @@ export function Devices() {
   )
 }
 
-const ACTIONS: [string, string][] = [['ping', 'Ping'], ['refresh_sims', 'Refresh SIM'], ['restart_service', 'Restart service'], ['upload_logs', 'Ambil log']]
+const ACTIONS: [string, string][] = [['ping', 'Ping'], ['refresh_sims', 'Refresh SIM'], ['restart_service', 'Restart service'], ['upload_logs', 'Ambil log'], ['rotate_credential', 'Putar kredensial']]
 
 export function DeviceDetail() {
   const { id } = useParams()
@@ -140,7 +140,7 @@ export function DeviceDetail() {
         <div className="card stack">
           <h2>Tindakan</h2>
           {admin ? (<>
-            <div className="row">{ACTIONS.map(([a, l]) => <button key={a} className="small" disabled={d.status === 'offline' || cmd.isPending} onClick={() => cmd.mutate(a)}>{l}</button>)}</div>
+            <div className="row">{ACTIONS.map(([a, l]) => <button key={a} className="small" disabled={d.status === 'offline' || cmd.isPending} onClick={() => (a !== 'rotate_credential' || window.confirm('Putar kredensial HP ini? Secret lama tetap berlaku 60 detik setelah HP mengonfirmasi.')) && cmd.mutate(a)}>{l}</button>)}</div>
             <label className="row"><input type="checkbox" checked={d.enabled} onChange={(e) => upd.mutate({ enabled: e.target.checked })} /> Device aktif (menerima pesan baru)</label>
             <div><button className="danger" onClick={() => setRevoke(true)}>Cabut device</button></div>
           </>) : <p className="muted">Hanya admin yang dapat mengubah device.</p>}

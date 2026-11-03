@@ -171,13 +171,14 @@ type SimReport struct {
 type DeviceCommand struct {
 	CommandID string `json:"command_id"`
 	Action    string `json:"action"`
+	// NewSecret hanya untuk rotate_credential (server → device lewat WSS). Tidak boleh dicatat di log mana pun.
+	NewSecret *string `json:"new_secret,omitempty"`
 }
 
 type CommandResult struct {
 	CommandID string  `json:"command_id"`
 	OK        bool    `json:"ok"`
 	Detail    *string `json:"detail,omitempty"`
-	NewSecret *string `json:"new_secret,omitempty"`
 }
 
 type ErrorPayload struct {

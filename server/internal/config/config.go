@@ -14,6 +14,7 @@ type Config struct {
 	HTTPAddr             string
 	PublicBaseURL        string
 	SessionSecret        string
+	SessionSecretPrev    []string // SESSION_SECRET_PREVIOUS (koma): sesi lama tetap sah selama rotasi
 	DefaultRegion        string
 	TrustTailscale       bool
 	AutoMigrate          bool
@@ -23,6 +24,9 @@ type Config struct {
 	OfflineAfter         time.Duration
 	HeartbeatIntervalSec int
 	EnrollTTL            time.Duration
+	LoginRatePerMin      float64       // LOGIN_RATE_PER_MIN (default 5/mnt/IP) — juga untuk /auth/login/verify; endpoint akun memakai 2x per pengguna
+	LoginBurst           float64       // LOGIN_BURST (default 5)
+	DeviceRotateGrace    time.Duration // masa secret device lama masih sah setelah rotasi (spec 06: 60 dtk)
 	SecureCookies        bool
 	RequireVPN           bool          // Profil A: device tanpa VPN aktif ditandai degraded
 	CampaignTick         time.Duration // siklus materializer/scheduler/auto-pause
@@ -33,7 +37,8 @@ type Config struct {
 	WebhookTimeout       time.Duration
 	WebhookBackoff       []time.Duration // jeda antar percobaan ulang; len = jumlah retry (total percobaan = len+1)
 	WebhookAllowLoopback bool            // izinkan target 127.0.0.0/8 (dev/tes); metadata cloud 169.254/16 selalu diblokir
-	WebhookKey           string          // kunci enkripsi secret webhook (default: SESSION_SECRET)
+	WebhookKey           string          // kunci enkripsi secret webhook/TOTP (default: SESSION_SECRET)
+	WebhookKeyPrev       []string        // kunci lama (WEBHOOK_ENC_KEY_PREVIOUS) untuk mendekripsi saat rotasi
 	WebhookWorkers       int
 	WebhookTick          time.Duration
 
@@ -72,6 +77,9 @@ func Load() (Config, error) {
 		OfflineAfter:         envDur("OFFLINE_AFTER", 90*time.Second),
 		HeartbeatIntervalSec: 30,
 		EnrollTTL:            envDur("ENROLL_TTL", 15*time.Minute),
+		DeviceRotateGrace:    envDur("DEVICE_ROTATE_GRACE", 60*time.Second),
+		LoginRatePerMin:      envFloat("LOGIN_RATE_PER_MIN", 5),
+		LoginBurst:           envFloat("LOGIN_BURST", 5),
 		SecureCookies:        env("SECURE_COOKIES", "true") == "true",
 		RequireVPN:           env("REQUIRE_VPN", "true") == "true",
 		CampaignTick:         envDur("CAMPAIGN_TICK", time.Second),
@@ -113,8 +121,12 @@ func Load() (Config, error) {
 			c.WebhookBackoff = bo
 		}
 	}
+	c.SessionSecretPrev = splitList(os.Getenv("SESSION_SECRET_PREVIOUS"))
+	c.WebhookKeyPrev = splitList(os.Getenv("WEBHOOK_ENC_KEY_PREVIOUS"))
 	if c.WebhookKey == "" {
+		// kunci enkripsi mengikuti SESSION_SECRET; rahasia sesi lama otomatis menjadi kunci dekripsi lama
 		c.WebhookKey = c.SessionSecret
+		c.WebhookKeyPrev = append(c.WebhookKeyPrev, c.SessionSecretPrev...)
 	}
 	var missing []string
 	if c.DatabaseURL == "" {
@@ -130,4 +142,21 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("konfigurasi wajib belum diisi: %s", strings.Join(missing, ", "))
 	}
 	return c, nil
+}
+
+func splitList(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func envFloat(k string, def float64) float64 {
+	if v, err := strconv.ParseFloat(os.Getenv(k), 64); err == nil && v > 0 {
+		return v
+	}
+	return def
 }

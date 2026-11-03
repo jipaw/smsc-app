@@ -32,7 +32,8 @@ Dokumen ini adalah lapisan **normatif** di atas [`contracts/device-ws-protocol.m
 | `delivery_timeout` | 24 jam | setting | Setelah itu `sent` dianggap final |
 | `hello_ack_timeout` | 10 dtk | tetap | |
 | Backoff reconnect | 1 → 60 dtk, full jitter | config | Reset setelah 60 dtk stabil |
-| Grace rotasi kredensial | 60 dtk | tetap | Secret lama masih sah |
+| Grace rotasi kredensial | 60 dtk | config (`DEVICE_ROTATE_GRACE`) | Secret lama masih sah setelah secret baru dikonfirmasi/dipakai |
+| Secret tertunda (rotasi) | 10 mnt | tetap | Secret baru yang belum dikonfirmasi device kedaluwarsa |
 
 ## 4. State machine job di device
 

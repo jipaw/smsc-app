@@ -44,14 +44,18 @@ Batas: browser↔server, sistem eksternal↔server, HP↔server, server↔DB, da
 | Kode manual enroll | 8 karakter alfabet tanpa karakter ambigu (≈ 40 bit) + batas percobaan 5/token + kedaluwarsa pendek |
 | Secret di HP | AES-256-GCM dengan kunci Android Keystore (non-exportable; `setIsStrongBoxBacked` bila tersedia), ciphertext di DataStore |
 | Signing webhook | HMAC-SHA256 + timestamp, secret per webhook |
-| Cookie sesi | 256-bit, hash di DB, rotasi saat login |
+| Cookie sesi | 256-bit, HMAC-SHA256(`SESSION_SECRET`) di DB, rotasi saat login |
+| 2FA (TOTP) | RFC 6238 (SHA-1, 6 digit, 30 dtk, toleransi ±1 langkah). Rahasia terenkripsi AES-256-GCM (kunci turunan `WEBHOOK_ENC_KEY`); tiap langkah hanya sekali pakai (atomik di DB, anti-replay); 10 kode pemulihan sekali pakai disimpan ter-hash |
+| Enkripsi data rahasia di DB | AES-256-GCM, kunci per tujuan diturunkan dari `WEBHOOK_ENC_KEY`/`SESSION_SECRET`; cincin kunci (kunci lama hanya untuk membaca) + `smscd secrets reencrypt` |
 
 ## 4. Kontrol akses
 
 - Otorisasi di server pada setiap handler (matriks spec 08 §3); UI hanya kemudahan.
 - Prinsip hak minimal: API key berscope; device hanya `/device/*` dan `/ws/device`; viewer tanpa PII penuh.
 - Perubahan peran/pengguna, policy, API key, revoke device, ekspor → audit (aktor, IP/tailnet identity, sebelum/sesudah ringkas).
-- Akun admin pertama dibuat via CLI; kebijakan password min 12 karakter + pengecekan daftar password umum; 2FA TOTP disarankan di fase 3.
+- Akun admin pertama dibuat via CLI; kebijakan password min 12 karakter (pengecekan daftar password umum **belum** ada).
+- **2FA TOTP (fase 4)**, opsional per pengguna (disarankan untuk semua admin). Login dua tahap: password benar → hanya *tantangan* tanpa sesi (token tanpa status, 5 menit, terikat sidik jari password sehingga ganti password membatalkannya) → `POST /auth/login/verify` dengan kode. Penghitung gagal **tidak** direset oleh password benar saat 2FA aktif, sehingga menebak kode dibatasi 5 kali lalu akun terkunci 15 menit. Mengaktifkan butuh password; menonaktifkan / menerbitkan ulang kode pemulihan butuh password **dan** kode. Pemakaian kode pemulihan diaudit. Pemulihan darurat: admin lain `DELETE /users/{id}/2fa`, atau `smscd admin reset-2fa --email …` di server (keduanya mencabut semua sesi pengguna tersebut).
+- **Belum ada**: kewajiban 2FA untuk admin (enforcement), WebAuthn/passkey, SSO. Endpoint akun dibatasi lajunya per pengguna; endpoint login per IP (`LOGIN_RATE_PER_MIN`/`LOGIN_BURST`).
 
 ## 5. Keamanan jaringan
 
@@ -79,9 +83,9 @@ Batas: browser↔server, sistem eksternal↔server, HP↔server, server↔DB, da
 | Kejadian | Tindakan segera |
 |---|---|
 | HP hilang/dicuri | Revoke device → blokir SIM ke operator → tinjau transaksi 24 jam terakhir → rotasi bila ada kredensial bersama |
-| API key bocor | Cabut key → tinjau lonjakan `source=api` → buat key baru → perkuat scope |
+| API key bocor | Cabut key (atau **Putar** dengan masa tumpang tindih 0 bila klien harus tetap hidup dengan secret baru) → tinjau lonjakan `source=api` → perkuat scope |
 | Lonjakan pengiriman tak wajar | Pause semua campaign (tombol darurat "Pause semua"), nonaktifkan SIM terkait, periksa audit |
-| Dugaan kompromi server | Isolasi node di tailnet, revoke semua device, rotasi `SESSION_SECRET`/API key/password, pulihkan dari backup bersih |
+| Dugaan kompromi server | Isolasi node di tailnet, revoke semua device, rotasi `SESSION_SECRET` **tanpa** `…_PREVIOUS` (logout massal) dan `WEBHOOK_ENC_KEY` (lihat spec 10 R-06), putar semua API key dan secret webhook dengan grace 0, minta semua pengguna ganti password, pulihkan dari backup bersih |
 | Kebocoran data | Identifikasi cakupan via audit, ikuti kewajiban pelaporan hukum yang berlaku |
 
 Tombol darurat "Pause semua pengiriman" (global kill switch, `settings.paused=true`) dibaca dispatcher dan tersedia untuk admin.

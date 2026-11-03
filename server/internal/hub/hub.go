@@ -339,6 +339,7 @@ func (h *Hub) handle(ctx context.Context, s *session, m proto.Envelope) {
 	case proto.TypeCommandResult:
 		var r proto.CommandResult
 		if json.Unmarshal(m.Payload, &r) == nil {
+			h.svc.OnCommandResult(ctx, s.deviceID, r)
 			h.svc.Bus.Publish("device.command_result", map[string]any{"device_id": s.deviceID, "command_id": r.CommandID, "ok": r.OK, "detail": r.Detail})
 		}
 	default:

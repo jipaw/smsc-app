@@ -38,7 +38,7 @@ Opsi A (Compose + sidecar) dan catatan jaringan ada di `docs/04` §4. Verifikasi
 | `DATABASE_URL` | – (wajib) | DSN PostgreSQL |
 | `HTTP_ADDR` | `127.0.0.1:8080` | Jangan bind ke `0.0.0.0` pada Profil A |
 | `PUBLIC_BASE_URL` | – (wajib) | Dipakai di `enroll_url` dan `ws_url` |
-| `SESSION_SECRET` | – (wajib) | ≥ 32 byte acak; rotasi = logout semua |
+| `SESSION_SECRET` | – (wajib) | ≥ 32 byte acak; rotasi tanpa `SESSION_SECRET_PREVIOUS` = logout semua |
 | `TRUST_TAILSCALE_HEADERS` | `false` | `true` hanya bila di belakang Serve lokal |
 | `TRUSTED_PROXY_ADDRS` | `127.0.0.1` | Sumber header identitas/`X-Forwarded-*` |
 | `DEFAULT_REGION` | `ID` | Normalisasi nomor |
@@ -47,7 +47,10 @@ Opsi A (Compose + sidecar) dan catatan jaringan ada di `docs/04` §4. Verifikasi
 | `WS_MAX_MESSAGE_BYTES` | `65536` | |
 | `SSE_REPLAY_SECONDS` | `300` | |
 | `METRICS_ADDR` | `127.0.0.1:9090` | Endpoint `/metrics` terpisah |
-| `WEBHOOK_ENC_KEY` | turunan `SESSION_SECRET` | Atur terpisah di produksi (merotasi SESSION_SECRET tanpa ini membuat secret webhook tak terbaca) |
+| `WEBHOOK_ENC_KEY` | turunan `SESSION_SECRET` | Kunci enkripsi secret webhook dan rahasia TOTP. Atur terpisah di produksi |
+| `SESSION_SECRET_PREVIOUS`, `WEBHOOK_ENC_KEY_PREVIOUS` | – | Kunci lama (koma) selama rotasi; lihat R-06 |
+| `LOGIN_RATE_PER_MIN`, `LOGIN_BURST` | `5`, `5` | Batas login & verifikasi 2FA per IP (endpoint akun: 2× per pengguna). Naikkan bila banyak admin berbagi satu IP/NAT |
+| `DEVICE_ROTATE_GRACE` | `60s` | Masa secret device lama setelah rotasi |
 | `WEBHOOK_TIMEOUT`, `WEBHOOK_BACKOFF`, `WEBHOOK_TICK`, `RETENTION_INTERVAL` | lihat `server/README.md` | |
 
 Konfigurasi bisnis (policy, retensi, timeouts) diubah dari dashboard/`settings`, tanpa restart.
@@ -133,7 +136,20 @@ SIM dicabut → `absent`; pasang SIM baru → muncul sebagai SIM pada slot sama;
 
 ### R-06 Rotasi kredensial / HP dicuri
 
-HP dicuri: **Revoke** → blokir SIM ke operator → tinjau Transaksi. Rotasi terencana: Devices → Rotasi kredensial (device harus online).
+HP dicuri: **Revoke** → blokir SIM ke operator → tinjau Transaksi.
+
+Rotasi terencana — semuanya tanpa downtime:
+
+| Yang diputar | Cara | Masa tumpang tindih |
+|---|---|---|
+| Secret device | Devices → detail → **Putar kredensial** (device harus online) | Dua tahap: secret baru dikirim lewat WSS dan baru berlaku setelah HP mengonfirmasi (atau langsung dipakai); secret lama sah 60 dtk (`DEVICE_ROTATE_GRACE`). HP gagal menyimpan → secret baru dibuang, tidak ada risiko terkunci. Secret tertunda kedaluwarsa 10 mnt |
+| API key | Pengaturan → API key → **Putar** (`POST /api-keys/{id}/rotate`) | Pilihan 0 / 1 jam / 24 jam / 7 hari. Id, nama, scope tetap |
+| Secret webhook | Pengaturan → Webhook → **Putar secret** | Selama masa itu pengiriman membawa dua tanda tangan (`sha256=<baru>,sha256=<lama>`); penerima menerima bila salah satu cocok |
+| Password sendiri | Akun → Ganti password | Sesi lain pengguna dikeluarkan. Lupa password: `smscd admin reset-password --email …` |
+| `SESSION_SECRET` | Setel nilai baru, simpan yang lama di `SESSION_SECRET_PREVIOUS` (koma bila banyak), restart. Kosongkan `…_PREVIOUS` setelah ≥ 7 hari (umur maks. sesi). Tanpa `…_PREVIOUS` = logout massal | Sesi lama tetap sah |
+| `WEBHOOK_ENC_KEY` (juga kunci rahasia TOTP) | Setel kunci baru, pindahkan yang lama ke `WEBHOOK_ENC_KEY_PREVIOUS`, restart, jalankan **`smscd secrets reencrypt`**, lalu hapus kunci lama. Bila `WEBHOOK_ENC_KEY` tidak diatur, kunci mengikuti `SESSION_SECRET` dan rotasinya otomatis ikut `SESSION_SECRET_PREVIOUS` | Selama kunci lama ada di `…_PREVIOUS`, data lama terbaca |
+
+Kunci yang salah **tidak** merusak data diam-diam: pengiriman webhook gagal dengan pesan jelas dan login 2FA ditolak; pulihkan kunci lama lalu ulangi. Pengguna 2FA yang terkunci keluar: `DELETE /users/{id}/2fa` oleh admin lain, atau `smscd admin reset-2fa --email …`.
 
 ### R-07 Kunci/tailnet bermasalah
 

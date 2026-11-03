@@ -57,11 +57,153 @@ paths:
                 password: {type: string, format: password}
       responses:
         '200':
-          description: Cookie sesi di-set (HttpOnly, Secure, SameSite=Lax). Klien wajib mengirim `X-CSRF-Token` pada request mutasi.
+          description: |
+            Dua kemungkinan. Tanpa 2FA: cookie sesi di-set (HttpOnly, Secure, SameSite=Lax) dan badan berisi profil + `csrf_token`.
+            Dengan 2FA aktif: **belum ada sesi**; badan berisi `mfa_required: true` + `mfa_token` (berlaku 5 menit) untuk `POST /auth/login/verify`.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/Me'}
+                  - {$ref: '#/components/schemas/MfaChallenge'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '423': {description: 'Akun terkunci sementara (`auth.locked`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/login/verify:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Selesaikan login dengan kode 2FA
+      description: |
+        `code` = 6 digit TOTP atau satu kode pemulihan (sekali pakai). Kode TOTP yang sama tidak diterima dua kali.
+        Salah memasukkan kode dihitung seperti salah password: 5 kali → akun terkunci 15 menit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfa_token, code]
+              properties:
+                mfa_token: {type: string}
+                code: {type: string, example: '123456'}
+      responses:
+        '200':
+          description: Cookie sesi di-set; badan = profil + `csrf_token`.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Me'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
+        '401': {description: 'Kode salah (`auth.invalid_code`) atau tantangan kedaluwarsa (`auth.mfa_expired`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '423': {description: 'Akun terkunci sementara (`auth.locked`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/password:
+    post:
+      tags: [Auth]
+      summary: Ganti password sendiri
+      description: Hanya sesi dashboard. Semua sesi lain milik pengguna dicabut; sesi saat ini tetap.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: {type: string, format: password}
+                new_password: {type: string, format: password, minLength: 12}
+      responses:
+        '204': {description: Diganti}
+        '401': {description: 'Password saat ini salah (`auth.invalid_credentials`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/2fa:
+    get:
+      tags: [Auth]
+      summary: Status 2FA akun saya
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MfaStatus'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /auth/2fa/setup:
+    post:
+      tags: [Auth]
+      summary: Mulai penyiapan 2FA (TOTP)
+      description: Meminta password. Mengembalikan rahasia + URI `otpauth://` (render sebagai QR). 2FA belum aktif sampai `/auth/2fa/enable`. Memanggil ulang mengganti rahasia tertunda.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: {type: string, format: password}
+      responses:
+        '200':
+          description: Rahasia tampil di sini saja
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MfaSetup'}
+        '401': {description: 'Password salah', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '409': {description: 'Sudah aktif (`mfa.already_enabled`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/2fa/enable:
+    post:
+      tags: [Auth]
+      summary: Konfirmasi kode pertama dan aktifkan 2FA
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: {type: string, example: '123456'}
+      responses:
+        '200':
+          description: 2FA aktif. 10 kode pemulihan tampil sekali.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RecoveryCodes'}
+        '409': {description: 'Belum ada penyiapan (`mfa.no_pending_setup`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {description: Kode salah, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/2fa/disable:
+    post:
+      tags: [Auth]
+      summary: Nonaktifkan 2FA (butuh password + kode)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MfaReauth'}
+      responses:
+        '204': {description: Dinonaktifkan}
+        '401': {description: 'Password/kode salah', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '409': {description: 'Belum aktif (`mfa.not_enabled`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/2fa/recovery-codes:
+    post:
+      tags: [Auth]
+      summary: Terbitkan ulang kode pemulihan (kode lama hangus)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MfaReauth'}
+      responses:
+        '200':
+          description: 10 kode baru, tampil sekali
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RecoveryCodes'}
+        '401': {description: 'Password/kode salah', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '409': {description: 'Belum aktif (`mfa.not_enabled`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '429': {$ref: '#/components/responses/TooManyRequests'}
   /auth/logout:
     post:
@@ -949,6 +1091,35 @@ paths:
                   - type: object
                     properties:
                       secret: {type: string, description: 'Format `smsc_live_<random>`'}
+  /api-keys/{apiKeyId}/rotate:
+    post:
+      tags: [Admin]
+      summary: Putar secret API key
+      description: |
+        Id, nama, scope tetap; secret baru tampil sekali. Secret lama tetap sah selama `grace_seconds` (default 0 = langsung mati,
+        maks. 604800) agar klien sempat diganti tanpa downtime.
+      parameters:
+        - {name: apiKeyId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grace_seconds: {type: integer, minimum: 0, maximum: 604800, default: 0}
+      responses:
+        '200':
+          description: Secret baru
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiKey'
+                  - type: object
+                    properties:
+                      secret: {type: string}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
   /api-keys/{apiKeyId}:
     delete:
       tags: [Admin]
@@ -986,6 +1157,16 @@ paths:
                 password: {type: string, format: password}
       responses:
         '201': {description: Dibuat}
+  /users/{userId}/2fa:
+    delete:
+      tags: [Admin]
+      summary: Reset 2FA pengguna (kehilangan authenticator)
+      description: Menghapus rahasia TOTP + kode pemulihan dan mencabut semua sesi pengguna itu. Tercatat di audit.
+      parameters:
+        - {name: userId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Direset}
+        '404': {$ref: '#/components/responses/NotFound'}
   /audit-logs:
     get:
       tags: [Admin]
@@ -1087,6 +1268,31 @@ paths:
       responses:
         '204': {description: Dihapus}
         '404': {$ref: '#/components/responses/NotFound'}
+  /webhooks/{webhookId}/rotate-secret:
+    parameters:
+      - {$ref: '#/components/parameters/WebhookId'}
+    post:
+      tags: [Webhooks]
+      summary: Putar secret penandatangan
+      description: |
+        Secret baru tampil sekali. Selama `grace_seconds` (default 86400, maks. 604800) setiap pengiriman membawa **dua**
+        tanda tangan di `X-SMSC-Signature` (`sha256=<baru>,sha256=<lama>`); penerima menerima bila salah satu cocok, sehingga
+        penerima bisa berganti secret kapan saja dalam masa itu tanpa kehilangan event.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grace_seconds: {type: integer, minimum: 0, maximum: 604800, default: 86400}
+      responses:
+        '200':
+          description: Secret baru
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebhookCreated'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
   /webhooks/{webhookId}/test:
     parameters:
       - {$ref: '#/components/parameters/WebhookId'}
@@ -1335,6 +1541,40 @@ components:
         email: {type: string, format: email}
         role: {$ref: '#/components/schemas/Role'}
         tailscale_login: {type: [string, 'null'], description: Terisi jika diautentikasi lewat identity header Tailscale Serve.}
+        mfa_enabled: {type: boolean, description: 2FA TOTP aktif untuk akun ini.}
+        csrf_token: {type: string, description: 'Hanya pada login/verify/me untuk sesi sendiri.'}
+
+    MfaChallenge:
+      type: object
+      required: [mfa_required, mfa_token]
+      properties:
+        mfa_required: {type: boolean, const: true}
+        mfa_token: {type: string, description: 'Berlaku 5 menit; hanya untuk /auth/login/verify.'}
+        expires_in: {type: integer}
+    MfaStatus:
+      type: object
+      required: [enabled, recovery_codes_remaining]
+      properties:
+        enabled: {type: boolean}
+        enabled_at: {type: [string, 'null'], format: date-time}
+        recovery_codes_remaining: {type: integer}
+    MfaSetup:
+      type: object
+      required: [secret, otpauth_uri]
+      properties:
+        secret: {type: string, description: 'Base32, untuk input manual di aplikasi authenticator.'}
+        otpauth_uri: {type: string}
+    MfaReauth:
+      type: object
+      required: [password, code]
+      properties:
+        password: {type: string, format: password}
+        code: {type: string, description: 'TOTP 6 digit atau kode pemulihan.'}
+    RecoveryCodes:
+      type: object
+      required: [recovery_codes]
+      properties:
+        recovery_codes: {type: array, items: {type: string}, minItems: 10, maxItems: 10}
 
     Enrollment:
       type: object
@@ -1750,6 +1990,8 @@ components:
         last_used_at: {type: [string, 'null'], format: date-time}
         expires_at: {type: [string, 'null'], format: date-time}
         created_at: {type: string, format: date-time}
+        rotated_at: {type: [string, 'null'], format: date-time}
+        previous_valid_until: {type: [string, 'null'], format: date-time, description: 'Sampai kapan secret lama masih sah (null = sudah tidak).'}
 
     WebhookEvent:
       type: string
@@ -1764,6 +2006,8 @@ components:
         enabled: {type: boolean}
         description: {type: [string, 'null']}
         created_at: {type: string, format: date-time}
+        secret_rotated_at: {type: [string, 'null'], format: date-time}
+        previous_secret_valid_until: {type: [string, 'null'], format: date-time, description: 'Selama masa ini pengiriman membawa dua tanda tangan.'}
     WebhookCreated:
       allOf:
         - $ref: '#/components/schemas/Webhook'

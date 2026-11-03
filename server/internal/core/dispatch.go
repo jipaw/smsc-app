@@ -413,12 +413,16 @@ func (s *Service) ResendAssigned(ctx context.Context, deviceID uuid.UUID, ids []
 	}
 }
 
-// SendDeviceCommand: perintah jarak jauh dari dashboard (FR-03). rotate_credential belum didukung pada irisan ini.
+// devicePendingTTL: berapa lama secret baru yang belum dikonfirmasi device masih diterima.
+const devicePendingTTL = 10 * time.Minute
+
+// SendDeviceCommand: perintah jarak jauh dari dashboard (FR-03).
+// rotate_credential: dua tahap tanpa risiko terkunci. Server menyimpan secret baru sebagai "tertunda" lalu mengirimnya ke
+// device; secret lama TETAP sah. Begitu device mengonfirmasi (command_result ok) atau langsung memakai secret baru untuk
+// autentikasi, secret baru dipromosikan dan secret lama berlaku Cfg.DeviceRotateGrace lagi lalu mati.
 func (s *Service) SendDeviceCommand(ctx context.Context, deviceID uuid.UUID, action string) (uuid.UUID, error) {
 	switch action {
-	case "ping", "refresh_sims", "restart_service", "upload_logs":
-	case "rotate_credential":
-		return uuid.Nil, NewProblem(http.StatusNotImplemented, "not_implemented", "Belum didukung", "rotate_credential dijadwalkan fase 3")
+	case "ping", "refresh_sims", "restart_service", "upload_logs", "rotate_credential":
 	default:
 		return uuid.Nil, Validation(FieldError{"action", "tidak dikenal"})
 	}
@@ -426,12 +430,54 @@ func (s *Service) SendDeviceCommand(ctx context.Context, deviceID uuid.UUID, act
 		return uuid.Nil, NewProblem(http.StatusConflict, "device.offline", "Device offline", "perintah hanya dapat dikirim ke device yang online")
 	}
 	cid := newID()
-	env, err := proto.New(proto.TypeDeviceCommand, proto.DeviceCommand{CommandID: cid.String(), Action: action}, nil)
+	cmd := proto.DeviceCommand{CommandID: cid.String(), Action: action}
+	if action == "rotate_credential" {
+		secret := "smsd_" + randToken(32)
+		ct, err := s.Pool.Exec(ctx, `UPDATE device_credentials SET pending_secret_hash=$2, pending_command_id=$3, pending_expires_at=now() + make_interval(secs => $4)
+			WHERE device_id=$1`, deviceID, sha(secret), cid, devicePendingTTL.Seconds())
+		if err != nil {
+			return uuid.Nil, err
+		}
+		if ct.RowsAffected() == 0 {
+			return uuid.Nil, NotFound("kredensial device")
+		}
+		cmd.NewSecret = &secret
+	}
+	env, err := proto.New(proto.TypeDeviceCommand, cmd, nil)
 	if err != nil {
 		return uuid.Nil, err
 	}
 	if err := s.link.Send(deviceID, env); err != nil {
+		if action == "rotate_credential" {
+			_, _ = s.Pool.Exec(ctx, `UPDATE device_credentials SET pending_secret_hash=NULL, pending_command_id=NULL, pending_expires_at=NULL WHERE device_id=$1 AND pending_command_id=$2`, deviceID, cid)
+		}
 		return uuid.Nil, NewProblem(http.StatusConflict, "device.offline", "Device offline", err.Error())
 	}
 	return cid, nil
+}
+
+// OnCommandResult dipanggil hub untuk device.command_result. Hanya rotasi kredensial yang punya efek samping.
+func (s *Service) OnCommandResult(ctx context.Context, deviceID uuid.UUID, r proto.CommandResult) {
+	cid, err := uuid.Parse(r.CommandID)
+	if err != nil {
+		return
+	}
+	if r.OK {
+		if ok, _ := s.promoteDeviceSecret(ctx, `device_id=$1 AND pending_command_id=$2`, deviceID, cid); ok {
+			s.Audit(ctx, "device:"+deviceID.String(), "device.credential_rotated", "device", deviceID.String(), nil)
+		}
+		return
+	}
+	// device menolak/gagal menyimpan: buang secret tertunda, secret lama tetap berlaku
+	_, _ = s.Pool.Exec(ctx, `UPDATE device_credentials SET pending_secret_hash=NULL, pending_command_id=NULL, pending_expires_at=NULL WHERE device_id=$1 AND pending_command_id=$2`, deviceID, cid)
+}
+
+// promoteDeviceSecret menjadikan secret tertunda sebagai secret aktif; secret lama berlaku sampai masa grace.
+func (s *Service) promoteDeviceSecret(ctx context.Context, where string, args ...any) (bool, uuid.UUID) {
+	var id uuid.UUID
+	grace := s.Cfg.DeviceRotateGrace.Seconds()
+	err := s.Pool.QueryRow(ctx, `UPDATE device_credentials SET prev_secret_hash=secret_hash, prev_valid_until=now() + make_interval(secs => `+fmt.Sprintf("%f", grace)+`),
+		secret_hash=pending_secret_hash, rotated_at=now(), pending_secret_hash=NULL, pending_command_id=NULL, pending_expires_at=NULL
+		WHERE pending_secret_hash IS NOT NULL AND pending_expires_at > now() AND `+where+` RETURNING device_id`, args...).Scan(&id)
+	return err == nil, id
 }

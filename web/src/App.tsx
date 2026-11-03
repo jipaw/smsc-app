@@ -13,6 +13,7 @@ import { Transactions } from './pages/Transactions'
 import { Templates } from './pages/Templates'
 import { CampaignDetail, CampaignWizard, Campaigns } from './pages/Campaigns'
 import { Settings } from './pages/Settings'
+import { Account } from './pages/Account'
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined) // undefined = memeriksa sesi
@@ -29,7 +30,7 @@ export function App() {
           <Route path="devices" element={<Devices />} /><Route path="devices/:id" element={<DeviceDetail />} />
           <Route path="sims" element={<Sims />} /><Route path="send" element={<Send />} />
           <Route path="transactions" element={<Transactions />} /><Route path="campaigns" element={<Campaigns />} /><Route path="campaigns/new" element={<CampaignWizard />} /><Route path="campaigns/:id/edit" element={<CampaignWizard />} /><Route path="campaigns/:id" element={<CampaignDetail />} />
-          <Route path="templates" element={<Templates />} /><Route path="settings" element={<Settings />} />
+          <Route path="templates" element={<Templates />} /><Route path="settings" element={<Settings />} /><Route path="account" element={<Account />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

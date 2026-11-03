@@ -24,7 +24,10 @@ export type Campaign = S['Campaign']
 export type CampaignPreview = S['CampaignPreview']
 export type ImportResult = S['ImportResult']
 
-export interface Me { id: string; email: string; role: Role; csrf_token: string }
+export interface Me { id: string; email: string; role: Role; csrf_token: string; mfa_enabled?: boolean }
+export interface MfaChallenge { mfa_required: true; mfa_token: string; expires_in?: number }
+export interface MfaStatus { enabled: boolean; enabled_at: string | null; recovery_codes_remaining: number }
+export interface MfaSetup { secret: string; otpauth_uri: string }
 export interface Page<T> { items: T[]; next_cursor: string | null }
 export interface Overview {
   devices: { online: number; degraded: number; offline: number }

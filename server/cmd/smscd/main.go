@@ -56,12 +56,14 @@ func main() {
 		}
 	case "admin":
 		adminCmd(ctx, args, cfg, pool, log)
+	case "secrets":
+		secretsCmd(ctx, args, cfg, pool, log)
 	case "privacy":
 		privacyCmd(ctx, args, cfg, pool, log)
 	case "serve":
 		serve(ctx, cfg, pool, log)
 	default:
-		fmt.Fprintln(os.Stderr, "perintah tidak dikenal:", cmd, "(serve | migrate | admin create | privacy erase)")
+		fmt.Fprintln(os.Stderr, "perintah tidak dikenal:", cmd, "(serve | migrate | admin create|reset-2fa|reset-password | secrets reencrypt | privacy erase)")
 		os.Exit(2)
 	}
 }
@@ -137,9 +139,52 @@ func serve(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, log *slog
 }
 
 func adminCmd(ctx context.Context, args []string, cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) {
-	if len(args) == 0 || args[0] != "create" {
-		fmt.Fprintln(os.Stderr, "pemakaian: smscd admin create --email <email> [--password <pw>] [--role admin|operator|viewer]")
+	usage := func() {
+		fmt.Fprintln(os.Stderr, "pemakaian:\n  smscd admin create --email <email> [--password <pw>] [--role admin|operator|viewer]\n  smscd admin reset-2fa --email <email>          (admin kehilangan authenticator)\n  smscd admin reset-password --email <email> [--password <pw>]")
 		os.Exit(2)
+	}
+	if len(args) == 0 {
+		usage()
+	}
+	svc := core.New(pool, cfg, log, bus.New(time.Minute))
+	switch args[0] {
+	case "reset-2fa":
+		fs := flag.NewFlagSet("admin reset-2fa", flag.ExitOnError)
+		email := fs.String("email", "", "email")
+		_ = fs.Parse(args[1:])
+		id, err := svc.ResetMFAByEmail(ctx, *email)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "gagal:", err)
+			os.Exit(1)
+		}
+		svc.Audit(ctx, "cli:admin", "user.2fa_reset", "user", id.String(), nil)
+		fmt.Printf("2FA %s direset dan semua sesinya dicabut; pengguna dapat mengaktifkan ulang dari Pengaturan > Akun\n", *email)
+		return
+	case "reset-password":
+		fs := flag.NewFlagSet("admin reset-password", flag.ExitOnError)
+		email := fs.String("email", "", "email")
+		pw := fs.String("password", "", "password baru (kosong = acak, dicetak sekali)")
+		_ = fs.Parse(args[1:])
+		generated := false
+		if *pw == "" {
+			raw := make([]byte, 15)
+			_, _ = rand.Read(raw)
+			*pw, generated = base64.RawURLEncoding.EncodeToString(raw), true
+		}
+		id, err := svc.SetPasswordByEmail(ctx, *email, *pw)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "gagal:", err)
+			os.Exit(1)
+		}
+		svc.Audit(ctx, "cli:admin", "user.password_reset", "user", id.String(), nil)
+		fmt.Printf("password %s diganti dan semua sesinya dicabut\n", *email)
+		if generated {
+			fmt.Printf("password (tampil sekali): %s\n", *pw)
+		}
+		return
+	case "create":
+	default:
+		usage()
 	}
 	fs := flag.NewFlagSet("admin create", flag.ExitOnError)
 	email := fs.String("email", "", "email")
@@ -152,7 +197,6 @@ func adminCmd(ctx context.Context, args []string, cfg config.Config, pool *pgxpo
 		_, _ = rand.Read(raw)
 		*pw, generated = base64.RawURLEncoding.EncodeToString(raw), true
 	}
-	svc := core.New(pool, cfg, log, bus.New(time.Minute))
 	u, err := svc.CreateUser(ctx, *email, *pw, *role)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gagal:", err)
@@ -162,6 +206,21 @@ func adminCmd(ctx context.Context, args []string, cfg config.Config, pool *pgxpo
 	if generated {
 		fmt.Printf("password (tampil sekali): %s\n", *pw)
 	}
+}
+
+func secretsCmd(ctx context.Context, args []string, cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) {
+	if len(args) == 0 || args[0] != "reencrypt" {
+		fmt.Fprintln(os.Stderr, "pemakaian: smscd secrets reencrypt   (tulis ulang secret webhook & rahasia TOTP dengan WEBHOOK_ENC_KEY saat ini)")
+		os.Exit(2)
+	}
+	svc := core.New(pool, cfg, log, bus.New(time.Minute))
+	wh, tp, err := svc.ReencryptSecrets(ctx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gagal:", err)
+		os.Exit(1)
+	}
+	svc.Audit(ctx, "cli:secrets", "secrets.reencrypt", "system", "", map[string]any{"webhooks": wh, "totp": tp})
+	fmt.Printf("selesai: %d webhook dan %d rahasia TOTP ditulis ulang dengan kunci saat ini. Kunci lama (…_PREVIOUS) kini aman dihapus.\n", wh, tp)
 }
 
 func privacyCmd(ctx context.Context, args []string, cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) {
