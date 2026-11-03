@@ -89,6 +89,12 @@ func (a *API) Router() http.Handler {
 		r.Put("/Users/{id}", a.scimReplaceUser)
 		r.Patch("/Users/{id}", a.scimPatchUser)
 		r.Delete("/Users/{id}", a.scimDeleteUser)
+		r.Get("/Groups", a.scimListGroups)
+		r.Post("/Groups", a.scimCreateGroup)
+		r.Get("/Groups/{id}", a.scimGetGroup)
+		r.Put("/Groups/{id}", a.scimReplaceGroup)
+		r.Patch("/Groups/{id}", a.scimPatchGroup)
+		r.Delete("/Groups/{id}", a.scimDeleteGroup)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -188,6 +194,7 @@ func (a *API) Router() http.Handler {
 			r.With(admin).Post("/users/{userId}/password", a.setUserPassword)
 			r.With(admin).Get("/settings/sso", a.getSSO)
 			r.With(admin).Get("/settings/scim", a.getSCIMSettings)
+			r.With(admin).Get("/scim-groups", a.listSCIMGroups)
 			r.With(admin).Get("/scim-tokens", a.listSCIMTokens)
 			r.With(admin).Post("/scim-tokens", a.createSCIMToken)
 			r.With(admin).Delete("/scim-tokens/{tokenId}", a.deleteSCIMToken)

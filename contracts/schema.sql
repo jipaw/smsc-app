@@ -34,7 +34,8 @@ CREATE TABLE users (
   scim_managed        boolean NOT NULL DEFAULT false,
   scim_external_id    text,
   scim_attrs          jsonb NOT NULL DEFAULT '{}',
-  scim_updated_at     timestamptz
+  scim_updated_at     timestamptz,
+  scim_direct_role    user_role
 );
 CREATE UNIQUE INDEX users_email_uq ON users (lower(email));
 CREATE UNIQUE INDEX users_oidc_uq ON users (oidc_issuer, oidc_subject) WHERE oidc_subject IS NOT NULL;
@@ -116,6 +117,23 @@ CREATE TABLE oidc_flows (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX oidc_flows_expires_idx ON oidc_flows (expires_at);
+
+CREATE TABLE scim_groups (
+  id           uuid PRIMARY KEY,
+  display_name text NOT NULL,
+  external_id  text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX scim_groups_name_uq ON scim_groups (lower(display_name));
+CREATE UNIQUE INDEX scim_groups_ext_uq  ON scim_groups (external_id) WHERE external_id IS NOT NULL;
+
+CREATE TABLE scim_group_members (
+  group_id uuid NOT NULL REFERENCES scim_groups(id) ON DELETE CASCADE,
+  user_id  uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (group_id, user_id)
+);
+CREATE INDEX scim_group_members_user_idx ON scim_group_members (user_id);
 
 CREATE TABLE scim_tokens (
   id           uuid PRIMARY KEY,

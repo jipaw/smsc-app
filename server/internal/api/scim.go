@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -76,7 +77,7 @@ func scimActor(r *http.Request) string {
 
 func (a *API) scimBase() string { return a.Svc.Cfg.PublicBaseURL + "/scim/v2" }
 
-func (a *API) scimUserJSON(u core.SCIMUser) map[string]any {
+func (a *API) scimUserJSON(u core.SCIMUser, groups []core.GroupRef) map[string]any {
 	loc := a.scimBase() + "/Users/" + u.ID.String()
 	out := map[string]any{
 		"schemas": []string{core.SCIMUserSchema}, "id": u.ID.String(), "userName": u.UserName, "active": u.Active,
@@ -87,6 +88,11 @@ func (a *API) scimUserJSON(u core.SCIMUser) map[string]any {
 	if u.ExternalID != nil {
 		out["externalId"] = *u.ExternalID
 	}
+	gl := make([]map[string]any, 0, len(groups))
+	for _, g := range groups {
+		gl = append(gl, map[string]any{"value": g.ID.String(), "display": g.Display, "$ref": a.scimBase() + "/Groups/" + g.ID.String(), "type": "direct"})
+	}
+	out["groups"] = gl // read-only (RFC 7643 §4.1.2)
 	if v, ok := u.Attrs["displayName"].(string); ok {
 		out["displayName"] = v
 	}
@@ -222,17 +228,22 @@ func (a *API) scimDiscoverySPC(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) scimDiscoveryRT(w http.ResponseWriter, r *http.Request) {
-	rt := map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ResourceType"}, "id": "User", "name": "User", "endpoint": "/Users", "description": "Pengguna dashboard",
-		"schema": core.SCIMUserSchema, "meta": map[string]any{"resourceType": "ResourceType", "location": a.scimBase() + "/ResourceTypes/User"}}
-	if chi.URLParam(r, "id") != "" {
-		if chi.URLParam(r, "id") != "User" {
+	types := map[string]map[string]any{
+		"User": {"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ResourceType"}, "id": "User", "name": "User", "endpoint": "/Users", "description": "Pengguna dashboard",
+			"schema": core.SCIMUserSchema, "meta": map[string]any{"resourceType": "ResourceType", "location": a.scimBase() + "/ResourceTypes/User"}},
+		"Group": {"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ResourceType"}, "id": "Group", "name": "Group", "endpoint": "/Groups", "description": "Grup; nama grup dipetakan ke peran lewat SCIM_*_GROUPS",
+			"schema": core.SCIMGroupSchema, "meta": map[string]any{"resourceType": "ResourceType", "location": a.scimBase() + "/ResourceTypes/Group"}},
+	}
+	if id := chi.URLParam(r, "id"); id != "" {
+		rt, ok := types[id]
+		if !ok {
 			a.scimFail(w, &core.SCIMError{Status: 404, Detail: "resource type tidak ditemukan"})
 			return
 		}
 		a.scimWrite(w, 200, rt, "")
 		return
 	}
-	a.scimWrite(w, 200, map[string]any{"schemas": []string{core.SCIMListSchema}, "totalResults": 1, "startIndex": 1, "itemsPerPage": 1, "Resources": []any{rt}}, "")
+	a.scimWrite(w, 200, map[string]any{"schemas": []string{core.SCIMListSchema}, "totalResults": 2, "startIndex": 1, "itemsPerPage": 2, "Resources": []any{types["User"], types["Group"]}}, "")
 }
 
 func scimUserSchema() map[string]any {
@@ -254,18 +265,32 @@ func scimUserSchema() map[string]any {
 		}}
 }
 
+func scimGroupSchema() map[string]any {
+	return map[string]any{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:Schema"}, "id": core.SCIMGroupSchema, "name": "Group", "description": "Grup SMSC",
+		"attributes": []map[string]any{
+			{"name": "displayName", "type": "string", "multiValued": false, "required": true, "caseExact": false, "mutability": "readWrite", "returned": "default", "uniqueness": "server"},
+			{"name": "externalId", "type": "string", "multiValued": false, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "server"},
+			{"name": "members", "type": "complex", "multiValued": true, "required": false, "mutability": "readWrite", "returned": "default", "uniqueness": "none", "description": "Hanya anggota bertipe User yang dikelola SCIM",
+				"subAttributes": []map[string]any{{"name": "value", "type": "string", "multiValued": false, "required": true, "mutability": "immutable", "returned": "default", "uniqueness": "none"}, {"name": "display", "type": "string", "multiValued": false, "required": false, "mutability": "readOnly", "returned": "default", "uniqueness": "none"}, {"name": "type", "type": "string", "multiValued": false, "required": false, "canonicalValues": []string{"User"}, "mutability": "immutable", "returned": "default", "uniqueness": "none"}}},
+		}}
+}
+
 func (a *API) scimDiscoverySchemas(w http.ResponseWriter, r *http.Request) {
-	sc := scimUserSchema()
-	sc["meta"] = map[string]any{"resourceType": "Schema", "location": a.scimBase() + "/Schemas/" + core.SCIMUserSchema}
+	us, gs := scimUserSchema(), scimGroupSchema()
+	us["meta"] = map[string]any{"resourceType": "Schema", "location": a.scimBase() + "/Schemas/" + core.SCIMUserSchema}
+	gs["meta"] = map[string]any{"resourceType": "Schema", "location": a.scimBase() + "/Schemas/" + core.SCIMGroupSchema}
 	if id := chi.URLParam(r, "id"); id != "" {
-		if id != core.SCIMUserSchema {
+		switch id {
+		case core.SCIMUserSchema:
+			a.scimWrite(w, 200, us, "")
+		case core.SCIMGroupSchema:
+			a.scimWrite(w, 200, gs, "")
+		default:
 			a.scimFail(w, &core.SCIMError{Status: 404, Detail: "schema tidak ditemukan"})
-			return
 		}
-		a.scimWrite(w, 200, sc, "")
 		return
 	}
-	a.scimWrite(w, 200, map[string]any{"schemas": []string{core.SCIMListSchema}, "totalResults": 1, "startIndex": 1, "itemsPerPage": 1, "Resources": []any{sc}}, "")
+	a.scimWrite(w, 200, map[string]any{"schemas": []string{core.SCIMListSchema}, "totalResults": 2, "startIndex": 1, "itemsPerPage": 2, "Resources": []any{us, gs}}, "")
 }
 
 func (a *API) scimListUsers(w http.ResponseWriter, r *http.Request) {
@@ -291,9 +316,14 @@ func (a *API) scimListUsers(w http.ResponseWriter, r *http.Request) {
 		a.scimFail(w, err)
 		return
 	}
+	ids := make([]uuid.UUID, 0, len(list))
+	for _, u := range list {
+		ids = append(ids, u.ID)
+	}
+	grp, _ := a.Svc.SCIMUserGroups(r.Context(), ids)
 	res := make([]map[string]any, 0, len(list))
 	for _, u := range list {
-		res = append(res, a.scimUserJSON(u))
+		res = append(res, a.scimUserJSON(u, grp[u.ID]))
 	}
 	if start < 1 {
 		start = 1
@@ -320,7 +350,7 @@ func (a *API) scimGetUser(w http.ResponseWriter, r *http.Request) {
 		a.scimFail(w, err)
 		return
 	}
-	a.scimWrite(w, 200, a.scimUserJSON(u), "")
+	a.scimWrite(w, 200, a.scimOneUser(r, u), "")
 }
 
 func (a *API) scimCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -332,7 +362,7 @@ func (a *API) scimCreateUser(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		var u core.SCIMUser
 		if u, err = a.Svc.SCIMCreateUser(r.Context(), scimActor(r), c); err == nil {
-			a.scimWrite(w, 201, a.scimUserJSON(u), a.scimBase()+"/Users/"+u.ID.String())
+			a.scimWrite(w, 201, a.scimOneUser(r, u), a.scimBase()+"/Users/"+u.ID.String())
 			return
 		}
 	}
@@ -352,7 +382,7 @@ func (a *API) scimReplaceUser(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		var u core.SCIMUser
 		if u, err = a.Svc.SCIMUpdateUser(r.Context(), scimActor(r), id, c, true); err == nil {
-			a.scimWrite(w, 200, a.scimUserJSON(u), "")
+			a.scimWrite(w, 200, a.scimOneUser(r, u), "")
 			return
 		}
 	}
@@ -510,7 +540,7 @@ func (a *API) scimPatchUser(w http.ResponseWriter, r *http.Request) {
 		a.scimFail(w, err)
 		return
 	}
-	a.scimWrite(w, 200, a.scimUserJSON(u), "")
+	a.scimWrite(w, 200, a.scimOneUser(r, u), "")
 }
 
 func (a *API) scimDeleteUser(w http.ResponseWriter, r *http.Request) {
@@ -570,4 +600,288 @@ func (a *API) deleteSCIMToken(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) getSCIMSettings(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, a.Svc.SCIMConfig(r.Context()))
+}
+
+func (a *API) scimOneUser(r *http.Request, u core.SCIMUser) map[string]any {
+	g, _ := a.Svc.SCIMUserGroups(r.Context(), []uuid.UUID{u.ID})
+	return a.scimUserJSON(u, g[u.ID])
+}
+
+// ---------- Groups (fase 13) ----------
+
+func (a *API) scimGroupJSON(g core.SCIMGroup, withMembers bool) map[string]any {
+	out := map[string]any{
+		"schemas": []string{core.SCIMGroupSchema}, "id": g.ID.String(), "displayName": g.DisplayName,
+		"meta": map[string]any{"resourceType": "Group", "created": g.Created.UTC().Format("2006-01-02T15:04:05Z07:00"), "lastModified": g.Updated.UTC().Format("2006-01-02T15:04:05Z07:00"), "location": a.scimBase() + "/Groups/" + g.ID.String()},
+	}
+	if g.ExternalID != nil {
+		out["externalId"] = *g.ExternalID
+	}
+	if withMembers {
+		ms := make([]map[string]any, 0, len(g.Members))
+		for _, m := range g.Members {
+			ms = append(ms, map[string]any{"value": m.ID.String(), "display": m.UserName, "$ref": a.scimBase() + "/Users/" + m.ID.String(), "type": "User"})
+		}
+		out["members"] = ms
+	}
+	return out
+}
+
+func excludesMembers(r *http.Request) bool {
+	for _, v := range strings.Split(r.URL.Query().Get("excludedAttributes"), ",") {
+		if strings.EqualFold(strings.TrimSpace(v), "members") {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *API) scimListGroups(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f, err := core.ParseSCIMFilter(q.Get("filter"))
+	if err != nil {
+		a.scimFail(w, err)
+		return
+	}
+	start, count := 1, 50
+	if v := q.Get("startIndex"); v != "" {
+		start, _ = strconv.Atoi(v)
+	}
+	if v := q.Get("count"); v != "" {
+		count, _ = strconv.Atoi(v)
+	}
+	wm := !excludesMembers(r)
+	list, total, err := a.Svc.SCIMListGroups(r.Context(), f, start, count, wm)
+	if err != nil {
+		a.scimFail(w, err)
+		return
+	}
+	res := make([]map[string]any, 0, len(list))
+	for _, g := range list {
+		res = append(res, a.scimGroupJSON(g, wm))
+	}
+	if start < 1 {
+		start = 1
+	}
+	a.scimWrite(w, 200, map[string]any{"schemas": []string{core.SCIMListSchema}, "totalResults": total, "startIndex": start, "itemsPerPage": len(res), "Resources": res}, "")
+}
+
+func (a *API) scimGetGroup(w http.ResponseWriter, r *http.Request) {
+	id, ok := a.scimUserID(w, r)
+	if !ok {
+		return
+	}
+	g, err := a.Svc.SCIMGetGroup(r.Context(), id, !excludesMembers(r))
+	if err != nil {
+		a.scimFail(w, err)
+		return
+	}
+	a.scimWrite(w, 200, a.scimGroupJSON(g, !excludesMembers(r)), "")
+}
+
+func memberIDs(v any) ([]uuid.UUID, error) {
+	list, ok := v.([]any)
+	if !ok {
+		return nil, &core.SCIMError{Status: 400, Type: "invalidValue", Detail: "members harus berupa array"}
+	}
+	var out []uuid.UUID
+	for _, it := range list {
+		m, ok := it.(map[string]any)
+		if !ok {
+			return nil, &core.SCIMError{Status: 400, Type: "invalidValue", Detail: "elemen members harus objek dengan value"}
+		}
+		if t, _ := m["type"].(string); t != "" && !strings.EqualFold(t, "User") {
+			return nil, &core.SCIMError{Status: 400, Type: "invalidValue", Detail: "hanya anggota bertipe User yang didukung (grup bersarang tidak)"}
+		}
+		raw, _ := m["value"].(string)
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return nil, &core.SCIMError{Status: 400, Type: "invalidValue", Detail: "members[].value harus berupa id pengguna"}
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+func groupChangeFromResource(m map[string]any) (core.SCIMGroupChange, error) {
+	var c core.SCIMGroupChange
+	if v, ok := m["displayName"].(string); ok {
+		c.DisplayName = core.Some(v)
+	}
+	if v, ok := m["externalId"].(string); ok {
+		c.ExternalID = core.Some(v)
+	}
+	if v, ok := m["members"]; ok && v != nil {
+		ids, err := memberIDs(v)
+		if err != nil {
+			return c, err
+		}
+		c.MemberOps = []core.MemberOp{{Kind: "replace", IDs: ids}}
+	}
+	return c, nil
+}
+
+func (a *API) scimCreateGroup(w http.ResponseWriter, r *http.Request) {
+	var m map[string]any
+	if !a.scimDecode(w, r, &m) {
+		return
+	}
+	c, err := groupChangeFromResource(m)
+	if err == nil {
+		var g core.SCIMGroup
+		if g, err = a.Svc.SCIMCreateGroup(r.Context(), scimActor(r), c); err == nil {
+			a.scimWrite(w, 201, a.scimGroupJSON(g, true), a.scimBase()+"/Groups/"+g.ID.String())
+			return
+		}
+	}
+	a.scimFail(w, err)
+}
+
+func (a *API) scimReplaceGroup(w http.ResponseWriter, r *http.Request) {
+	id, ok := a.scimUserID(w, r)
+	if !ok {
+		return
+	}
+	var m map[string]any
+	if !a.scimDecode(w, r, &m) {
+		return
+	}
+	c, err := groupChangeFromResource(m)
+	if err == nil {
+		var g core.SCIMGroup
+		if g, err = a.Svc.SCIMUpdateGroup(r.Context(), scimActor(r), id, c, true); err == nil {
+			a.scimWrite(w, 200, a.scimGroupJSON(g, true), "")
+			return
+		}
+	}
+	a.scimFail(w, err)
+}
+
+var memberPathRe = regexp.MustCompile(`(?i)^members\[\s*value\s+eq\s+"([^"]+)"\s*\]$`)
+
+func (a *API) scimPatchGroup(w http.ResponseWriter, r *http.Request) {
+	id, ok := a.scimUserID(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Schemas []string `json:"schemas"`
+		Ops     []struct {
+			Op    string          `json:"op"`
+			Path  string          `json:"path"`
+			Value json.RawMessage `json:"value"`
+		} `json:"Operations"`
+	}
+	if !a.scimDecode(w, r, &body) {
+		return
+	}
+	if !hasSchema(body.Schemas, core.SCIMPatchSchema) || len(body.Ops) == 0 {
+		a.scimFail(w, &core.SCIMError{Status: 400, Type: "invalidSyntax", Detail: "butuh schemas PatchOp dan minimal satu Operations"})
+		return
+	}
+	var c core.SCIMGroupChange
+	bad := func(t, d string) { a.scimFail(w, &core.SCIMError{Status: 400, Type: t, Detail: d}) }
+	for _, op := range body.Ops {
+		kind := strings.ToLower(op.Op)
+		if kind != "add" && kind != "replace" && kind != "remove" {
+			bad("invalidSyntax", "op harus add, replace, atau remove")
+			return
+		}
+		var val any
+		if len(op.Value) > 0 {
+			_ = json.Unmarshal(op.Value, &val)
+		}
+		path := strings.TrimSpace(op.Path)
+		if mm := memberPathRe.FindStringSubmatch(path); mm != nil {
+			uid, err := uuid.Parse(mm[1])
+			if err != nil || kind != "remove" {
+				bad("invalidPath", "members[value eq \"id\"] hanya untuk remove dengan id pengguna")
+				return
+			}
+			c.MemberOps = append(c.MemberOps, core.MemberOp{Kind: "remove", IDs: []uuid.UUID{uid}})
+			continue
+		}
+		setField := func(attr string, v any, remove bool) error {
+			switch strings.ToLower(attr) {
+			case "displayname":
+				if remove {
+					return &core.SCIMError{Status: 400, Type: "invalidValue", Detail: "displayName tidak boleh dihapus"}
+				}
+				s, _ := v.(string)
+				c.DisplayName = core.Some(s)
+			case "externalid":
+				if remove {
+					c.ExternalID = core.Clear[string]()
+				} else {
+					s, _ := v.(string)
+					c.ExternalID = core.Some(s)
+				}
+			case "members":
+				switch {
+				case remove && v == nil:
+					c.MemberOps = append(c.MemberOps, core.MemberOp{Kind: "clear"})
+				default:
+					ids, err := memberIDs(v)
+					if err != nil {
+						return err
+					}
+					k := kind
+					c.MemberOps = append(c.MemberOps, core.MemberOp{Kind: k, IDs: ids})
+				}
+			case "meta", "id", "schemas":
+			default:
+				return &core.SCIMError{Status: 400, Type: "invalidPath", Detail: "atribut grup tidak dikenal: " + attr}
+			}
+			return nil
+		}
+		if path == "" {
+			m, ok := val.(map[string]any)
+			if !ok || kind == "remove" {
+				bad("noTarget", "operasi tanpa path harus berisi objek value")
+				return
+			}
+			for k, v := range m {
+				if err := setField(k, v, false); err != nil {
+					a.scimFail(w, err)
+					return
+				}
+			}
+			continue
+		}
+		if kind != "remove" && op.Value == nil {
+			bad("invalidValue", "value wajib untuk add/replace")
+			return
+		}
+		if err := setField(path, val, kind == "remove"); err != nil {
+			a.scimFail(w, err)
+			return
+		}
+	}
+	g, err := a.Svc.SCIMUpdateGroup(r.Context(), scimActor(r), id, c, false)
+	if err != nil {
+		a.scimFail(w, err)
+		return
+	}
+	a.scimWrite(w, 200, a.scimGroupJSON(g, true), "")
+}
+
+func (a *API) scimDeleteGroup(w http.ResponseWriter, r *http.Request) {
+	id, ok := a.scimUserID(w, r)
+	if !ok {
+		return
+	}
+	if err := a.Svc.SCIMDeleteGroup(r.Context(), scimActor(r), id); err != nil {
+		a.scimFail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) listSCIMGroups(w http.ResponseWriter, r *http.Request) {
+	items, err := a.Svc.SCIMGroupSummaries(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }

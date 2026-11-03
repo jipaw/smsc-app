@@ -201,14 +201,17 @@ func TestSCIMDiscovery(t *testing.T) {
 		t.Fatalf("authenticationSchemes: %v", as)
 	}
 	st, m, _ = s.do("GET", "/ResourceTypes", nil)
-	if st != 200 || m["totalResults"].(float64) != 1 || m["Resources"].([]any)[0].(map[string]any)["endpoint"] != "/Users" {
+	if st != 200 || m["totalResults"].(float64) != 2 || m["Resources"].([]any)[0].(map[string]any)["endpoint"] != "/Users" || m["Resources"].([]any)[1].(map[string]any)["endpoint"] != "/Groups" {
 		t.Fatalf("ResourceTypes: %d %v", st, m)
 	}
 	if st, _, _ := s.do("GET", "/ResourceTypes/User", nil); st != 200 {
 		t.Fatal(st)
 	}
-	if st, _, _ := s.do("GET", "/ResourceTypes/Group", nil); st != 404 {
-		t.Fatalf("Group tidak didukung: %d", st)
+	if st, _, _ := s.do("GET", "/ResourceTypes/Group", nil); st != 200 {
+		t.Fatalf("Group: %d", st)
+	}
+	if st, _, _ := s.do("GET", "/ResourceTypes/Tim", nil); st != 404 {
+		t.Fatalf("resource type tak ada: %d", st)
 	}
 	st, m, _ = s.do("GET", "/Schemas", nil)
 	if st != 200 || m["Resources"].([]any)[0].(map[string]any)["id"] != uSchema {
@@ -217,8 +220,11 @@ func TestSCIMDiscovery(t *testing.T) {
 	if st, _, _ := s.do("GET", "/Schemas/"+uSchema, nil); st != 200 {
 		t.Fatal(st)
 	}
-	if st, _, _ := s.do("GET", "/Groups", nil); st != 404 {
-		t.Fatalf("Groups: %d", st)
+	if st, m, _ := s.do("GET", "/Groups", nil); st != 200 || m["totalResults"].(float64) != 0 {
+		t.Fatalf("Groups: %d %v", st, m)
+	}
+	if st, _, _ := s.do("GET", "/Schemas/urn:ietf:params:scim:schemas:core:2.0:Group", nil); st != 200 {
+		t.Fatalf("schema Group: %d", st)
 	}
 }
 

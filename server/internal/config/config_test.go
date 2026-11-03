@@ -148,3 +148,32 @@ func TestSCIMConfig(t *testing.T) {
 		t.Fatal("peran bawaan admin harus ditolak")
 	}
 }
+
+func TestSCIMGroupMappingConfig(t *testing.T) {
+	base(t)
+	for _, k := range []string{"SCIM_ENABLED", "SCIM_DEFAULT_ROLE", "SCIM_ALLOW_ADMIN_ROLE", "SCIM_ADOPT_EXISTING", "SCIM_ADMIN_GROUPS", "SCIM_OPERATOR_GROUPS", "SCIM_VIEWER_GROUPS"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("SCIM_ENABLED", "true")
+	t.Setenv("SCIM_OPERATOR_GROUPS", "Gateway Ops, Tim Ops")
+	t.Setenv("SCIM_VIEWER_GROUPS", "Gateway Viewers")
+	c, err := Load()
+	if err != nil || c.SCIM.GroupRoles["gateway ops"] != "operator" || c.SCIM.GroupRoles["tim ops"] != "operator" || c.SCIM.GroupRoles["gateway viewers"] != "viewer" || len(c.SCIM.GroupRoles) != 3 {
+		t.Fatalf("pemetaan: %v %v", err, c.SCIM.GroupRoles)
+	}
+	// grup yang sama di dua peran = ambigu → gagal start
+	t.Setenv("SCIM_VIEWER_GROUPS", "gateway OPS")
+	if _, err := Load(); err == nil {
+		t.Fatal("grup ganda peran harus ditolak")
+	}
+	// grup admin butuh SCIM_ALLOW_ADMIN_ROLE
+	t.Setenv("SCIM_VIEWER_GROUPS", "")
+	t.Setenv("SCIM_ADMIN_GROUPS", "Gateway Admins")
+	if _, err := Load(); err == nil {
+		t.Fatal("SCIM_ADMIN_GROUPS tanpa SCIM_ALLOW_ADMIN_ROLE harus ditolak")
+	}
+	t.Setenv("SCIM_ALLOW_ADMIN_ROLE", "true")
+	if c, err = Load(); err != nil || c.SCIM.GroupRoles["gateway admins"] != "admin" {
+		t.Fatalf("admin diizinkan: %v", err)
+	}
+}

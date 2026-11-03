@@ -1656,6 +1656,30 @@ paths:
                       token: {type: string}
         '409': {description: 'SCIM belum diaktifkan (`scim.not_enabled`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  /scim-groups:
+    get:
+      tags: [Admin]
+      summary: Grup SCIM yang diterima dari IdP (ringkasan, 500 teratas)
+      description: Nama grup → peran dipetakan oleh environment (`SCIM_ADMIN_GROUPS`/`SCIM_OPERATOR_GROUPS`/`SCIM_VIEWER_GROUPS`); `mapped_role` null = grup tidak memengaruhi peran.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, display_name, members]
+                      properties:
+                        id: {type: string, format: uuid}
+                        display_name: {type: string}
+                        members: {type: integer}
+                        mapped_role: {type: [string, 'null'], enum: [viewer, operator, admin, null]}
   /scim-tokens/{tokenId}:
     delete:
       tags: [Admin]
@@ -2203,6 +2227,8 @@ components:
         allow_admin_role: {type: boolean, description: 'SCIM boleh memberi/mengubah peran admin (default false).'}
         adopt_existing: {type: boolean, description: 'Pengguna lokal yang ada terlihat/dapat dikelola SCIM (default false).'}
         managed_users: {type: integer}
+        groups: {type: integer, description: 'Jumlah grup SCIM yang diterima.'}
+        group_roles: {type: object, additionalProperties: {type: string, enum: [viewer, operator, admin]}, description: 'Pemetaan nama grup (huruf kecil) → peran dari environment.'}
     SSOView:
       type: object
       required: [enabled, auto_provision, link_by_email, sync_roles, trust_idp_mfa, allowed_domains, linked_users]

@@ -98,6 +98,13 @@ func serve(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, log *slog
 		go svc.RunCampaigns(leaderCtx)
 		go svc.RunWebhooks(leaderCtx)
 		go svc.RunEmails(leaderCtx)
+		go func() { // terapkan ulang pemetaan grup SCIM → peran (mis. setelah SCIM_*_GROUPS diubah)
+			if n, err := svc.ReconcileSCIMRoles(leaderCtx); err != nil {
+				log.Error("rekonsiliasi peran SCIM gagal", "err", err)
+			} else if n > 0 {
+				log.Info("rekonsiliasi peran SCIM", "diubah", n)
+			}
+		}()
 		go svc.RunRetention(leaderCtx)
 	} else {
 		log.Warn("instance lain sudah menjadi leader; dispatcher/reaper tidak dijalankan di sini")

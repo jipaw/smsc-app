@@ -107,7 +107,7 @@ async function main() {
   await new Promise((r) => idp.listen(IPORT, '127.0.0.1', r)); procs.push({ kill: () => idp.close() })
   psql(`CREATE DATABASE ${DB}`)
   const env = { ...process.env, DATABASE_URL: BASE.replace('/postgres?', `/${DB}?`), PUBLIC_BASE_URL: URL_, SESSION_SECRET: 's'.repeat(40), HTTP_ADDR: `127.0.0.1:${PORT}`,
-    AUTO_MIGRATE: 'true', SECURE_COOKIES: 'false', REQUIRE_VPN: 'false', DISPATCH_TICK: '300ms', WEBHOOK_ALLOW_LOOPBACK: 'true', METRICS_ADDR: `127.0.0.1:${MPORT}`, WEBHOOK_TICK: '300ms', SCIM_ENABLED: 'true', OIDC_ISSUER: `http://localhost:${IPORT}`, OIDC_CLIENT_ID: 'smsc-e2e', OIDC_CLIENT_SECRET: 'rahasia-e2e', OIDC_NAME: 'IdP E2E', OIDC_AUTO_PROVISION: 'true', OIDC_ADMIN_GROUPS: 'e2e-admin', SMTP_HOST: '127.0.0.1', SMTP_PORT: String(SPORT), SMTP_MODE: 'none', SMTP_FROM: 'SMSC Gateway <smsc@e2e.test>', EMAIL_TICK: '300ms', LOGIN_BURST: '60', LOGIN_RATE_PER_MIN: '600', REAPER_INTERVAL: '500ms' }
+    AUTO_MIGRATE: 'true', SECURE_COOKIES: 'false', REQUIRE_VPN: 'false', DISPATCH_TICK: '300ms', WEBHOOK_ALLOW_LOOPBACK: 'true', METRICS_ADDR: `127.0.0.1:${MPORT}`, WEBHOOK_TICK: '300ms', SCIM_ENABLED: 'true', SCIM_OPERATOR_GROUPS: 'E2E Ops', OIDC_ISSUER: `http://localhost:${IPORT}`, OIDC_CLIENT_ID: 'smsc-e2e', OIDC_CLIENT_SECRET: 'rahasia-e2e', OIDC_NAME: 'IdP E2E', OIDC_AUTO_PROVISION: 'true', OIDC_ADMIN_GROUPS: 'e2e-admin', SMTP_HOST: '127.0.0.1', SMTP_PORT: String(SPORT), SMTP_MODE: 'none', SMTP_FROM: 'SMSC Gateway <smsc@e2e.test>', EMAIL_TICK: '300ms', LOGIN_BURST: '60', LOGIN_RATE_PER_MIN: '600', REAPER_INTERVAL: '500ms' }
   execFileSync(BIN, ['migrate'], { env })
   execFileSync(BIN, ['admin', 'create', '--email', ADMIN, '--password', PW], { env })
   const srv = spawn(BIN, ['serve'], { env, stdio: 'ignore' }); procs.push(srv)
@@ -822,6 +822,23 @@ async function main() {
   await page.getByRole('tab', { name: 'Pengguna' }).click()
   await page.getByRole('row').filter({ hasText: 'scim-user@e2e.test' }).getByText('SCIM', { exact: true }).waitFor()
   check(true, 'scim: pengguna hasil provisioning ditandai SCIM di daftar pengguna')
+  // grup SCIM → peran
+  const gUser = await scim('POST', '/Users', { schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], userName: 'grup-user@e2e.test' })
+  check(gUser.status === 201 && gUser.json.roles[0].value === 'viewer', 'scim-grup: pengguna baru tanpa grup = peran bawaan (viewer)')
+  const grp = await scim('POST', '/Groups', { schemas: ['urn:ietf:params:scim:schemas:core:2.0:Group'], displayName: 'e2e ops', externalId: 'okta-grp-1', members: [{ value: gUser.json.id }] })
+  check(grp.status === 201 && grp.json.members.length === 1, 'scim-grup: IdP membuat grup dengan anggota')
+  check((await scim('GET', `/Users/${gUser.json.id}`)).json.roles[0].value === 'operator', 'scim-grup: anggota grup "E2E Ops" otomatis operator (nama tak peka huruf)')
+  await page.getByRole('tab', { name: 'SCIM' }).click()
+  await page.getByRole('table', { name: 'Grup SCIM' }).getByRole('row').filter({ hasText: 'e2e ops' }).getByText('operator').waitFor({ timeout: 10000 })
+  check(true, 'scim-grup: dashboard menampilkan grup, jumlah anggota, dan peran hasil pemetaan')
+  await axeCheck(page, 'pengaturan SCIM + grup')
+  await page.getByRole('tab', { name: 'Pengguna' }).click()
+  await until(async () => (await page.getByLabel('Peran grup-user@e2e.test').inputValue()) === 'operator', 8000, 'peran di tabel pengguna')
+  check(true, 'scim-grup: tabel pengguna menampilkan peran operator hasil grup')
+  const rm = await scim('PATCH', `/Groups/${grp.json.id}`, { schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'], Operations: [{ op: 'Remove', path: `members[value eq "${gUser.json.id}"]` }] })
+  check(rm.status === 200 && (await scim('GET', `/Users/${gUser.json.id}`)).json.roles[0].value === 'viewer', 'scim-grup: keluar dari grup mengembalikan peran bawaan seketika')
+  await scim('DELETE', `/Groups/${grp.json.id}`)
+  await scim('DELETE', `/Users/${gUser.json.id}`)
   // pengguna masuk lewat SSO (email terverifikasi menautkan otomatis)
   idpUser = { sub: 'e2e-sub-scim', email: 'scim-user@e2e.test', email_verified: true, name: 'SCIM User', groups: [] }
   const xctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })

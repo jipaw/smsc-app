@@ -231,6 +231,12 @@ SCIM_USER_SCHEMA = {"type": "object", "required": ["schemas", "id", "userName", 
 SCIM_LIST_SCHEMA = {"type": "object", "required": ["schemas", "totalResults", "startIndex", "itemsPerPage", "Resources"],
                     "properties": {"schemas": {"type": "array", "contains": {"const": "urn:ietf:params:scim:api:messages:2.0:ListResponse"}},
                                    "totalResults": {"type": "integer"}, "Resources": {"type": "array", "items": SCIM_USER_SCHEMA}}}
+SCIM_GROUP_SCHEMA = {"type": "object", "required": ["schemas", "id", "displayName", "meta"],
+                     "properties": {"schemas": {"type": "array", "contains": {"const": "urn:ietf:params:scim:schemas:core:2.0:Group"}},
+                                    "id": {"type": "string", "format": "uuid"}, "displayName": {"type": "string"},
+                                    "members": {"type": "array", "items": {"type": "object", "required": ["value", "type"], "properties": {"type": {"const": "User"}}}},
+                                    "meta": {"type": "object", "required": ["resourceType", "location"], "properties": {"resourceType": {"const": "Group"}}}}}
+SCIM_GLIST_SCHEMA = {"type": "object", "required": ["schemas", "totalResults", "Resources"], "properties": {"Resources": {"type": "array", "items": SCIM_GROUP_SCHEMA}}}
 SCIM_ERR_SCHEMA = {"type": "object", "required": ["schemas", "status", "detail"],
                    "properties": {"schemas": {"type": "array", "contains": {"const": "urn:ietf:params:scim:api:messages:2.0:Error"}}, "status": {"type": "string"}}}
 
@@ -262,7 +268,7 @@ def scim(token, method, path, body=None, expect=None, schema=None):
 def main():
     psql(f"CREATE DATABASE {DB}")
     env = dict(os.environ, DATABASE_URL=DSN, PUBLIC_BASE_URL="http://example.test", SESSION_SECRET="s" * 40,
-               HTTP_ADDR=f"127.0.0.1:{PORT}", AUTO_MIGRATE="true", SECURE_COOKIES="false", REQUIRE_VPN="false", LOGIN_BURST="60", LOGIN_RATE_PER_MIN="600", SCIM_ENABLED="true")
+               HTTP_ADDR=f"127.0.0.1:{PORT}", AUTO_MIGRATE="true", SECURE_COOKIES="false", REQUIRE_VPN="false", LOGIN_BURST="60", LOGIN_RATE_PER_MIN="600", SCIM_ENABLED="true", SCIM_OPERATOR_GROUPS="Kontrak Ops")
     admin_pw = "kontrak-pagar-biru-12"
     subprocess.run([BIN, "migrate"], env=env, check=True, capture_output=True)
     subprocess.run([BIN, "admin", "create", "--email", "admin@ct.test", "--password", admin_pw], env=env, check=True, capture_output=True)
@@ -590,6 +596,24 @@ def run_checks(pw):
     scim(T, "PUT", f"/Users/{uid}", {"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "scim-kontrak@ct.test", "displayName": "Baru"}, 200, SCIM_USER_SCHEMA)
     scim(T, "PATCH", f"/Users/{uid}", {"schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], "Operations": [{"op": "Replace", "path": "active", "value": "False"}]}, 200, SCIM_USER_SCHEMA)
     scim(T, "PATCH", f"/Users/{uid}", {"schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], "Operations": [{"op": "replace", "path": "nope", "value": 1}]}, 400)
+    # grup (fase 13)
+    scim(T, "GET", "/ResourceTypes/Group", expect=200)
+    scim(T, "GET", "/Schemas/urn:ietf:params:scim:schemas:core:2.0:Group", expect=200)
+    st, g = scim(T, "POST", "/Groups", {"schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"], "displayName": "Kontrak Ops", "members": [{"value": uid}]}, 201, SCIM_GROUP_SCHEMA)
+    gid = g["id"]
+    scim(T, "POST", "/Groups", {"displayName": "kontrak ops"}, 409)
+    scim(T, "POST", "/Groups", {"displayName": "X", "members": [{"value": str(uuid.uuid4())}]}, 400)
+    scim(T, "GET", f"/Groups/{gid}", expect=200, schema=SCIM_GROUP_SCHEMA)
+    scim(T, "GET", f"/Groups/{uuid.uuid4()}", expect=404)
+    scim(T, "GET", "/Groups?filter=displayName%20eq%20%22kontrak%20ops%22", expect=200, schema=SCIM_GLIST_SCHEMA)
+    scim(T, "GET", "/Groups?filter=displayName%20co%20%22k%22", expect=400)
+    st, u2 = scim(T, "GET", f"/Users/{uid}", expect=200, schema=SCIM_USER_SCHEMA)
+    if u2 and (u2["roles"][0]["value"] != "operator" or not u2.get("groups")):
+        problems.append("anggota grup Kontrak Ops harus operator dan punya groups[]")
+    scim(T, "PATCH", f"/Groups/{gid}", {"schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], "Operations": [{"op": "Remove", "path": f'members[value eq "{uid}"]'}]}, 200, SCIM_GROUP_SCHEMA)
+    scim(T, "PUT", f"/Groups/{gid}", {"schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"], "displayName": "Kontrak Ops", "members": [{"value": uid}]}, 200, SCIM_GROUP_SCHEMA)
+    call("GET", "/api/v1/scim-groups", expect=200)
+    scim(T, "DELETE", f"/Groups/{gid}", expect=204)
     scim(T, "DELETE", f"/Users/{uid}", expect=204)
     scim(T, "GET", f"/Users/{uid}", expect=404)
     st, lt = call("GET", "/api/v1/scim-tokens", expect=200)

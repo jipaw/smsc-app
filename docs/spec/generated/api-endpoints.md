@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (111 operasi)
+# Daftar endpoint (112 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -140,6 +140,7 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `DELETE` | `/invitations/{invitationId}` | Cabut undangan | apiKey/sessionCookie | 204,404,409 |
 | `GET` | `/scim-tokens` | Daftar token SCIM aktif (tanpa nilai token) | apiKey/sessionCookie | 200 |
 | `POST` | `/scim-tokens` | Buat token SCIM untuk IdP | apiKey/sessionCookie | 201,409,422 |
+| `GET` | `/scim-groups` | Grup SCIM yang diterima dari IdP (ringkasan, 500 teratas) | apiKey/sessionCookie | 200 |
 | `DELETE` | `/scim-tokens/{tokenId}` | Cabut token SCIM | apiKey/sessionCookie | 204,404 |
 | `GET` | `/settings/scim` | Konfigurasi SCIM yang aktif | apiKey/sessionCookie | 200 |
 | `GET` | `/settings/sso` | Konfigurasi SSO OIDC yang aktif (tanpa rahasia) | apiKey/sessionCookie | 200 |

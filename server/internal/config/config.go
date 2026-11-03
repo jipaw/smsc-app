@@ -44,6 +44,8 @@ type SCIMConfig struct {
 	DefaultRole    string // peran pengguna baru tanpa atribut roles: viewer|operator
 	AllowAdminRole bool   // izinkan SCIM memberi/mengubah peran admin (default false: kompromi IdP tidak boleh mencetak admin)
 	AdoptExisting  bool   // pengguna lokal yang sudah ada terlihat/dapat dikelola SCIM (default false)
+	// pemetaan grup SCIM (displayName, tak peka huruf) → peran; peran efektif pengguna = tertinggi(roles, grup)
+	GroupRoles map[string]string
 }
 
 type Config struct {
@@ -221,8 +223,23 @@ func Load() (Config, error) {
 	}
 	c.SCIM = SCIMConfig{Enabled: env("SCIM_ENABLED", "false") == "true", DefaultRole: strings.ToLower(env("SCIM_DEFAULT_ROLE", "viewer")),
 		AllowAdminRole: env("SCIM_ALLOW_ADMIN_ROLE", "false") == "true", AdoptExisting: env("SCIM_ADOPT_EXISTING", "false") == "true"}
+	c.SCIM.GroupRoles = map[string]string{}
+	for role, key := range map[string]string{"admin": "SCIM_ADMIN_GROUPS", "operator": "SCIM_OPERATOR_GROUPS", "viewer": "SCIM_VIEWER_GROUPS"} {
+		for _, g := range splitList(os.Getenv(key)) {
+			n := strings.ToLower(strings.TrimSpace(g))
+			if prev, dup := c.SCIM.GroupRoles[n]; dup && prev != role {
+				return c, fmt.Errorf("grup SCIM %q dipetakan ke dua peran (%s dan %s)", g, prev, role)
+			}
+			c.SCIM.GroupRoles[n] = role
+		}
+	}
 	if c.SCIM.Enabled && c.SCIM.DefaultRole != "viewer" && c.SCIM.DefaultRole != "operator" {
 		return c, fmt.Errorf("SCIM_DEFAULT_ROLE harus viewer atau operator")
+	}
+	for g, r := range c.SCIM.GroupRoles {
+		if r == "admin" && !c.SCIM.AllowAdminRole {
+			return c, fmt.Errorf("SCIM_ADMIN_GROUPS (%s) butuh SCIM_ALLOW_ADMIN_ROLE=true", g)
+		}
 	}
 	if err := c.loadOIDC(); err != nil {
 		return c, err

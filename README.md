@@ -1,6 +1,6 @@
 # SMSC — SMS Gateway Android + Tailscale
 
-Paket desain (analisis, stack, kontrak, flow), server + dashboard (fase 1–12) yang teruji, dan skeleton PoC Android. Aplikasi Android produksi belum ada (menunggu hasil PoC).
+Paket desain (analisis, stack, kontrak, flow), server + dashboard (fase 1–13) yang teruji, dan skeleton PoC Android. Aplikasi Android produksi belum ada (menunggu hasil PoC).
 
 ## Ringkasan keputusan
 
@@ -48,13 +48,13 @@ Paket desain (analisis, stack, kontrak, flow), server + dashboard (fase 1–12) 
 
 | Path | Isi |
 |---|---|
-| [`openapi.yaml`](contracts/openapi.yaml) | REST, OpenAPI 3.1 (111 operasi) + [`scim.md`](contracts/scim.md) (profil SCIM 2.0) |
+| [`openapi.yaml`](contracts/openapi.yaml) | REST, OpenAPI 3.1 (112 operasi) + [`scim.md`](contracts/scim.md) (profil SCIM 2.0) |
 | [`ws-schema.json`](contracts/ws-schema.json) + [`test-vectors/`](contracts/test-vectors/) | Protokol WebSocket: JSON Schema, 17 contoh valid, 15 invalid |
 | [`device-ws-protocol.md`](contracts/device-ws-protocol.md) | Penjelasan protokol WebSocket |
 | [`schema.sql`](contracts/schema.sql) | DDL PostgreSQL 16 (diuji: dimuat bersih, constraint diverifikasi) |
 | [`tools/verify.sh`](contracts/tools/verify.sh) | Verifikasi kontrak (OpenAPI, vector, tabel endpoint) |
 
-**Server & dashboard (`server/`, `web/`)** — implementasi fase 1–12 (campaign, webhook, retensi, metrik, rotasi kredensial, 2FA TOTP + WebAuthn + login passkey + SSO OIDC + SCIM + kewajiban 2FA, manajemen pengguna, undangan + email SMTP, kebijakan password), teruji (lihat [`docs/STATUS.md`](docs/STATUS.md))
+**Server & dashboard (`server/`, `web/`)** — implementasi fase 1–13 (campaign, webhook, retensi, metrik, rotasi kredensial, 2FA TOTP + WebAuthn + login passkey + SSO OIDC + SCIM (User + Group) + kewajiban 2FA, manajemen pengguna, undangan + email SMTP, kebijakan password), teruji (lihat [`docs/STATUS.md`](docs/STATUS.md))
 
 | Path | Isi |
 |---|---|

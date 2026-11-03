@@ -134,6 +134,9 @@ type SCIMView struct {
 	AllowAdminRole bool   `json:"allow_admin_role"`
 	AdoptExisting  bool   `json:"adopt_existing"`
 	ManagedUsers   int    `json:"managed_users"`
+	// pemetaan grup → peran dari environment (nama grup huruf kecil); admin hanya muncul bila SCIM_ALLOW_ADMIN_ROLE
+	GroupRoles map[string]string `json:"group_roles"`
+	Groups     int               `json:"groups"`
 }
 
 func (s *Service) SCIMConfig(ctx context.Context) SCIMView {
@@ -142,6 +145,11 @@ func (s *Service) SCIMConfig(ctx context.Context) SCIMView {
 	if c.Enabled {
 		v.BaseURL, v.DefaultRole, v.AllowAdminRole, v.AdoptExisting = s.Cfg.PublicBaseURL+"/scim/v2", c.DefaultRole, c.AllowAdminRole, c.AdoptExisting
 		_ = s.Pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE scim_managed`).Scan(&v.ManagedUsers)
+		_ = s.Pool.QueryRow(ctx, `SELECT count(*) FROM scim_groups`).Scan(&v.Groups)
+		v.GroupRoles = map[string]string{}
+		for g, r := range c.GroupRoles {
+			v.GroupRoles[g] = r
+		}
 	}
 	return v
 }
@@ -180,6 +188,8 @@ func ParseSCIMFilter(f string) (SCIMFilter, error) {
 			a = "userName"
 		case "externalid":
 			a = "externalId"
+		case "displayname":
+			a = "displayName"
 		case "id":
 			a = "id"
 		case "active":
@@ -302,6 +312,8 @@ func (s *Service) SCIMListUsers(ctx context.Context, f SCIMFilter, start, count 
 			}
 			args = append(args, id)
 			where = append(where, fmt.Sprintf("u.id=$%d", len(args)))
+		case "displayName":
+			return nil, 0, serr(400, "invalidFilter", "displayName tidak didukung sebagai filter Users")
 		case "active":
 			args = append(args, *t.Bool)
 			where = append(where, fmt.Sprintf("(NOT u.disabled)=$%d", len(args)))
@@ -379,13 +391,15 @@ func (s *Service) SCIMCreateUser(ctx context.Context, actor string, c SCIMChange
 	if err != nil {
 		return SCIMUser{}, err
 	}
-	role := s.Cfg.SCIM.DefaultRole
+	var direct *string
 	if c.Role.Set && !c.Role.Null {
-		role = c.Role.V
+		v := c.Role.V
+		direct = &v
+		if err := s.scimRoleOK(v); err != nil {
+			return SCIMUser{}, err
+		}
 	}
-	if err := s.scimRoleOK(role); err != nil {
-		return SCIMUser{}, err
-	}
+	role := s.effectiveRole(direct, "") // belum ada grup saat pembuatan; keanggotaan datang kemudian lewat /Groups
 	active := !(c.Active.Set && !c.Active.Null && !c.Active.V)
 	var ext *string
 	if c.ExternalID.Set && !c.ExternalID.Null && c.ExternalID.V != "" {
@@ -393,8 +407,8 @@ func (s *Service) SCIMCreateUser(ctx context.Context, actor string, c SCIMChange
 	}
 	attrs, _ := json.Marshal(mergeAttrs(nil, c, true))
 	id := newID()
-	_, err = s.Pool.Exec(ctx, `INSERT INTO users(id,email,password_hash,role,disabled,scim_managed,scim_external_id,scim_attrs,scim_updated_at) VALUES ($1,$2,NULL,$3,$4,true,$5,$6,now())`,
-		id, email, role, !active, ext, attrs)
+	_, err = s.Pool.Exec(ctx, `INSERT INTO users(id,email,password_hash,role,disabled,scim_managed,scim_external_id,scim_attrs,scim_updated_at,scim_direct_role) VALUES ($1,$2,NULL,$3,$4,true,$5,$6,now(),$7::user_role)`,
+		id, email, role, !active, ext, attrs, direct)
 	if err != nil {
 		if isUnique(err, "") {
 			return SCIMUser{}, serr(409, "uniqueness", "userName atau externalId sudah dipakai")
@@ -421,10 +435,10 @@ func (s *Service) SCIMUpdateUser(ctx context.Context, actor string, id uuid.UUID
 	}
 	var email, role string
 	var disabled, managed bool
-	var ext *string
+	var ext, direct *string
 	var raw []byte
-	err = tx.QueryRow(ctx, `SELECT email, role::text, disabled, scim_managed, scim_external_id, scim_attrs FROM users u WHERE u.id=$1 AND `+s.scimVisible()+` FOR UPDATE`, id).
-		Scan(&email, &role, &disabled, &managed, &ext, &raw)
+	err = tx.QueryRow(ctx, `SELECT email, role::text, disabled, scim_managed, scim_external_id, scim_attrs, scim_direct_role::text FROM users u WHERE u.id=$1 AND `+s.scimVisible()+` FOR UPDATE`, id).
+		Scan(&email, &role, &disabled, &managed, &ext, &raw, &direct)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SCIMUser{}, serr(404, "", "pengguna %s tidak ditemukan", id)
 	}
@@ -446,12 +460,28 @@ func (s *Service) SCIMUpdateUser(ctx context.Context, actor string, id uuid.UUID
 			return SCIMUser{}, err
 		}
 	}
+	// peran efektif = tertinggi(roles langsung, peran dari grup); tanpa keduanya → peran bawaan
+	if !managed && direct == nil { // adopsi: peran saat ini menjadi peran langsung
+		r := role
+		direct = &r
+	}
 	switch {
 	case c.Role.Set && !c.Role.Null:
-		newRole = c.Role.V
-	case c.Role.Set || (replace && !c.Role.Set):
-		newRole = s.Cfg.SCIM.DefaultRole // roles dihapus / PUT tanpa roles → peran bawaan
+		v := c.Role.V
+		direct = &v
+	case c.Role.Set || (replace && !c.Role.Set): // roles dihapus / PUT tanpa roles
+		direct = nil
 	}
+	if direct != nil {
+		if err := s.scimRoleOK(*direct); err != nil {
+			return SCIMUser{}, err
+		}
+	}
+	gr, err := s.groupRole(ctx, tx, id)
+	if err != nil {
+		return SCIMUser{}, err
+	}
+	newRole = s.effectiveRole(direct, gr)
 	if newRole != role {
 		if err := s.scimRoleOK(newRole); err != nil {
 			return SCIMUser{}, err
@@ -480,8 +510,8 @@ func (s *Service) SCIMUpdateUser(ctx context.Context, actor string, id uuid.UUID
 		}
 	}
 	attrs, _ := json.Marshal(mergeAttrs(cur, c, replace))
-	_, err = tx.Exec(ctx, `UPDATE users SET email=$2, role=$3::user_role, disabled=$4, scim_external_id=$5, scim_attrs=$6, scim_managed=true, scim_updated_at=now() WHERE id=$1`,
-		id, newEmail, newRole, newDisabled, newExt, attrs)
+	_, err = tx.Exec(ctx, `UPDATE users SET email=$2, role=$3::user_role, disabled=$4, scim_external_id=$5, scim_attrs=$6, scim_managed=true, scim_updated_at=now(), scim_direct_role=$7::user_role WHERE id=$1`,
+		id, newEmail, newRole, newDisabled, newExt, attrs, direct)
 	if err != nil {
 		if isUnique(err, "") {
 			return SCIMUser{}, serr(409, "uniqueness", "userName atau externalId sudah dipakai")

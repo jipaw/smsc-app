@@ -107,7 +107,7 @@ Login tanpa password (passkey, bila diizinkan admin): `POST /auth/passkey/begin`
 
 SSO (bila dikonfigurasi): navigasi peramban `GET /auth/oidc/login?next=/path` → IdP → `GET /auth/oidc/callback` (selalu 302; gagal → `/?sso_error=<kode>`). Kode: `invalid_state`, `session_mismatch`, `denied`, `token`, `unavailable`, `not_linked`, `unverified_email`, `domain`, `disabled`, `conflict`, `link_conflict`. Penautan dari akun: `POST /auth/oidc/link` → `{url}`; lepas: `DELETE /auth/oidc/link`. `GET /auth/methods` (publik) memberi `oidc.enabled` + `oidc.name`.
 
-SCIM 2.0 (provisioning dari IdP) berada di `/scim/v2` dengan token khusus; galat berformat SCIM, bukan RFC 9457. Lihat `contracts/scim.md`. Manajemen token: `GET/POST /scim-tokens`, `DELETE /scim-tokens/{id}`, `GET /settings/scim`.
+SCIM 2.0 (provisioning dari IdP) berada di `/scim/v2` dengan token khusus; galat berformat SCIM, bukan RFC 9457. Lihat `contracts/scim.md`. Manajemen token: `GET/POST /scim-tokens`, `DELETE /scim-tokens/{id}`, `GET /settings/scim`, `GET /scim-groups` (ringkasan grup + peran hasil pemetaan).
 
 ### 3.2 Kirim non-campaign (API key)
 

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get, patch, post, put } from '../lib/api'
 import { fmtTime } from '../lib/format'
 import { isAdmin, useMe } from '../lib/session'
-import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, Invitation, EmailConfig, SSOView, ScimSettings, ScimToken, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
+import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, Invitation, EmailConfig, SSOView, ScimSettings, ScimToken, ScimGroupSummary, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
 import { Empty, ErrorBox, errMsg, Field, Loading, Modal, useToast } from '../components/ui'
 
 const TABS = ['Policy', 'Daftar blokir', 'API key', 'Webhook', 'Retensi', 'Keamanan', 'SSO', 'SCIM', 'Email', 'Pengguna', 'Audit'] as const
@@ -125,7 +125,7 @@ function Users() {
   const [f, setF] = useState<{ email: string; role: Role; password: string }>({ email: '', role: 'operator', password: '' })
   const [pwFor, setPwFor] = useState<UserItem | null>(null)
   const [newPw, setNewPw] = useState('')
-  const q = useQuery({ queryKey: ['users'], queryFn: () => get<{ items: UserItem[] }>('/users') })
+  const q = useQuery({ queryKey: ['users'], queryFn: () => get<{ items: UserItem[] }>('/users'), refetchOnMount: 'always' }) // IdP (SCIM/SSO) dapat mengubah pengguna tanpa lewat UI ini
   const refresh = () => qc.invalidateQueries({ queryKey: ['users'] })
   const reset = useMutation({ mutationFn: (id: string) => del(`/users/${id}/2fa`), onSuccess: refresh })
   const edit = useMutation({ mutationFn: (v: { id: string; body: { role?: Role; disabled?: boolean } }) => patch(`/users/${v.id}`, v.body), onSuccess: refresh, onError: (e) => toast(errMsg(e), true) })
@@ -202,11 +202,13 @@ function Invitations() {
 function ScimSettingsTab() {
   const qc = useQueryClient()
   const toast = useToast()
-  const cfg = useQuery({ queryKey: ['scim'], queryFn: () => get<ScimSettings>('/settings/scim') })
+  const live = { refetchOnMount: 'always' as const, refetchInterval: 10000 } // IdP mengubah data tanpa lewat UI ini
+  const cfg = useQuery({ queryKey: ['scim'], queryFn: () => get<ScimSettings>('/settings/scim'), ...live })
   const tokens = useQuery({ queryKey: ['scim-tokens'], queryFn: () => get<{ items: ScimToken[] }>('/scim-tokens'), enabled: !!cfg.data?.enabled })
+  const groups = useQuery({ queryKey: ['scim-groups'], queryFn: () => get<{ items: ScimGroupSummary[] }>('/scim-groups'), enabled: !!cfg.data?.enabled, ...live })
   const [name, setName] = useState('')
   const [secret, setSecret] = useState('')
-  const refresh = () => { qc.invalidateQueries({ queryKey: ['scim-tokens'] }); qc.invalidateQueries({ queryKey: ['scim'] }) }
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['scim-tokens'] }); qc.invalidateQueries({ queryKey: ['scim-groups'] }); qc.invalidateQueries({ queryKey: ['scim'] }) }
   const create = useMutation({ mutationFn: () => post<ScimToken>('/scim-tokens', { name }), onSuccess: (t) => { setSecret(t.token ?? ''); setName(''); refresh() } })
   const revoke = useMutation({ mutationFn: (id: string) => del(`/scim-tokens/${id}`), onSuccess: () => { toast('Token SCIM dicabut'); refresh() } })
   if (cfg.isLoading) return <Loading what="pengaturan SCIM" />
@@ -222,6 +224,14 @@ function ScimSettingsTab() {
           <dl><dt>SCIM base URL (isi di IdP)</dt><dd className="mono">{c.base_url}</dd><dt>Peran bawaan</dt><dd>{c.default_role}</dd>
             <dt>Boleh memberi peran admin</dt><dd>{c.allow_admin_role ? 'ya' : 'tidak (disarankan)'}</dd>
             <dt>Mengelola pengguna lokal yang sudah ada</dt><dd>{c.adopt_existing ? 'ya' : 'tidak — hanya pengguna yang dibuat SCIM'}</dd><dt>Pengguna terkelola</dt><dd>{c.managed_users}</dd></dl>
+          <h3>Grup → peran</h3>
+          {Object.keys(c.group_roles ?? {}).length === 0
+            ? <p className="muted">Belum ada pemetaan. Atur <span className="mono">SCIM_ADMIN_GROUPS</span>, <span className="mono">SCIM_OPERATOR_GROUPS</span>, <span className="mono">SCIM_VIEWER_GROUPS</span> (nama grup IdP dipisah koma, tak peka huruf) lalu restart. Peran efektif = tertinggi dari atribut roles dan grup.</p>
+            : <p className="muted">Pemetaan dari environment: {Object.entries(c.group_roles ?? {}).map(([g, r]) => `${g} → ${r}`).join(' · ')}</p>}
+          {groups.data && groups.data.items.length > 0 && (
+            <div className="scroll-x"><table aria-label="Grup SCIM"><thead><tr><th>Grup dari IdP</th><th>Anggota</th><th>Peran hasil pemetaan</th></tr></thead><tbody>
+              {groups.data.items.map((g) => <tr key={g.id}><td>{g.display_name}</td><td>{g.members}</td><td>{g.mapped_role ?? <span className="muted">tidak dipetakan</span>}</td></tr>)}
+            </tbody></table></div>)}
           <h3>Token</h3>
           <div className="row"><Field label="Nama token"><input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="okta-prod" /></Field>
             <button className="primary" disabled={!name || create.isPending} onClick={() => create.mutate()}>Buat token</button></div>

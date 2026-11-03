@@ -24,7 +24,8 @@ export function Layout({ onLogout }: { onLogout: () => void }) {
     mutationFn: () => put('/settings/dispatch-pause', { paused: false }),
     onSuccess: () => { qc.invalidateQueries(); toast('Pengiriman dilanjutkan') }, onError: (e) => toast(errMsg(e), true),
   })
-  const logout = async () => { await post('/auth/logout'); onLogout(); nav('/') }
+  // selalu keluar di sisi klien walau permintaan gagal (mis. 429/401): jangan biarkan pengguna terjebak di sesi yang tak dapat ditutup
+  const logout = async () => { try { await post('/auth/logout') } catch { /* sesi sudah tidak valid atau dibatasi laju */ } finally { onLogout(); nav('/') } }
   const sseLabel = { live: 'Realtime tersambung', connecting: 'Menyambung…', down: 'Realtime terputus' }[sse]
 
   return (
