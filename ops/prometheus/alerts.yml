@@ -110,3 +110,22 @@ groups:
         expr: changes(process_start_time_seconds[15m]) > 3
         labels: {severity: warning}
         annotations: {summary: "Server restart > 3 kali dalam 15 menit (crash loop?) — lihat log dan anotasi Restart di dashboard Grafana"}
+      - alert: SmscNoLeader
+        expr: sum(smsc_leader) == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "Tidak ada leader: dispatcher, reaper, campaign, webhook, email, dan retensi tidak berjalan — cek koneksi database dan log 'leader hilang'"}
+      - alert: SmscLeaderMetricAbsent
+        expr: absent(smsc_leader)
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "Metrik smsc_leader tidak ada: server smscd tidak ter-scrape (mati atau METRICS_ADDR salah)"}
+      - alert: SmscMultipleLeaders
+        expr: sum(smsc_leader) > 1
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: "Lebih dari satu leader (seharusnya mustahil karena advisory lock) — risiko kirim ganda; hentikan instance tambahan"}
+      - alert: SmscLeaderLost
+        expr: increase(smsc_leader_changes_total{event="lost"}[15m]) > 0
+        labels: {severity: warning}
+        annotations: {summary: "Leader kehilangan lock advisory (koneksi DB bermasalah); pemilihan diulang otomatis — periksa stabilitas database/jaringan"}

@@ -18,6 +18,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
 | **Fase 13**: SCIM `Group` → peran (`SCIM_ADMIN_GROUPS`/`SCIM_OPERATOR_GROUPS`/`SCIM_VIEWER_GROUPS`), peran efektif = tertinggi(roles, grup), rekonsiliasi saat start | |
 | **Fase 14–15**: rekonsiliasi grup SCIM berkala (`SCIM_RECONCILE_INTERVAL`); status run terakhir tersimpan di database (`settings.scim_reconcile_last`) dan tampil di Pengaturan → SCIM | |
+| **Fase 19**: pemantauan lock leader + pemilihan ulang/ambil-alih standby (`LEADER_TICK`), metrik `smsc_leader_changes_total`, 4 alert leader | |
 | **Fase 18**: anotasi restart/deploy/pergantian leader di Grafana, metrik `smsc_build_info` dan `smsc_leader`, alert `SmscRestartLoop` | |
 | **Fase 17**: dashboard Grafana SCIM + rekonsiliasi (`ops/grafana/smsc-scim.json`) | |
 | **Fase 16**: metrik Prometheus rekonsiliasi SCIM + 2 alert | |
@@ -80,6 +81,7 @@ Endpoint: `POST /auth/login` → (2FA aktif) `{mfa_required, mfa_token}` → `PO
 | `SCIM_ALLOW_ADMIN_ROLE` | `false` | Izinkan SCIM memberi/mengubah peran admin |
 | `SCIM_ADOPT_EXISTING` | `false` | Pengguna lokal yang sudah ada terlihat dan dapat dikelola SCIM |
 | `SCIM_ADMIN_GROUPS` | – | Nama grup IdP → admin (butuh `SCIM_ALLOW_ADMIN_ROLE=true`, jika tidak gagal start) |
+| `LEADER_TICK` | `5s` | Interval pemeriksaan lock leader / percobaan ambil alih oleh standby |
 | `SCIM_RECONCILE_INTERVAL` | `1h` | Rekonsiliasi berkala pemetaan grup → peran (leader); `0` = hanya saat start |
 | `SCIM_OPERATOR_GROUPS`, `SCIM_VIEWER_GROUPS` | – | Nama grup (dipisah koma, tak peka huruf) → operator / viewer; satu nama tidak boleh di dua peran |
 

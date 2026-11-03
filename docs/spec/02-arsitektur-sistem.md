@@ -29,7 +29,7 @@ Batas kepercayaan: (1) browser ↔ server, (2) sistem eksternal ↔ server, (3) 
 | Dashboard | file statis di-embed pada `smscd` | – | – |
 | Aplikasi Android | HP | Room (job, outbox) | Satu per HP |
 
-**Leader election.** `smscd` mengambil `pg_try_advisory_lock(k)` saat start untuk menjalankan komponen leader (dispatcher, reaper, materializer, retensi). Dengan satu instance, selalu memenangkannya; memungkinkan rolling restart aman dan jalan menuju multi-instance (fase 4, butuh pub/sub antar-instance untuk WS Hub).
+**Leader election.** `smscd` mengambil `pg_try_advisory_lock(k)` pada koneksi khusus untuk menjalankan komponen leader (dispatcher, reaper, materializer, retensi). Sejak fase 19 lock dipantau tiap `LEADER_TICK` (default 5 dtk): bila hilang (koneksi putus/di-terminate, DB restart) worker dihentikan, `smsc_leader` turun ke 0, dan instance mana pun (termasuk yang sama) memilih ulang — standby mengambil alih tanpa restart. Dengan satu instance, selalu memenangkannya; memungkinkan rolling restart aman dan jalan menuju multi-instance (fase 4, butuh pub/sub antar-instance untuk WS Hub).
 
 ## 3. Keputusan arsitektur (ADR)
 

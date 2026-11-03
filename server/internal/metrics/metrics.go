@@ -46,7 +46,8 @@ type Metrics struct {
 	SCIMReconcileRuns    *prometheus.CounterVec
 	SCIMReconcileChanged prometheus.Counter
 
-	Leader prometheus.Gauge // 1 bila instance ini memegang peran leader
+	LeaderChanges *prometheus.CounterVec
+	Leader        prometheus.Gauge // 1 bila instance ini memegang peran leader
 
 	ScrapeErrors prometheus.Counter
 }
@@ -79,10 +80,14 @@ func New(pool *pgxpool.Pool) *Metrics {
 		m.SCIMReconcileRuns.WithLabelValues(r) // seri ada sejak awal (0)
 	}
 	m.Leader = prometheus.NewGauge(prometheus.GaugeOpts{Name: "smsc_leader", Help: "1 bila instance ini leader (dispatcher/reaper/worker aktif di sini), 0 bila bukan."})
+	m.LeaderChanges = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_leader_changes_total", Help: "Perubahan kepemimpinan pada instance ini (acquired|lost); lost > 0 = lock advisory hilang."}, []string{"event"})
+	for _, ev := range []string{"acquired", "lost"} {
+		m.LeaderChanges.WithLabelValues(ev)
+	}
 	f(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "smsc_build_info", Help: "Info build (nilai selalu 1); label version berubah saat deploy.", ConstLabels: prometheus.Labels{"version": buildinfo.Version, "revision": buildinfo.Revision(), "go_version": runtime.Version()}}, func() float64 { return 1 }))
 	m.ScrapeErrors = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_scrape_errors_total", Help: "Kegagalan membaca metrik berbasis database saat scrape."})
 	for _, c := range []prometheus.Collector{m.HTTPRequests, m.HTTPDuration, m.MessagesCreated, m.Transitions, m.LeaseExpired, m.EventIngest, m.WSConnections, m.WSConnects, m.WSMessages,
-		m.DispatchAssignments, m.DispatchWait, m.CampaignMaterialized, m.WebhookDeliveries, m.EmailResults, m.WebhookDuration, m.RetentionRuns, m.RetentionRows, m.SCIMReconcileRuns, m.SCIMReconcileChanged, m.Leader, m.ScrapeErrors} {
+		m.DispatchAssignments, m.DispatchWait, m.CampaignMaterialized, m.WebhookDeliveries, m.EmailResults, m.WebhookDuration, m.RetentionRuns, m.RetentionRows, m.SCIMReconcileRuns, m.SCIMReconcileChanged, m.Leader, m.LeaderChanges, m.ScrapeErrors} {
 		f(c)
 	}
 	f(collectors.NewGoCollector())

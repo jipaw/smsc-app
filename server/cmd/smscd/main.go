@@ -81,29 +81,23 @@ func serve(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, log *slog
 	h := hub.New(svc, log)
 	handler := api.New(svc, h, b, log).Router()
 
-	// Komponen leader (dispatcher/reaper) hanya di satu instance: advisory lock (ADR, spec 02 §2).
+	// Komponen leader (dispatcher/reaper/worker) hanya di satu instance: advisory lock (ADR, spec 02 §2).
+	// RunLeader memantau lock terus-menerus: bila hilang worker dihentikan, dan instance mana pun dapat mengambil alih.
 	leaderCtx, leaderCancel := context.WithCancel(ctx)
 	defer leaderCancel()
-	leaderConn, err := pool.Acquire(ctx)
-	if err != nil {
-		log.Error("acquire", "err", err)
-		os.Exit(1)
-	}
-	var leader bool
-	_ = leaderConn.QueryRow(ctx, `SELECT pg_try_advisory_lock(727002)`).Scan(&leader)
-	if leader {
-		log.Info("menjadi leader: dispatcher dan reaper aktif")
-		svc.M.Leader.Set(1)
-		go svc.RunDispatcher(leaderCtx)
-		go svc.RunReaper(leaderCtx)
-		go svc.RunCampaigns(leaderCtx)
-		go svc.RunWebhooks(leaderCtx)
-		go svc.RunEmails(leaderCtx)
-		go svc.RunSCIMReconcile(leaderCtx) // pemetaan grup SCIM → peran: saat start, lalu berkala
-		go svc.RunRetention(leaderCtx)
-	} else {
-		log.Warn("instance lain sudah menjadi leader; dispatcher/reaper tidak dijalankan di sini")
-	}
+	leaderDone := make(chan struct{})
+	go func() {
+		defer close(leaderDone)
+		svc.RunLeader(leaderCtx, cfg.LeaderTick, func(lctx context.Context) {
+			go svc.RunDispatcher(lctx)
+			go svc.RunReaper(lctx)
+			go svc.RunCampaigns(lctx)
+			go svc.RunWebhooks(lctx)
+			go svc.RunEmails(lctx)
+			go svc.RunSCIMReconcile(lctx) // pemetaan grup SCIM → peran: saat start, lalu berkala
+			go svc.RunRetention(lctx)
+		})
+	}()
 
 	// metrik Prometheus: listener TERPISAH (default loopback); kosongkan METRICS_ADDR untuk menonaktifkan
 	if cfg.MetricsAddr != "" {
@@ -130,16 +124,14 @@ func serve(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, log *slog
 		}
 	case <-ctx.Done():
 		log.Info("shutdown: berhenti menerima koneksi, menutup sesi device")
-		leaderCancel() // tidak ada lease baru
+		leaderCancel() // tidak ada lease baru (RunLeader melepas lock)
 		h.CloseAll()   // 1012: device reconnect dengan backoff
 		sctx, c := context.WithTimeout(context.Background(), 20*time.Second)
 		defer c()
 		_ = srv.Shutdown(sctx)
 	}
-	if leader {
-		_, _ = leaderConn.Exec(context.Background(), `SELECT pg_advisory_unlock(727002)`)
-	}
-	leaderConn.Release()
+	leaderCancel()
+	<-leaderDone // RunLeader melepas lock advisory sebelum keluar
 }
 
 func adminCmd(ctx context.Context, args []string, cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) {
