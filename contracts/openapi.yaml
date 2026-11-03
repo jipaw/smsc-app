@@ -117,6 +117,151 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/webauthn:
+    get:
+      tags: [Auth]
+      summary: Kunci keamanan / passkey milik saya
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebAuthnList'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /auth/webauthn/register/begin:
+    post:
+      tags: [Auth]
+      summary: Mulai mendaftarkan kunci keamanan (butuh password)
+      description: |
+        Mengembalikan opsi untuk `navigator.credentials.create()` (`options` = `PublicKeyCredentialCreationOptions` dengan
+        field biner base64url) dan `ceremony_id` sekali pakai berumur 5 menit. Kunci yang sudah terdaftar dikecualikan.
+        WebAuthn sebagai **faktor kedua**: `residentKey: discouraged`, `userVerification: preferred`, attestation `none`.
+        RP ID = host `PUBLIC_BASE_URL` (atau `WEBAUTHN_RP_ID`); alamat IP tidak valid → 409 `webauthn.not_available`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: {type: string, format: password}
+                name: {type: string, maxLength: 40, example: YubiKey kantor}
+      responses:
+        '200':
+          description: Opsi + ceremony
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebAuthnBegin'}
+        '401': {description: 'Password salah', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '409': {description: 'WebAuthn tidak tersedia / batas 10 kunci', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {description: 'Nama terlalu panjang', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/webauthn/register/finish:
+    post:
+      tags: [Auth]
+      summary: Selesaikan pendaftaran kunci keamanan
+      description: |
+        `credential` = hasil `navigator.credentials.create()` yang diserialisasi (`id`, `rawId`, `type`, `response.{clientDataJSON,attestationObject}`,
+        semua biner base64url). Server memverifikasi challenge, origin, RP ID, flag, dan attestation. Bila ini faktor 2FA pertama,
+        10 kode pemulihan diterbitkan (tampil sekali); jika tidak, `recovery_codes` kosong.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ceremony_id, credential]
+              properties:
+                ceremony_id: {type: string, format: uuid}
+                credential: {type: object, additionalProperties: true}
+      responses:
+        '201':
+          description: Terdaftar
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [credential, recovery_codes]
+                properties:
+                  credential: {$ref: '#/components/schemas/WebAuthnCredential'}
+                  recovery_codes: {type: array, items: {type: string}, maxItems: 10}
+        '400': {description: 'Upacara tidak valid/kedaluwarsa/terpakai (`webauthn.ceremony_invalid`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '409': {description: 'Kunci sudah terdaftar / batas 10 kunci', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {description: 'Verifikasi pendaftaran gagal', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/webauthn/credentials/{credentialId}:
+    delete:
+      tags: [Auth]
+      summary: Hapus satu kunci keamanan (butuh password + kode)
+      description: Kode = TOTP atau kode pemulihan. Menghapus kunci TERAKHIR tanpa TOTP berarti 2FA mati (kode pemulihan ikut dibuang).
+      parameters:
+        - {name: credentialId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MfaReauth'}
+      responses:
+        '204': {description: Dihapus}
+        '401': {description: 'Password / kode salah', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/login/webauthn/begin:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Mulai login dengan kunci keamanan (setelah password benar)
+      description: Memakai `mfa_token` dari `/auth/login`. `allowCredentials` hanya berisi kunci milik pengguna itu.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfa_token]
+              properties:
+                mfa_token: {type: string}
+      responses:
+        '200':
+          description: Opsi + ceremony
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebAuthnBegin'}
+        '401': {description: 'Token tantangan tidak valid (`auth.mfa_expired`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '409': {description: 'Tidak ada kunci (`webauthn.no_credentials`) / tidak tersedia', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '423': {description: 'Akun terkunci (`auth.locked`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/login/webauthn/finish:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Selesaikan login dengan kunci keamanan
+      description: |
+        `credential` = hasil `navigator.credentials.get()` (`id`, `rawId`, `type`, `response.{clientDataJSON,authenticatorData,signature,userHandle?}`).
+        Upacara sekali pakai (juga bila gagal). Kegagalan dihitung seperti salah kode: 5 kali → akun terkunci 15 menit.
+        Sign count yang mundur (indikasi kunci diklon) ditolak dan diaudit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfa_token, ceremony_id, credential]
+              properties:
+                mfa_token: {type: string}
+                ceremony_id: {type: string, format: uuid}
+                credential: {type: object, additionalProperties: true}
+      responses:
+        '200':
+          description: Cookie sesi di-set; badan = profil + `csrf_token`.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+        '400': {description: 'Upacara tidak valid/kedaluwarsa/terpakai', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '401': {description: 'Verifikasi gagal (`auth.webauthn_failed`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '423': {description: 'Akun terkunci (`auth.locked`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
   /auth/2fa:
     get:
       tags: [Auth]
@@ -1853,15 +1998,44 @@ components:
       required: [mfa_required, mfa_token]
       properties:
         mfa_required: {type: boolean, const: true}
-        mfa_token: {type: string, description: 'Berlaku 5 menit; hanya untuk /auth/login/verify.'}
+        mfa_token: {type: string, description: 'Berlaku 5 menit; hanya untuk /auth/login/verify dan /auth/login/webauthn/*.'}
         expires_in: {type: integer}
+        methods:
+          type: array
+          description: 'Faktor kedua yang tersedia untuk akun ini, urutan tampilan.'
+          items: {type: string, enum: [webauthn, totp, recovery]}
     MfaStatus:
       type: object
-      required: [enabled, recovery_codes_remaining]
+      required: [enabled, totp_enabled, webauthn_credentials, recovery_codes_remaining]
       properties:
-        enabled: {type: boolean}
+        enabled: {type: boolean, description: 'Faktor apa pun aktif (TOTP atau kunci keamanan).'}
+        totp_enabled: {type: boolean}
+        webauthn_credentials: {type: integer}
         enabled_at: {type: [string, 'null'], format: date-time}
         recovery_codes_remaining: {type: integer}
+    WebAuthnCredential:
+      type: object
+      required: [id, name, created_at, backed_up, transports]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        created_at: {type: string, format: date-time}
+        last_used_at: {type: [string, 'null'], format: date-time}
+        backed_up: {type: boolean, description: 'Passkey tersinkron (BS), mis. iCloud / Google Password Manager.'}
+        transports: {type: array, items: {type: string}}
+    WebAuthnList:
+      type: object
+      required: [enabled, credentials]
+      properties:
+        enabled: {type: boolean, description: 'false bila RP ID server tidak valid (mis. alamat IP).'}
+        rp_id: {type: string}
+        credentials: {type: array, items: {$ref: '#/components/schemas/WebAuthnCredential'}}
+    WebAuthnBegin:
+      type: object
+      required: [ceremony_id, options]
+      properties:
+        ceremony_id: {type: string, format: uuid}
+        options: {type: object, additionalProperties: true, description: 'PublicKeyCredentialCreationOptions / RequestOptions (di bawah kunci `publicKey`), field biner base64url.'}
     MfaSetup:
       type: object
       required: [secret, otpauth_uri]
@@ -1878,7 +2052,7 @@ components:
       type: object
       required: [recovery_codes]
       properties:
-        recovery_codes: {type: array, items: {type: string}, minItems: 10, maxItems: 10}
+        recovery_codes: {type: array, items: {type: string}, maxItems: 10, description: '10 kode saat faktor 2FA PERTAMA diaktifkan; array kosong bila 2FA sudah aktif dengan faktor lain (kode yang ada tetap dipakai).'}
 
     Enrollment:
       type: object

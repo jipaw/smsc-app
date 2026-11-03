@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -49,6 +50,11 @@ type Config struct {
 	Mail         mailer.Config
 	EmailBackoff []time.Duration // jeda sebelum percobaan ulang; len = jumlah retry
 	EmailTick    time.Duration
+
+	// WebAuthn (fase 9). RP ID default = host dari PUBLIC_BASE_URL (tanpa port); alamat IP tidak valid sebagai RP ID
+	WebAuthnRPID    string
+	WebAuthnRPName  string
+	WebAuthnOrigins []string
 
 	// retensi & metrik (fase 3)
 	RetentionInterval time.Duration
@@ -165,6 +171,17 @@ func Load() (Config, error) {
 	}
 	if err := c.Mail.Validate(); err != nil {
 		return c, err
+	}
+	c.WebAuthnRPName = env("WEBAUTHN_RP_NAME", "SMSC Gateway")
+	c.WebAuthnRPID = os.Getenv("WEBAUTHN_RP_ID")
+	if c.WebAuthnRPID == "" {
+		if u, err := url.Parse(c.PublicBaseURL); err == nil {
+			c.WebAuthnRPID = u.Hostname()
+		}
+	}
+	c.WebAuthnOrigins = splitList(os.Getenv("WEBAUTHN_ORIGINS"))
+	if len(c.WebAuthnOrigins) == 0 && c.PublicBaseURL != "" {
+		c.WebAuthnOrigins = []string{c.PublicBaseURL}
 	}
 	c.SessionSecretPrev = splitList(os.Getenv("SESSION_SECRET_PREVIOUS"))
 	c.WebhookKeyPrev = splitList(os.Getenv("WEBHOOK_ENC_KEY_PREVIOUS"))

@@ -145,6 +145,58 @@ def anon(method, path, body=None, expect=None):
     return status, parsed
 
 
+
+class SoftAuth:
+    """Authenticator perangkat lunak (ES256, attestation none) untuk uji kontrak WebAuthn."""
+    def __init__(self, rp="example.test", origin="http://example.test"):
+        from cryptography.hazmat.primitives.asymmetric import ec
+        self.ec, self.key = ec, ec.generate_private_key(ec.SECP256R1())
+        self.cred = os.urandom(32); self.count = 0; self.rp = rp; self.origin = origin
+
+    @staticmethod
+    def _head(major, n):
+        if n < 24: return bytes([major << 5 | n])
+        if n < 256: return bytes([major << 5 | 24, n])
+        return bytes([major << 5 | 25]) + n.to_bytes(2, "big")
+
+    def _int(self, n): return self._head(0, n) if n >= 0 else self._head(1, -1 - n)
+    def _bytes(self, b): return self._head(2, len(b)) + b
+    def _text(self, t): return self._head(3, len(t)) + t.encode()
+    def _map(self, *kv): return self._head(5, len(kv) // 2) + b"".join(kv)
+
+    def _authdata(self, flags, with_cred):
+        import hashlib, struct
+        out = hashlib.sha256(self.rp.encode()).digest() + bytes([flags]) + struct.pack(">I", self.count)
+        if with_cred:
+            nums = self.key.public_key().public_numbers()
+            cose = self._map(self._int(1), self._int(2), self._int(3), self._int(-7), self._int(-1), self._int(1),
+                             self._int(-2), self._bytes(nums.x.to_bytes(32, "big")), self._int(-3), self._bytes(nums.y.to_bytes(32, "big")))
+            out += bytes(16) + len(self.cred).to_bytes(2, "big") + self.cred + cose
+        return out
+
+    @staticmethod
+    def _b64(b): import base64; return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+    def _cd(self, typ, challenge): return json.dumps({"type": typ, "challenge": challenge, "origin": self.origin, "crossOrigin": False}).encode()
+
+    def create(self, options):
+        self.count = 0
+        att = self._map(self._text("fmt"), self._text("none"), self._text("attStmt"), self._map(), self._text("authData"), self._bytes(self._authdata(0x45, True)))
+        return {"id": self._b64(self.cred), "rawId": self._b64(self.cred), "type": "public-key",
+                "response": {"clientDataJSON": self._b64(self._cd("webauthn.create", options["publicKey"]["challenge"])), "attestationObject": self._b64(att)},
+                "clientExtensionResults": {}}
+
+    def get(self, options):
+        import hashlib
+        from cryptography.hazmat.primitives import hashes
+        self.count += 1
+        cd = self._cd("webauthn.get", options["publicKey"]["challenge"]); ad = self._authdata(0x05, False)
+        sig = self.key.sign(ad + hashlib.sha256(cd).digest(), self.ec.ECDSA(hashes.SHA256()))
+        return {"id": self._b64(self.cred), "rawId": self._b64(self.cred), "type": "public-key",
+                "response": {"clientDataJSON": self._b64(cd), "authenticatorData": self._b64(ad), "signature": self._b64(sig)},
+                "clientExtensionResults": {}}
+
+
 def main():
     psql(f"CREATE DATABASE {DB}")
     env = dict(os.environ, DATABASE_URL=DSN, PUBLIC_BASE_URL="http://example.test", SESSION_SECRET="s" * 40,
@@ -388,6 +440,34 @@ def run_checks(pw):
     call("POST", "/api/v1/invitations", {"email": "kirim@ct.test", "role": "viewer", "send_email": True}, 409)
     st, inv3 = call("POST", "/api/v1/invitations", {"email": "tanpa-email@ct.test", "role": "viewer", "send_email": False}, 201)
     call("GET", "/api/v1/invitations", expect=200)
+
+    # WebAuthn (fase 9): admin saat ini tanpa 2FA; kunci keamanan menjadi faktor pertama
+    pw2 = "kontrak-baru-12345"  # password admin sudah diganti di blok fase 4
+    call("GET", "/api/v1/auth/webauthn", expect=200)
+    call("POST", "/api/v1/auth/webauthn/register/begin", {"password": "salah-salah-1234"}, 401)
+    call("POST", "/api/v1/auth/webauthn/register/finish", {"ceremony_id": str(uuid.uuid4()), "credential": {}}, 400)
+    key = SoftAuth()
+    st, wb = call("POST", "/api/v1/auth/webauthn/register/begin", {"password": pw2, "name": "Kunci Kontrak"}, 200)
+    call("POST", "/api/v1/auth/webauthn/register/finish", {"ceremony_id": wb["ceremony_id"], "credential": {"id": "x"}}, 422)
+    st, wb = call("POST", "/api/v1/auth/webauthn/register/begin", {"password": pw2, "name": "Kunci Kontrak"}, 200)
+    st, wr = call("POST", "/api/v1/auth/webauthn/register/finish", {"ceremony_id": wb["ceremony_id"], "credential": key.create(wb["options"])}, 201)
+    if wr and len(wr.get("recovery_codes", [])) != 10:
+        problems.append("kunci pertama harus menerbitkan 10 kode pemulihan")
+    call("GET", "/api/v1/auth/webauthn", expect=200)
+    call("GET", "/api/v1/auth/2fa", expect=200)
+    st, ch = anon("POST", "/api/v1/auth/login", {"email": "admin@ct.test", "password": pw2}, 200)
+    if not ch or "webauthn" not in ch.get("methods", []):
+        problems.append("tantangan login harus menawarkan webauthn")
+    else:
+        anon("POST", "/api/v1/auth/login/webauthn/begin", {"mfa_token": "sampah"}, 401)
+        st, lb = anon("POST", "/api/v1/auth/login/webauthn/begin", {"mfa_token": ch["mfa_token"]}, 200)
+        anon("POST", "/api/v1/auth/login/webauthn/finish", {"mfa_token": ch["mfa_token"], "ceremony_id": str(uuid.uuid4()), "credential": {}}, 400)
+        anon("POST", "/api/v1/auth/login/webauthn/finish", {"mfa_token": ch["mfa_token"], "ceremony_id": lb["ceremony_id"], "credential": key.get(lb["options"])}, 200)
+    call("DELETE", f"/api/v1/auth/webauthn/credentials/{uuid.uuid4()}", {"password": pw2, "code": wr["recovery_codes"][0]}, 404)
+    st, lst = call("GET", "/api/v1/auth/webauthn", expect=200)
+    kid = lst["credentials"][0]["id"]
+    call("DELETE", f"/api/v1/auth/webauthn/credentials/{kid}", {"password": pw2, "code": "000000"}, 401)
+    call("DELETE", f"/api/v1/auth/webauthn/credentials/{kid}", {"password": pw2, "code": wr["recovery_codes"][0]}, 204)
 
     # revoke di akhir
     call("DELETE", f"/api/v1/devices/{dev}", expect=204)

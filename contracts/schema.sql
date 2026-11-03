@@ -72,6 +72,28 @@ CREATE TABLE email_outbox (
 CREATE INDEX email_outbox_due_idx ON email_outbox (next_attempt_at) WHERE status = 'pending';
 CREATE INDEX email_outbox_invitation_idx ON email_outbox (invitation_id);
 
+CREATE TABLE webauthn_credentials (
+  id            uuid PRIMARY KEY,
+  user_id       uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  credential_id bytea NOT NULL UNIQUE,
+  name          text NOT NULL,
+  data          jsonb NOT NULL,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  last_used_at  timestamptz
+);
+CREATE INDEX webauthn_credentials_user_idx ON webauthn_credentials (user_id);
+
+CREATE TABLE webauthn_ceremonies (
+  id         uuid PRIMARY KEY,
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind       text NOT NULL CHECK (kind IN ('register','login')),
+  data       jsonb NOT NULL,
+  name       text,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX webauthn_ceremonies_expires_idx ON webauthn_ceremonies (expires_at);
+
 CREATE TABLE sessions (
   id          uuid PRIMARY KEY,
   user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,

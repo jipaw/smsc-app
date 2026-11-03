@@ -38,7 +38,7 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if res.MFARequired { // password benar tetapi belum ada sesi: kirim tantangan
-		a.writeJSON(w, http.StatusOK, map[string]any{"mfa_required": true, "mfa_token": res.MFAToken, "expires_in": 300})
+		a.writeJSON(w, http.StatusOK, map[string]any{"mfa_required": true, "mfa_token": res.MFAToken, "expires_in": 300, "methods": res.Methods})
 		return
 	}
 	a.setSession(w, res.Token)
@@ -1592,4 +1592,110 @@ func (a *API) testEmail(w http.ResponseWriter, r *http.Request) {
 	}
 	a.Svc.Audit(r.Context(), actorOf(p), "email.test", "settings", "email", nil) // alamat tujuan sengaja tidak dicatat
 	a.writeJSON(w, http.StatusOK, map[string]any{"sent": true})
+}
+
+// ---------- WebAuthn (fase 9) ----------
+
+func (a *API) webauthnList(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	items, err := a.Svc.ListWebAuthn(r.Context(), p.user.ID)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"enabled": a.Svc.WebAuthnEnabled(), "rp_id": a.Svc.Cfg.WebAuthnRPID, "credentials": items})
+}
+
+func (a *API) webauthnRegisterBegin(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	var in struct{ Password, Name string }
+	if !a.decode(w, r, &in) {
+		return
+	}
+	out, err := a.Svc.WebAuthnRegisterBegin(r.Context(), p.user.ID, p.user.Email, in.Password, in.Name)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, out)
+}
+
+type webauthnFinishIn struct {
+	MFAToken   string          `json:"mfa_token"`
+	CeremonyID uuid.UUID       `json:"ceremony_id"`
+	Credential json.RawMessage `json:"credential"`
+}
+
+func (a *API) webauthnRegisterFinish(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	var in webauthnFinishIn
+	if !a.decode(w, r, &in) {
+		return
+	}
+	cred, codes, err := a.Svc.WebAuthnRegisterFinish(r.Context(), p.user.ID, p.user.Email, in.CeremonyID, in.Credential)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(p), "auth.webauthn_register", "user", p.user.ID.String(), map[string]any{"credential_id": cred.ID.String(), "first_factor": len(codes) > 0})
+	a.writeJSON(w, http.StatusCreated, map[string]any{"credential": cred, "recovery_codes": codes})
+}
+
+func (a *API) webauthnRemove(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	id, perr := pathUUID(r, "credentialId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	var in struct{ Password, Code string }
+	if !a.decode(w, r, &in) {
+		return
+	}
+	if err := a.Svc.WebAuthnRemove(r.Context(), p.user.ID, id, in.Password, in.Code); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(p), "auth.webauthn_remove", "user", p.user.ID.String(), map[string]any{"credential_id": id.String()})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) webauthnLoginBegin(w http.ResponseWriter, r *http.Request) {
+	var in webauthnFinishIn
+	if !a.decode(w, r, &in) {
+		return
+	}
+	out, err := a.Svc.WebAuthnLoginBegin(r.Context(), in.MFAToken)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) webauthnLoginFinish(w http.ResponseWriter, r *http.Request) {
+	var in webauthnFinishIn
+	if !a.decode(w, r, &in) {
+		return
+	}
+	res, err := a.Svc.WebAuthnLoginFinish(r.Context(), in.MFAToken, in.CeremonyID, in.Credential)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.setSession(w, res.Token)
+	a.Svc.Audit(r.Context(), "user:"+res.User.Email, "auth.login", "user", res.User.ID.String(), map[string]any{"mfa": true, "method": "webauthn"})
+	a.writeJSON(w, http.StatusOK, a.sessionBody(r, res))
 }

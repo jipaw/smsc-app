@@ -76,6 +76,7 @@ Prioritas: **M** = MVP (fase 1), **S** = fase 2, **C** = fase 3. Kriteria peneri
 | FR-28 | Hapus pengguna (harus dinonaktifkan dahulu) | C | KP1 sesi hilang, objek buatannya tetap ada · KP2 audit tetap memuat email pelaku · KP3 akun sendiri ditolak |
 | FR-30 | Pembersihan undangan lama (retensi dapat diatur) | C | KP1 hanya undangan selesai (diterima/dicabut/kedaluwarsa) yang lewat masa simpan · KP2 undangan tertunda & pengguna hasilnya tidak tersentuh · KP3 idempoten |
 | FR-31 | Pengiriman email undangan lewat SMTP (opsional) | C | KP1 tanpa SMTP undangan tetap berjalan (tautan manual) · KP2 outbox + retry, kegagalan sementara diulang, penolakan permanen tidak · KP3 isi email terenkripsi dan dibuang setelah selesai/dibatalkan · KP4 tidak pernah turun ke koneksi tanpa enkripsi bila starttls/tls diminta |
+| FR-32 | WebAuthn (kunci keamanan / passkey) sebagai faktor kedua | C | KP1 assertion/attestation diverifikasi penuh (challenge, origin, RP ID, tanda tangan, sign count) · KP2 upacara sekali pakai & terikat pengguna · KP3 kegagalan dihitung ke lockout; sign count mundur ditolak & diaudit · KP4 dihitung sebagai 2FA oleh kebijakan wajib-2FA · KP5 kode pemulihan diterbitkan sekali saat faktor pertama |
 | FR-29 | Kebijakan password baru (daftar password umum, pola, kemiripan email) | C | KP1 berlaku di semua pintu masuk · KP2 tidak retroaktif · KP3 penolakan menyebut alasan · KP4 undangan tidak hangus bila password ditolak |
 
 ## 4. Kebutuhan non-fungsional

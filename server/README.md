@@ -3,11 +3,11 @@
 Go 1.24 + PostgreSQL 16. Satu biner: REST API, WebSocket device, SSE, dispatcher, reaper, dan dashboard (embed).
 Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 
-## Status (fase 1–8)
+## Status (fase 1–9)
 
 | Sudah | Belum (fase 4) |
 |---|---|
-| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | WebAuthn, SSO |
+| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | SSO, login tanpa password |
 | Enrollment sekali pakai, registry device/SIM, revoke, perintah jarak jauh | Multi-instance (hanya leader tunggal via advisory lock) |
 | WS hub protokol v1 (hello + rekonsiliasi, heartbeat, sms.event idempoten, sim.report) | |
 | Kirim pesan (normalisasi E.164, GSM-7/UCS-2, template, suppression, Idempotency-Key, `client_ref`) | |
@@ -16,6 +16,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | Mesin status satu pintu, retry + backoff, cancel/retry manual, transaksi + timeline, ekspor CSV aman | |
 | Policy berlapis (global/device/SIM/pesan) + CRUD + tampilan efektif, SSE dengan replay, statistik, audit log | |
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
+| **Fase 9**: WebAuthn (kunci keamanan / passkey) sebagai faktor kedua: `/auth/webauthn*`, `/auth/login/webauthn/*` | |
 | **Fase 8**: email undangan lewat SMTP (outbox terenkripsi, retry, STARTTLS/TLS), `GET /settings/email`, `POST /settings/email/test` | |
 | **Fase 7**: kebijakan password (daftar umum + pola + kemiripan email) di semua pintu masuk; retensi undangan | |
 | **Fase 6**: undangan pengguna (`/invitations`, tautan sekali pakai) dan `DELETE /users/{id}` (harus dinonaktifkan dahulu) | |
@@ -61,6 +62,16 @@ smscd secrets reencrypt                               # setelah mengganti WEBHOO
 ```
 
 Endpoint: `POST /auth/login` → (2FA aktif) `{mfa_required, mfa_token}` → `POST /auth/login/verify`; `/auth/2fa`, `/auth/2fa/{setup,enable,disable,recovery-codes}`, `/auth/password`, `/users/{id}/2fa` (admin), `/api-keys/{id}/rotate`, `/webhooks/{id}/rotate-secret`, perintah device `rotate_credential`. Runbook: `docs/spec/10` R-06.
+
+## WebAuthn (fase 9)
+
+| Env | Default | Arti |
+|---|---|---|
+| `WEBAUTHN_RP_ID` | host `PUBLIC_BASE_URL` | RP ID (nama domain; **bukan IP**). Mengubahnya membuat semua kunci terdaftar tak berlaku |
+| `WEBAUTHN_ORIGINS` | `PUBLIC_BASE_URL` | Origin yang diizinkan (koma) |
+| `WEBAUTHN_RP_NAME` | `SMSC Gateway` | Nama yang tampil di dialog browser |
+
+Alur: `POST /auth/webauthn/register/begin|finish` (sesi, butuh password), `GET /auth/webauthn`, `DELETE /auth/webauthn/credentials/{id}` (password + kode); login: `POST /auth/login` → `methods` → `POST /auth/login/webauthn/begin|finish`. Mendaftarkan kunci pertama menerbitkan kode pemulihan.
 
 ## Email lewat SMTP (fase 8)
 

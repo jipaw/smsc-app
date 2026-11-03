@@ -25,8 +25,10 @@ export type CampaignPreview = S['CampaignPreview']
 export type ImportResult = S['ImportResult']
 
 export interface Me { id: string; email: string; role: Role; csrf_token: string; mfa_enabled?: boolean; mfa_setup_required?: boolean }
-export interface MfaChallenge { mfa_required: true; mfa_token: string; expires_in?: number }
-export interface MfaStatus { enabled: boolean; enabled_at: string | null; recovery_codes_remaining: number }
+export interface MfaChallenge { mfa_required: true; mfa_token: string; expires_in?: number; methods?: ('webauthn' | 'totp' | 'recovery')[] }
+export interface MfaStatus { enabled: boolean; totp_enabled: boolean; webauthn_credentials: number; enabled_at: string | null; recovery_codes_remaining: number }
+export interface WebAuthnCred { id: string; name: string; created_at: string; last_used_at?: string | null; backed_up: boolean; transports: string[] }
+export interface WebAuthnList { enabled: boolean; rp_id?: string; credentials: WebAuthnCred[] }
 export interface SecuritySettings { require_2fa: 'off' | 'admin' | 'all'; users_missing_2fa: number }
 export interface UserItem { id: string; email: string; role: Role; mfa_enabled?: boolean; disabled: boolean; created_at: string }
 export interface Invitation { id: string; email: string; role: Role; status: 'pending' | 'accepted' | 'expired' | 'revoked'; created_by?: string | null; created_at: string; expires_at: string; accepted_at?: string | null; token?: string; invite_url?: string; email_status?: 'queued' | 'sent' | 'failed' | 'cancelled' | null; email_error?: string | null }

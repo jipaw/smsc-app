@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (93 operasi)
+# Daftar endpoint (99 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -10,6 +10,12 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `POST` | `/auth/login` | Login dashboard | publik | 200,401,423,429 |
 | `POST` | `/auth/login/verify` | Selesaikan login dengan kode 2FA | publik | 200,401,423,429 |
 | `POST` | `/auth/password` | Ganti password sendiri | apiKey/sessionCookie | 204,401,403,422,429 |
+| `GET` | `/auth/webauthn` | Kunci keamanan / passkey milik saya | apiKey/sessionCookie | 200,403 |
+| `POST` | `/auth/webauthn/register/begin` | Mulai mendaftarkan kunci keamanan (butuh password) | apiKey/sessionCookie | 200,401,409,422,429 |
+| `POST` | `/auth/webauthn/register/finish` | Selesaikan pendaftaran kunci keamanan | apiKey/sessionCookie | 201,400,409,422,429 |
+| `DELETE` | `/auth/webauthn/credentials/{credentialId}` | Hapus satu kunci keamanan (butuh password + kode) | apiKey/sessionCookie | 204,401,404,429 |
+| `POST` | `/auth/login/webauthn/begin` | Mulai login dengan kunci keamanan (setelah password benar) | publik | 200,401,409,423,429 |
+| `POST` | `/auth/login/webauthn/finish` | Selesaikan login dengan kunci keamanan | publik | 200,400,401,423,429 |
 | `GET` | `/auth/2fa` | Status 2FA akun saya | apiKey/sessionCookie | 200,403 |
 | `POST` | `/auth/2fa/setup` | Mulai penyiapan 2FA (TOTP) | apiKey/sessionCookie | 200,401,409,429 |
 | `POST` | `/auth/2fa/enable` | Konfirmasi kode pertama dan aktifkan 2FA | apiKey/sessionCookie | 200,409,422,429 |

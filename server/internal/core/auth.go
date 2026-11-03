@@ -90,7 +90,7 @@ func (s *Service) Login(ctx context.Context, email, password string) (LoginResul
 	var failed int
 	var locked *time.Time
 	var disabled bool
-	row := s.Pool.QueryRow(ctx, `SELECT id, email, role, tailscale_login, password_hash, failed_logins, locked_until, disabled, totp_secret IS NOT NULL FROM users WHERE lower(email)=$1`, email)
+	row := s.Pool.QueryRow(ctx, `SELECT id, email, role, tailscale_login, password_hash, failed_logins, locked_until, disabled, `+mfaAny("users")+` FROM users WHERE lower(email)=$1`, email)
 	scanErr := row.Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &hash, &failed, &locked, &disabled, &u.MFAEnabled)
 	if scanErr != nil || hash == nil {
 		VerifyPassword(password, dummyHash)
@@ -107,7 +107,7 @@ func (s *Service) Login(ctx context.Context, email, password string) (LoginResul
 	}
 	if u.MFAEnabled {
 		// penghitung gagal TIDAK direset di sini: percobaan menebak kode tetap terbatas 5x
-		return LoginResult{User: u, MFARequired: true, MFAToken: s.mfaChallenge(u.ID, *hash)}, nil
+		return LoginResult{User: u, MFARequired: true, MFAToken: s.mfaChallenge(u.ID, *hash), Methods: s.mfaMethods(ctx, u.ID)}, nil
 	}
 	_, _ = s.Pool.Exec(ctx, `UPDATE users SET failed_logins=0, locked_until=NULL WHERE id=$1`, u.ID)
 	return s.startSession(ctx, u)
@@ -129,7 +129,7 @@ func (s *Service) SessionUser(ctx context.Context, token string) (User, string, 
 		FROM users us
 		WHERE se.user_id = us.id AND se.token_hash = ANY($1) AND se.expires_at > now()
 		  AND se.last_seen_at > now() - interval '12 hours' AND NOT us.disabled
-		RETURNING us.id, us.email, us.role, us.tailscale_login, us.totp_secret IS NOT NULL, se.csrf_token`, s.hmacTokens(token)).
+		RETURNING us.id, us.email, us.role, us.tailscale_login, `+mfaAny("us")+`, se.csrf_token`, s.hmacTokens(token)).
 		Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &csrf)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, "", NewProblem(http.StatusUnauthorized, "auth.unauthenticated", "Tidak terautentikasi", "sesi tidak valid")
@@ -247,7 +247,7 @@ type UserItem struct {
 }
 
 func (s *Service) ListUsers(ctx context.Context) ([]UserItem, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id,email,role,tailscale_login,totp_secret IS NOT NULL,disabled,created_at FROM users ORDER BY created_at`)
+	rows, err := s.Pool.Query(ctx, `SELECT id,email,role,tailscale_login,`+mfaAny("users")+`,disabled,created_at FROM users ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}

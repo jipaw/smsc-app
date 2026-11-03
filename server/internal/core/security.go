@@ -68,7 +68,7 @@ func (s *Service) GetSecurity(ctx context.Context) (SecuritySettings, error) {
 	s.sec.level = "" // paksa baca ulang
 	s.sec.mu.Unlock()
 	out := SecuritySettings{Require2FA: s.mfaLevel(ctx)}
-	err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE NOT disabled AND totp_secret IS NULL
+	err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE NOT disabled AND NOT `+mfaAny("users")+`
 		AND ($1='all' OR ($1='admin' AND role='admin'))`, out.Require2FA).Scan(&out.UsersMissing2FA)
 	return out, err
 }
@@ -136,7 +136,7 @@ func (s *Service) UpdateUser(ctx context.Context, actor, id uuid.UUID, p UserPat
 		}
 	}
 	var u UserItem
-	err := s.Pool.QueryRow(ctx, `SELECT id,email,role,tailscale_login,totp_secret IS NOT NULL,disabled,created_at FROM users WHERE id=$1`, id).
+	err := s.Pool.QueryRow(ctx, `SELECT id,email,role,tailscale_login,`+mfaAny("users")+`,disabled,created_at FROM users WHERE id=$1`, id).
 		Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.Disabled, &u.CreatedAt)
 	return u, change, err
 }

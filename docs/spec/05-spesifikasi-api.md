@@ -41,6 +41,11 @@ Sumber kebenaran skema: [`contracts/openapi.yaml`](../../contracts/openapi.yaml)
 | `auth.mfa_setup_required` | 403 | Kebijakan mewajibkan 2FA untuk akun ini; hanya endpoint akun yang terbuka |
 | `security.enroll_first` | 409 | Admin yang menyalakan kewajiban 2FA harus sudah memakai 2FA |
 | `user.must_disable_first` | 409 | Hapus pengguna hanya untuk akun yang sudah dinonaktifkan |
+| `webauthn.not_available` | 409 | RP ID server bukan nama domain (mis. IP) |
+| `webauthn.limit` | 409 | Maks. 10 kunci keamanan per akun |
+| `webauthn.no_credentials` | 409 | Akun tidak punya kunci keamanan |
+| `webauthn.ceremony_invalid` | 400 | Upacara WebAuthn tak ada / kedaluwarsa / sudah dipakai / milik pengguna lain |
+| `auth.webauthn_failed` | 401 | Assertion tidak valid (dihitung ke lockout) |
 | `email.not_configured` | 409 | `send_email` / email uji diminta tetapi SMTP belum dikonfigurasi |
 | `email.send_failed` | 502 | Server SMTP menolak / tidak terjangkau (email uji) |
 | `invitation.invalid` | 404 | Token undangan tidak dikenal/kedaluwarsa/dicabut/sudah dipakai (seragam) |
@@ -89,6 +94,8 @@ POST /auth/login/verify {mfa_token,code}  -> 200 profil + csrf_token, cookie ses
 ```
 
 Tanpa 2FA, `POST /auth/login` langsung mengembalikan profil + cookie seperti biasa. Kelola 2FA: `GET /auth/2fa`, `POST /auth/2fa/setup|enable|disable|recovery-codes`; ganti password: `POST /auth/password`; admin: `DELETE /users/{id}/2fa`. Endpoint akun hanya untuk sesi (API key → 403). Bila `GET /settings/security` bernilai `admin`/`all`, akun dalam cakupan tanpa 2FA mendapat `mfa_setup_required: true` pada login/`/auth/me` dan 403 `auth.mfa_setup_required` di endpoint lain. Undangan (opsional `send_email`): `POST/GET /invitations`, `DELETE /invitations/{id}`; publik `POST /invitations/lookup|accept`. Manajemen pengguna: `GET/POST /users`, `DELETE /users/{id}`, `PATCH /users/{id}`, `POST /users/{id}/password`, `DELETE /users/{id}/2fa`.
+
+Login dengan kunci keamanan: `POST /auth/login` → `{mfa_required, mfa_token, methods:[webauthn|totp|recovery]}` → `POST /auth/login/webauthn/begin {mfa_token}` → `{ceremony_id, options}` → `navigator.credentials.get()` → `POST /auth/login/webauthn/finish {mfa_token, ceremony_id, credential}`. Pendaftaran: `POST /auth/webauthn/register/begin {password, name}` → `navigator.credentials.create()` → `.../finish {ceremony_id, credential}`.
 
 ### 3.2 Kirim non-campaign (API key)
 

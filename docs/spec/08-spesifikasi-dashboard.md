@@ -112,6 +112,10 @@ Daftar + editor: nama, isi, daftar variabel terdeteksi, penghitung segmen, tombo
 
 ### 4.9 Akun (semua peran)
 
+- **Kunci keamanan & passkey**: daftar (nama, ditambahkan, terakhir dipakai, lencana *passkey tersinkron*), *Tambah kunci* (nama + password → dialog browser), *Hapus* (password + kode TOTP/pemulihan). Peringatan bila WebAuthn tak tersedia (RP ID IP / browser tak mendukung / bukan HTTPS). Kunci pertama menampilkan kode pemulihan sekali.
+- **Login langkah 2**: tombol *Gunakan kunci keamanan* bila akun punya kunci; di bawahnya kolom kode TOTP/pemulihan.
+
+
 - **Ganti password**: password saat ini + baru (≥ 12, diulang). Sesi lain dikeluarkan.
 - **Verifikasi 2 langkah**: Siapkan (minta password) → QR + kunci manual → kode 6 digit untuk mengaktifkan → 10 kode pemulihan tampil **sekali** (salin/unduh). Saat aktif: tanggal, sisa kode pemulihan (peringatan ≤ 2), *Terbitkan ulang kode*, *Nonaktifkan* (butuh password + kode).
 - **Login**: bila 2FA aktif, setelah password muncul langkah kedua (kode TOTP atau kode pemulihan); Kembali membatalkan.

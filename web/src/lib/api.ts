@@ -33,7 +33,7 @@ export const get = <T,>(path: string) => api<T>('GET', path)
 export const post = <T,>(path: string, body?: unknown, headers?: Record<string, string>) => api<T>('POST', path, body ?? {}, headers)
 export const put = <T,>(path: string, body: unknown) => api<T>('PUT', path, body)
 export const patch = <T,>(path: string, body: unknown) => api<T>('PATCH', path, body)
-export const del = <T,>(path: string) => api<T>('DELETE', path)
+export const del = <T,>(path: string, body?: unknown) => api<T>('DELETE', path, body)
 
 export function qs(params: Record<string, string | number | boolean | undefined | null | string[]>): string {
   const u = new URLSearchParams()

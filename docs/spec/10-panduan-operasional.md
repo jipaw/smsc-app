@@ -50,6 +50,7 @@ Opsi A (Compose + sidecar) dan catatan jaringan ada di `docs/04` §4. Verifikasi
 | `WEBHOOK_ENC_KEY` | turunan `SESSION_SECRET` | Kunci enkripsi secret webhook dan rahasia TOTP. Atur terpisah di produksi |
 | `SESSION_SECRET_PREVIOUS`, `WEBHOOK_ENC_KEY_PREVIOUS` | – | Kunci lama (koma) selama rotasi; lihat R-06 |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_MODE`, `SMTP_FROM`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_CA_FILE`, `SMTP_TIMEOUT`, `EMAIL_BACKOFF`, `EMAIL_TICK` | email nonaktif | Pengiriman email undangan; lihat `server/README.md`. Simpan kredensial di secret manager, bukan di repo |
+| `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS`, `WEBAUTHN_RP_NAME` | host `PUBLIC_BASE_URL` | WebAuthn; lihat `server/README.md` |
 | `LOGIN_RATE_PER_MIN`, `LOGIN_BURST` | `5`, `5` | Batas login & verifikasi 2FA per IP (endpoint akun: 2× per pengguna). Naikkan bila banyak admin berbagi satu IP/NAT |
 | `DEVICE_ROTATE_GRACE` | `60s` | Masa secret device lama setelah rotasi |
 | `WEBHOOK_TIMEOUT`, `WEBHOOK_BACKOFF`, `WEBHOOK_TICK`, `RETENTION_INTERVAL` | lihat `server/README.md` | |
@@ -157,6 +158,8 @@ Kunci yang salah **tidak** merusak data diam-diam: pengiriman webhook gagal deng
 Menyalakan: pastikan **Anda** sudah memakai 2FA (Akun), lalu Pengaturan → Keamanan → *Wajib untuk admin* (atau *semua*). Dampak seketika: pengguna dalam cakupan tanpa 2FA — termasuk yang sedang login — hanya dapat membuka halaman Akun sampai mengaktifkan 2FA; API key tidak terpengaruh. Beri tahu pengguna dahulu; halaman Keamanan menampilkan berapa yang akan terdampak. Mematikan: pilih *Opsional* (efek seketika).
 
 Kebijakan password baru berlaku di semua pintu (spec 09); bila admin menerima 422 `terlalu lemah`, pilih frasa panjang yang tidak memuat nama akun. Pengaturan → Retensi juga mengatur masa simpan undangan selesai (default 90 hari).
+
+Kunci keamanan: Akun → *Kunci keamanan & passkey*. Pastikan dashboard diakses lewat nama domain HTTPS (di Tailscale: nama `*.ts.net`) — alamat IP tidak dapat dipakai untuk WebAuthn. `WEBAUTHN_RP_ID` harus sama dengan domain yang dipakai pengguna; **mengganti domain berarti semua kunci harus didaftarkan ulang** (pengguna masuk dengan kode pemulihan/TOTP, atau admin mereset 2FA). Sarankan minimal dua kunci per akun (cadangan).
 
 Mengundang: Pengaturan → Pengguna → *Undang pengguna* → salin tautan (tampil sekali) dan kirim lewat jalur aman, atau centang *Kirim tautan ke email penerima* (butuh SMTP; uji dulu di Pengaturan → Email). Email gagal (kolom *Email* = gagal, arahkan kursor untuk alasan): periksa SMTP lalu *Kirim ulang* atau bagikan tautan manual. Salah kirim / batal: *Cabut* (email yang masih antre ikut dibatalkan). Pensiun akun: *Nonaktifkan* lalu (opsional) *Hapus*.
 

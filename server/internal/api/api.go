@@ -79,6 +79,8 @@ func (a *API) Router() http.Handler {
 		// publik
 		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/login", a.login)
 		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/login/verify", a.loginVerify)
+		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/login/webauthn/begin", a.webauthnLoginBegin)
+		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/login/webauthn/finish", a.webauthnLoginFinish)
 		r.With(a.limit(a.loginLimit, clientIP)).Post("/invitations/lookup", a.lookupInvitation)
 		r.With(a.limit(a.loginLimit, clientIP)).Post("/invitations/accept", a.acceptInvitation)
 		r.With(a.limit(a.enrollLimit, clientIP)).Post("/device/enroll", a.deviceEnroll)
@@ -97,6 +99,10 @@ func (a *API) Router() http.Handler {
 			r.Get("/auth/me", a.me)
 			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/password", a.changePassword)
 			r.Get("/auth/2fa", a.mfaStatus)
+			r.Get("/auth/webauthn", a.webauthnList)
+			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/webauthn/register/begin", a.webauthnRegisterBegin)
+			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/webauthn/register/finish", a.webauthnRegisterFinish)
+			r.With(a.limit(a.acctLimit, userKey)).Delete("/auth/webauthn/credentials/{credentialId}", a.webauthnRemove)
 			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/2fa/setup", a.mfaSetup)
 			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/2fa/enable", a.mfaEnable)
 			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/2fa/disable", a.mfaDisable)
@@ -273,6 +279,7 @@ func (a *API) authenticate(next http.Handler) http.Handler {
 var mfaSetupPaths = map[string]bool{
 	"/api/v1/auth/me": true, "/api/v1/auth/logout": true, "/api/v1/auth/password": true,
 	"/api/v1/auth/2fa": true, "/api/v1/auth/2fa/setup": true, "/api/v1/auth/2fa/enable": true,
+	"/api/v1/auth/webauthn": true, "/api/v1/auth/webauthn/register/begin": true, "/api/v1/auth/webauthn/register/finish": true,
 }
 
 func (a *API) mfaGate(next http.Handler) http.Handler {
