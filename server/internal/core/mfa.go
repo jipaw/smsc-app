@@ -95,6 +95,7 @@ func (s *Service) challengeUser(ctx context.Context, mfaToken string) (User, err
 	if locked != nil && locked.After(time.Now()) {
 		return User{}, NewProblem(http.StatusLocked, "auth.locked", "Akun terkunci", "terlalu banyak percobaan, coba lagi nanti")
 	}
+	u.HasPassword = true // lolos langkah password
 	return u, nil
 }
 

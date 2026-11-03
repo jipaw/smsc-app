@@ -74,7 +74,18 @@ func inScope(level, role string) bool {
 
 // MFASetupRequired: pengguna ini wajib menyiapkan 2FA sebelum memakai dashboard.
 func (s *Service) MFASetupRequired(ctx context.Context, u User) bool {
-	return !u.MFAEnabled && inScope(s.mfaLevel(ctx), u.Role)
+	if u.MFAEnabled || !inScope(s.mfaLevel(ctx), u.Role) {
+		return false
+	}
+	// akun SSO-saja (tanpa password) tidak dapat menyiapkan 2FA lokal — MFA menjadi tanggung jawab IdP
+	if !u.HasPassword {
+		return false
+	}
+	// sesi SSO memenuhi kewajiban bila admin menyatakan IdP menegakkan MFA (OIDC_TRUST_IDP_MFA, default true)
+	if u.SSOSession && s.Cfg.OIDC.TrustIdPMFA {
+		return false
+	}
+	return true
 }
 
 func (s *Service) GetSecurity(ctx context.Context) (SecuritySettings, error) {
@@ -162,8 +173,8 @@ func (s *Service) UpdateUser(ctx context.Context, actor, id uuid.UUID, p UserPat
 		}
 	}
 	var u UserItem
-	err := s.Pool.QueryRow(ctx, `SELECT id,email,role,tailscale_login,`+mfaAny("users")+`,disabled,created_at FROM users WHERE id=$1`, id).
-		Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.Disabled, &u.CreatedAt)
+	err := s.Pool.QueryRow(ctx, `SELECT id,email,role,tailscale_login,`+mfaAny("users")+`,password_hash IS NOT NULL,oidc_subject IS NOT NULL,disabled,created_at FROM users WHERE id=$1`, id).
+		Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.HasPassword, &u.SSOLinked, &u.Disabled, &u.CreatedAt)
 	return u, change, err
 }
 

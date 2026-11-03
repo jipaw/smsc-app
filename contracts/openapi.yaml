@@ -129,9 +129,15 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [passkey_login]
+                required: [passkey_login, oidc]
                 properties:
                   passkey_login: {type: boolean, description: 'WebAuthn tersedia di server DAN admin mengizinkan login passkey.'}
+                  oidc:
+                    type: object
+                    required: [enabled]
+                    properties:
+                      enabled: {type: boolean, description: 'SSO OIDC dikonfigurasi (OIDC_ISSUER).'}
+                      name: {type: string, description: 'Label tombol, mis. Google Workspace.'}
   /auth/passkey/begin:
     post:
       tags: [Auth]
@@ -178,6 +184,64 @@ paths:
         '409': {description: 'Login passkey dinonaktifkan', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '423': {description: 'Akun terkunci (`auth.locked`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/oidc/login:
+    get:
+      tags: [Auth]
+      security: []
+      summary: Mulai login SSO (navigasi peramban)
+      description: |
+        Mengalihkan (302) ke IdP dengan authorization code + PKCE S256 + `state` + `nonce`, dan men-set cookie pengikat `smsc_oidc`
+        (HttpOnly, Lax, 10 menit). `next` = path lokal tujuan setelah login (selain path lokal diabaikan → `/`).
+        Bila IdP tidak terjangkau: 302 ke `/?sso_error=unavailable`. SSO belum dikonfigurasi → 404 `sso.not_configured`.
+      parameters:
+        - {name: next, in: query, required: false, schema: {type: string, example: /campaigns}}
+      responses:
+        '302': {description: 'Menuju IdP', headers: {Location: {schema: {type: string}}}}
+        '404': {description: 'SSO belum dikonfigurasi (`sso.not_configured`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/oidc/callback:
+    get:
+      tags: [Auth]
+      security: []
+      summary: Callback IdP (redirect_uri)
+      description: |
+        Selalu membalas 302. Sukses login: cookie sesi di-set dan menuju `next`. Sukses link: `/account?sso=linked`. Gagal: `/?sso_error=<kode>`
+        (login) atau `/account?sso_error=<kode>` (link) dengan kode ringkas: `invalid_state` (state tak dikenal/kedaluwarsa/terpakai/binder tak cocok),
+        `session_mismatch`, `denied`, `token` (penukaran code / verifikasi id_token / nonce gagal), `unavailable`, `not_linked`, `unverified_email`,
+        `domain`, `disabled`, `conflict`, `link_conflict`. Detail hanya di log/audit server.
+      parameters:
+        - {name: code, in: query, schema: {type: string}}
+        - {name: state, in: query, schema: {type: string}}
+        - {name: error, in: query, schema: {type: string}}
+      responses:
+        '302': {description: Redirect, headers: {Location: {schema: {type: string}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/oidc/link:
+    post:
+      tags: [Auth]
+      summary: Mulai menautkan akun saya ke SSO
+      description: Sesi dashboard. Mengembalikan URL IdP (klien menavigasinya) dan men-set cookie pengikat. Identitas = (issuer, sub), bukan email.
+      responses:
+        '200':
+          description: URL otorisasi IdP
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url: {type: string}
+        '404': {description: 'SSO belum dikonfigurasi', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '502': {description: 'IdP tidak terjangkau (`sso.unavailable`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    delete:
+      tags: [Auth]
+      summary: Lepas tautan SSO akun saya
+      description: Ditolak (409 `sso.unlink_blocked`) bila akun tidak punya password — akan terkunci permanen.
+      responses:
+        '204': {description: Dilepas}
+        '409': {description: 'Tidak tertaut (`sso.not_linked`) / akun tanpa password (`sso.unlink_blocked`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
   /auth/webauthn:
     get:
       tags: [Auth]
@@ -1548,6 +1612,19 @@ paths:
         '409': {description: 'Email sudah terdaftar', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+  /settings/sso:
+    get:
+      tags: [Admin]
+      summary: Konfigurasi SSO OIDC yang aktif (tanpa rahasia)
+      description: Konfigurasi dari environment server (`OIDC_*`). `?probe=1` menguji discovery ke IdP.
+      parameters:
+        - {name: probe, in: query, required: false, schema: {type: string, enum: ['1']}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SSOView'}
   /settings/email:
     get:
       tags: [Admin]
@@ -2000,6 +2077,9 @@ components:
         role: {$ref: '#/components/schemas/Role'}
         tailscale_login: {type: [string, 'null'], description: Terisi jika diautentikasi lewat identity header Tailscale Serve.}
         mfa_enabled: {type: boolean, description: 2FA TOTP aktif untuk akun ini.}
+        has_password: {type: boolean, description: 'false = akun SSO-saja (dibuat lewat penyediaan otomatis, tanpa password lokal).'}
+        sso_linked: {type: boolean, description: 'Akun tertaut ke identitas SSO.'}
+        sso_session: {type: boolean, description: 'Sesi ini dibuat lewat SSO (hanya pada /auth/me).'}
         mfa_setup_required: {type: boolean, description: 'Kebijakan mewajibkan 2FA untuk akun ini tetapi belum aktif: hanya endpoint akun yang terbuka (403 `auth.mfa_setup_required` selainnya).'}
         csrf_token: {type: string, description: 'Hanya pada login/verify/me untuk sesi sendiri.'}
 
@@ -2040,6 +2120,24 @@ components:
         email: {type: string, format: email}
         role: {$ref: '#/components/schemas/Role'}
         expires_at: {type: string, format: date-time}
+    SSOView:
+      type: object
+      required: [enabled, auto_provision, link_by_email, sync_roles, trust_idp_mfa, allowed_domains, linked_users]
+      properties:
+        enabled: {type: boolean}
+        name: {type: string}
+        issuer: {type: string}
+        client_id: {type: string}
+        redirect_url: {type: string, description: 'Daftarkan persis URL ini sebagai redirect URI di IdP.'}
+        reachable: {type: boolean, description: 'Hanya dengan ?probe=1.'}
+        reach_error: {type: string}
+        auto_provision: {type: boolean}
+        default_role: {type: string}
+        link_by_email: {type: boolean}
+        sync_roles: {type: boolean}
+        trust_idp_mfa: {type: boolean, description: 'Sesi SSO memenuhi kewajiban 2FA.'}
+        allowed_domains: {type: array, items: {type: string}}
+        linked_users: {type: integer}
     EmailConfig:
       type: object
       required: [configured, auth_enabled]

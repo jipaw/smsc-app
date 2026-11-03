@@ -6,6 +6,7 @@ toolchain go1.24.7
 
 require (
 	github.com/coder/websocket v1.8.13
+	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/go-chi/chi/v5 v5.2.1
 	github.com/go-webauthn/webauthn v0.15.0
 	github.com/google/uuid v1.6.0
@@ -15,12 +16,14 @@ require (
 	github.com/prometheus/client_model v0.6.1
 	github.com/prometheus/common v0.55.0
 	golang.org/x/crypto v0.43.0
+	golang.org/x/oauth2 v0.34.0
 )
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/go-webauthn/x v0.1.26 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect

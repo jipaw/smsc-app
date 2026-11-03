@@ -460,9 +460,9 @@ func (s *Service) PasskeyLoginFinish(ctx context.Context, ceremony uuid.UUID, cr
 		}
 		var locked *time.Time
 		var disabled, isPasskey bool
-		if e := s.Pool.QueryRow(ctx, `SELECT u.id,u.email,u.role,u.tailscale_login,`+mfaAny("u")+`,u.locked_until,u.disabled,
+		if e := s.Pool.QueryRow(ctx, `SELECT u.id,u.email,u.role,u.tailscale_login,`+mfaAny("u")+`,u.password_hash IS NOT NULL,u.locked_until,u.disabled,
 			EXISTS (SELECT 1 FROM webauthn_credentials w WHERE w.user_id=u.id AND w.credential_id=$2 AND w.passkey)
-			FROM users u WHERE u.id=$1`, uid, rawID).Scan(&found.ID, &found.Email, &found.Role, &found.TailscaleLogin, &found.MFAEnabled, &locked, &disabled, &isPasskey); e != nil {
+			FROM users u WHERE u.id=$1`, uid, rawID).Scan(&found.ID, &found.Email, &found.Role, &found.TailscaleLogin, &found.MFAEnabled, &found.HasPassword, &locked, &disabled, &isPasskey); e != nil {
 			return nil, errors.New("pengguna tidak ditemukan")
 		}
 		if disabled || !isPasskey {

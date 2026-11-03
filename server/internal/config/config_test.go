@@ -62,3 +62,68 @@ func TestSMTPMisconfigurationFailsFast(t *testing.T) {
 		})
 	}
 }
+
+func oidcBase(t *testing.T) {
+	base(t)
+	for _, k := range []string{"OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_REDIRECT_URL", "OIDC_SCOPES", "OIDC_NAME", "OIDC_ALLOWED_DOMAINS",
+		"OIDC_AUTO_PROVISION", "OIDC_DEFAULT_ROLE", "OIDC_GROUPS_CLAIM", "OIDC_ADMIN_GROUPS", "OIDC_OPERATOR_GROUPS", "OIDC_SYNC_ROLES", "OIDC_LINK_BY_EMAIL",
+		"OIDC_TRUST_IDP_MFA", "OIDC_CA_FILE", "OIDC_ALLOW_INSECURE"} {
+		t.Setenv(k, "")
+	}
+}
+
+func TestOIDCDisabledByDefaultAndDefaults(t *testing.T) {
+	oidcBase(t)
+	c, err := Load()
+	if err != nil || c.OIDC.Enabled() {
+		t.Fatalf("default harus nonaktif: %v", err)
+	}
+	t.Setenv("OIDC_ISSUER", "https://idp.contoh.id/")
+	t.Setenv("OIDC_CLIENT_ID", "smsc")
+	c, err = Load()
+	o := c.OIDC
+	if err != nil || !o.Enabled() || o.Issuer != "https://idp.contoh.id" || o.RedirectURL != "https://smsc.contoh.id/api/v1/auth/oidc/callback" ||
+		o.DefaultRole != "viewer" || o.AutoProvision || o.LinkByEmail || o.SyncRoles || !o.TrustIdPMFA || o.GroupsClaim != "groups" || o.Name != "SSO" || len(o.Scopes) != 3 {
+		t.Fatalf("default: %v %+v", err, o)
+	}
+	t.Setenv("OIDC_ALLOWED_DOMAINS", "Contoh.ID, kantor.id")
+	t.Setenv("OIDC_ADMIN_GROUPS", "a, b")
+	c, _ = Load()
+	if len(c.OIDC.AllowedDomains) != 2 || c.OIDC.AllowedDomains[0] != "contoh.id" || len(c.OIDC.AdminGroups) != 2 {
+		t.Fatalf("daftar: %+v", c.OIDC)
+	}
+}
+
+func TestOIDCMisconfigurationFailsFast(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"tanpa client id":        {"OIDC_ISSUER": "https://idp.contoh.id"},
+		"issuer bukan url":       {"OIDC_ISSUER": "idp.contoh.id", "OIDC_CLIENT_ID": "x"},
+		"http non-loopback":      {"OIDC_ISSUER": "http://idp.contoh.id", "OIDC_CLIENT_ID": "x"},
+		"role default admin":     {"OIDC_ISSUER": "https://idp.contoh.id", "OIDC_CLIENT_ID": "x", "OIDC_DEFAULT_ROLE": "admin"},
+		"scope tanpa openid":     {"OIDC_ISSUER": "https://idp.contoh.id", "OIDC_CLIENT_ID": "x", "OIDC_SCOPES": "email profile"},
+		"redirect bukan absolut": {"OIDC_ISSUER": "https://idp.contoh.id", "OIDC_CLIENT_ID": "x", "OIDC_REDIRECT_URL": "/callback"},
+		"CA tidak ada":           {"OIDC_ISSUER": "https://idp.contoh.id", "OIDC_CLIENT_ID": "x", "OIDC_CA_FILE": "/tidak/ada.pem"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			oidcBase(t)
+			for k, v := range env {
+				t.Setenv(k, v)
+			}
+			if _, err := Load(); err == nil {
+				t.Fatal("harus gagal saat startup")
+			}
+		})
+	}
+	// http diizinkan untuk loopback dan dengan OIDC_ALLOW_INSECURE
+	oidcBase(t)
+	t.Setenv("OIDC_ISSUER", "http://localhost:9000")
+	t.Setenv("OIDC_CLIENT_ID", "x")
+	if _, err := Load(); err != nil {
+		t.Fatalf("loopback http: %v", err)
+	}
+	t.Setenv("OIDC_ISSUER", "http://idp.internal")
+	t.Setenv("OIDC_ALLOW_INSECURE", "true")
+	if _, err := Load(); err != nil {
+		t.Fatalf("OIDC_ALLOW_INSECURE: %v", err)
+	}
+}

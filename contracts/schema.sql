@@ -27,9 +27,13 @@ CREATE TABLE users (
   totp_pending        bytea,
   totp_enabled_at     timestamptz,
   totp_last_step      bigint NOT NULL DEFAULT 0,
-  password_changed_at timestamptz
+  password_changed_at timestamptz,
+  oidc_issuer         text,
+  oidc_subject        text,
+  oidc_linked_at      timestamptz
 );
 CREATE UNIQUE INDEX users_email_uq ON users (lower(email));
+CREATE UNIQUE INDEX users_oidc_uq ON users (oidc_issuer, oidc_subject) WHERE oidc_subject IS NOT NULL;
 CREATE UNIQUE INDEX users_ts_login_uq ON users (tailscale_login) WHERE tailscale_login IS NOT NULL;
 
 CREATE TABLE user_recovery_codes (
@@ -95,6 +99,19 @@ CREATE TABLE webauthn_ceremonies (
 );
 CREATE INDEX webauthn_ceremonies_expires_idx ON webauthn_ceremonies (expires_at);
 
+CREATE TABLE oidc_flows (
+  state_hash  bytea PRIMARY KEY,
+  binder_hash bytea NOT NULL,
+  nonce       text NOT NULL,
+  verifier    text NOT NULL,
+  purpose     text NOT NULL CHECK (purpose IN ('login','link')),
+  user_id     uuid REFERENCES users(id) ON DELETE CASCADE,
+  next_path   text,
+  expires_at  timestamptz NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX oidc_flows_expires_idx ON oidc_flows (expires_at);
+
 CREATE TABLE sessions (
   id          uuid PRIMARY KEY,
   user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -102,7 +119,8 @@ CREATE TABLE sessions (
   csrf_token  text NOT NULL,
   created_at  timestamptz NOT NULL DEFAULT now(),
   expires_at  timestamptz NOT NULL,
-  last_seen_at timestamptz NOT NULL DEFAULT now()
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  sso         boolean NOT NULL DEFAULT false
 );
 CREATE INDEX sessions_user_idx ON sessions (user_id);
 

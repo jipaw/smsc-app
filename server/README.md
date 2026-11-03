@@ -3,11 +3,11 @@
 Go 1.24 + PostgreSQL 16. Satu biner: REST API, WebSocket device, SSE, dispatcher, reaper, dan dashboard (embed).
 Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 
-## Status (fase 1–10)
+## Status (fase 1–11)
 
 | Sudah | Belum (fase 4) |
 |---|---|
-| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | SSO |
+| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | back-channel logout, SCIM |
 | Enrollment sekali pakai, registry device/SIM, revoke, perintah jarak jauh | Multi-instance (hanya leader tunggal via advisory lock) |
 | WS hub protokol v1 (hello + rekonsiliasi, heartbeat, sms.event idempoten, sim.report) | |
 | Kirim pesan (normalisasi E.164, GSM-7/UCS-2, template, suppression, Idempotency-Key, `client_ref`) | |
@@ -16,6 +16,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | Mesin status satu pintu, retry + backoff, cancel/retry manual, transaksi + timeline, ekspor CSV aman | |
 | Policy berlapis (global/device/SIM/pesan) + CRUD + tampilan efektif, SSE dengan replay, statistik, audit log | |
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
+| **Fase 11**: SSO OIDC (code + PKCE): `/auth/oidc/login|callback|link`, `/settings/sso`; penyediaan otomatis & pemetaan grup opsional | |
 | **Fase 10**: login tanpa password dengan passkey (opt-in admin): `/auth/passkey/begin|finish`, `/auth/methods`, `passkey:true` pada pendaftaran | |
 | **Fase 9**: WebAuthn (kunci keamanan / passkey) sebagai faktor kedua: `/auth/webauthn*`, `/auth/login/webauthn/*` | |
 | **Fase 8**: email undangan lewat SMTP (outbox terenkripsi, retry, STARTTLS/TLS), `GET /settings/email`, `POST /settings/email/test` | |
@@ -63,6 +64,25 @@ smscd secrets reencrypt                               # setelah mengganti WEBHOO
 ```
 
 Endpoint: `POST /auth/login` → (2FA aktif) `{mfa_required, mfa_token}` → `POST /auth/login/verify`; `/auth/2fa`, `/auth/2fa/{setup,enable,disable,recovery-codes}`, `/auth/password`, `/users/{id}/2fa` (admin), `/api-keys/{id}/rotate`, `/webhooks/{id}/rotate-secret`, perintah device `rotate_credential`. Runbook: `docs/spec/10` R-06.
+
+## SSO OIDC (fase 11)
+
+| Env | Default | Arti |
+|---|---|---|
+| `OIDC_ISSUER` | – | URL issuer (https; http hanya localhost / `OIDC_ALLOW_INSECURE=true`). Kosong = SSO mati |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | – | Klien terdaftar di IdP (secret boleh kosong = klien publik + PKCE) |
+| `OIDC_REDIRECT_URL` | `PUBLIC_BASE_URL/api/v1/auth/oidc/callback` | Daftarkan persis ini di IdP |
+| `OIDC_SCOPES` / `OIDC_NAME` | `openid email profile` / `SSO` | Scope; label tombol |
+| `OIDC_AUTO_PROVISION` | `false` | Buat pengguna pada login SSO pertama |
+| `OIDC_ALLOWED_DOMAINS` | semua | Batasi domain email untuk penyediaan/penautan otomatis |
+| `OIDC_DEFAULT_ROLE` | `viewer` | `viewer`/`operator` |
+| `OIDC_GROUPS_CLAIM`, `OIDC_ADMIN_GROUPS`, `OIDC_OPERATOR_GROUPS` | `groups`, – | Pemetaan grup → peran |
+| `OIDC_SYNC_ROLES` | `false` | Sinkronkan peran dari grup tiap login |
+| `OIDC_LINK_BY_EMAIL` | `false` | Tautkan otomatis ke pengguna lokal bersemail sama (`email_verified` wajib) |
+| `OIDC_TRUST_IDP_MFA` | `true` | Sesi SSO memenuhi kewajiban 2FA |
+| `OIDC_CA_FILE` | – | CA privat untuk IdP internal |
+
+Alur: `GET /auth/oidc/login?next=` → IdP → `GET /auth/oidc/callback` (302; `?sso_error=` bila gagal). Menautkan: `POST /auth/oidc/link` (sesi) → navigasi ke `url`. Runbook: `docs/spec/10`.
 
 ## Passkey (fase 10)
 

@@ -4,7 +4,8 @@ import QRCode from 'qrcode'
 import { del, get, post } from '../lib/api'
 import { fmtTime } from '../lib/format'
 import { useMe, useRefreshMe } from '../lib/session'
-import type { MfaSetup, MfaStatus, WebAuthnList } from '../lib/types'
+import { SSO_ERRORS } from '../lib/types'
+import type { AuthMethods, MfaSetup, MfaStatus, WebAuthnList } from '../lib/types'
 import { createCredential, waErrMsg, webauthnSupported } from '../lib/webauthn'
 import { ErrorBox, Field, Loading, useToast } from '../components/ui'
 
@@ -15,9 +16,10 @@ export function Account() {
       <h1>Akun</h1>
       <div className="muted">{me.email} · {me.role}</div>
       {me.mfa_setup_required && <div className="banner" role="alert">Kebijakan keamanan mewajibkan 2FA untuk akun Anda. Aktifkan di bawah ini untuk membuka dashboard.</div>}
-      <Password />
+      <SSOLink />
+      {me.has_password === false ? <div className="card muted">Akun ini masuk lewat SSO dan tidak memiliki password lokal. Password dan verifikasi 2 langkah dikelola di penyedia identitas Anda.</div> : <><Password />
       <TwoFactor />
-      <SecurityKeys />
+      <SecurityKeys /></>}
     </div>
   )
 }
@@ -192,6 +194,45 @@ function SecurityKeys() {
           <ErrorBox error={err} />
           <div><button className="primary" disabled={!pw || busy} onClick={add}>{busy ? 'Menunggu kunci…' : 'Tambah kunci keamanan'}</button></div>
         </div>)}
+    </section>
+  )
+}
+
+function SSOLink() {
+  const me = useMe()
+  const qc = useQueryClient()
+  const toast = useToast()
+  const refreshMe = useRefreshMe()
+  const q = useQuery({ queryKey: ['auth-methods'], queryFn: () => get<AuthMethods>('/auth/methods') })
+  const [msg, setMsg] = useState('')
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search)
+    if (p.get('sso') === 'linked') toast('Akun SSO berhasil ditautkan')
+    const code = p.get('sso_error')
+    if (code) setMsg(SSO_ERRORS[code] ?? 'Penautan SSO gagal.')
+    if (p.get('sso') || code) { window.history.replaceState(null, '', window.location.pathname); refreshMe() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const link = useMutation({ mutationFn: () => post<{ url: string }>('/auth/oidc/link'), onSuccess: (r) => { window.location.href = r.url } })
+  const unlink = useMutation({ mutationFn: () => del('/auth/oidc/link'), onSuccess: () => { toast('Tautan SSO dilepas'); refreshMe(); qc.invalidateQueries({ queryKey: ['users'] }) } })
+  if (!q.data?.oidc.enabled) return null
+  return (
+    <section className="card stack" aria-label="Akun SSO">
+      <h2>Single sign-on ({q.data.oidc.name || 'SSO'})</h2>
+      {msg && <div className="err" role="alert">{msg}</div>}
+      {me.sso_linked ? (
+        <div className="stack">
+          <div><span className="badge ok">Tertaut</span> Anda dapat masuk dengan tombol “Masuk dengan {q.data.oidc.name || 'SSO'}”.{me.sso_session && ' Sesi ini dibuat lewat SSO.'}</div>
+          <ErrorBox error={unlink.error} />
+          {me.has_password !== false && <div><button className="small danger" disabled={unlink.isPending} onClick={() => window.confirm('Lepas tautan SSO? Anda tetap bisa masuk dengan password.') && unlink.mutate()}>Lepas tautan SSO</button></div>}
+        </div>
+      ) : (
+        <div className="stack">
+          <p className="muted">Tautkan akun ini ke identitas SSO Anda agar bisa masuk tanpa password. Identitas dicocokkan lewat ID unik penyedia (bukan email).</p>
+          <ErrorBox error={link.error} />
+          <div><button className="primary" disabled={link.isPending} onClick={() => link.mutate()}>Hubungkan akun SSO</button></div>
+        </div>
+      )}
     </section>
   )
 }

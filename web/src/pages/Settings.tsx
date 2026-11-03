@@ -3,10 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get, patch, post, put } from '../lib/api'
 import { fmtTime } from '../lib/format'
 import { isAdmin, useMe } from '../lib/session'
-import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, Invitation, EmailConfig, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
+import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, Invitation, EmailConfig, SSOView, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
 import { Empty, ErrorBox, errMsg, Field, Loading, Modal, useToast } from '../components/ui'
 
-const TABS = ['Policy', 'Daftar blokir', 'API key', 'Webhook', 'Retensi', 'Keamanan', 'Email', 'Pengguna', 'Audit'] as const
+const TABS = ['Policy', 'Daftar blokir', 'API key', 'Webhook', 'Retensi', 'Keamanan', 'SSO', 'Email', 'Pengguna', 'Audit'] as const
 
 export function Settings() {
   const me = useMe()
@@ -16,7 +16,7 @@ export function Settings() {
     <div className="stack">
       <h1>Pengaturan</h1>
       <div className="tabs" role="tablist">{TABS.map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{t}</button>)}</div>
-      {tab === 'Policy' && <Policies />}{tab === 'Daftar blokir' && <Suppressions />}{tab === 'API key' && <ApiKeys />}{tab === 'Webhook' && <Webhooks />}{tab === 'Retensi' && <Retention />}{tab === 'Keamanan' && <Security />}{tab === 'Email' && <EmailSettings />}{tab === 'Pengguna' && <Users />}{tab === 'Audit' && <Audit />}
+      {tab === 'Policy' && <Policies />}{tab === 'Daftar blokir' && <Suppressions />}{tab === 'API key' && <ApiKeys />}{tab === 'Webhook' && <Webhooks />}{tab === 'Retensi' && <Retention />}{tab === 'Keamanan' && <Security />}{tab === 'SSO' && <SSOSettings />}{tab === 'Email' && <EmailSettings />}{tab === 'Pengguna' && <Users />}{tab === 'Audit' && <Audit />}
     </div>
   )
 }
@@ -144,7 +144,7 @@ function Users() {
         return (
           <tr key={u.id}><td>{u.email}{self && <span className="muted"> (Anda)</span>}</td>
             <td>{self ? u.role : <select aria-label={`Peran ${u.email}`} value={u.role} onChange={(e) => edit.mutate({ id: u.id, body: { role: e.target.value as Role } })}><option>admin</option><option>operator</option><option>viewer</option></select>}</td>
-            <td>{u.disabled ? 'nonaktif' : 'aktif'}</td><td>{u.mfa_enabled ? 'aktif' : '—'}</td>
+            <td>{u.disabled ? 'nonaktif' : 'aktif'}{u.sso_linked && <span className="badge muted" title="Tertaut ke SSO"> SSO</span>}{u.has_password === false && <span className="muted" title="Hanya bisa masuk lewat SSO"> · tanpa password</span>}</td><td>{u.mfa_enabled ? 'aktif' : '—'}</td>
             <td className="right"><span className="row">
               {!self && <button className="small" onClick={() => { setPwFor(u); setNewPw('') }}>Set password</button>}
               {!self && <button className={`small${u.disabled ? '' : ' danger'}`} onClick={() => (u.disabled || window.confirm(`Nonaktifkan ${u.email}? Semua sesinya dikeluarkan.`)) && edit.mutate({ id: u.id, body: { disabled: !u.disabled } })}>{u.disabled ? 'Aktifkan' : 'Nonaktifkan'}</button>}
@@ -196,6 +196,35 @@ function Invitations() {
               <td className="right"><span className="row">{mailOk && (i.status === 'pending' || i.status === 'expired') && <button className="small" disabled={resend.isPending} onClick={() => window.confirm(`Buat undangan baru untuk ${i.email} dan kirim ulang? Tautan lama tidak berlaku lagi.`) && resend.mutate(i)}>Kirim ulang</button>}{(i.status === 'pending' || i.status === 'expired') && <button className="small danger" onClick={() => revoke.mutate(i.id)}>Cabut</button>}</span></td></tr>))}
         </tbody></table></div>)}
     </section>
+  )
+}
+
+function SSOSettings() {
+  const [probe, setProbe] = useState(false)
+  const q = useQuery({ queryKey: ['sso', probe], queryFn: () => get<SSOView>('/settings/sso' + (probe ? '?probe=1' : '')) })
+  if (q.isLoading) return <Loading what="pengaturan SSO" />
+  if (!q.data) return <ErrorBox error={q.error} />
+  const c = q.data
+  return (
+    <div className="card stack" aria-label="Pengaturan SSO">
+      <h2>Single sign-on (OpenID Connect)</h2>
+      {!c.enabled ? (
+        <p className="muted">SSO belum dikonfigurasi. Atur <span className="mono">OIDC_ISSUER</span>, <span className="mono">OIDC_CLIENT_ID</span> (dan <span className="mono">OIDC_CLIENT_SECRET</span>) di server lalu restart. Daftarkan redirect URI <span className="mono">PUBLIC_BASE_URL/api/v1/auth/oidc/callback</span> di IdP.</p>
+      ) : (
+        <>
+          <dl><dt>Penyedia</dt><dd>{c.name} · <span className="mono">{c.issuer}</span></dd><dt>Client ID</dt><dd className="mono">{c.client_id}</dd>
+            <dt>Redirect URI (daftarkan di IdP)</dt><dd className="mono">{c.redirect_url}</dd>
+            <dt>Penyediaan otomatis</dt><dd>{c.auto_provision ? `ya (peran dasar: ${c.default_role})` : 'tidak — pengguna harus ditautkan dahulu'}</dd>
+            <dt>Tautkan otomatis lewat email</dt><dd>{c.link_by_email ? 'ya (email_verified wajib)' : 'tidak (hanya lewat halaman Akun)'}</dd>
+            <dt>Sinkron peran dari grup</dt><dd>{c.sync_roles ? 'ya' : 'tidak'}</dd><dt>SSO memenuhi kewajiban 2FA</dt><dd>{c.trust_idp_mfa ? 'ya (IdP menegakkan MFA)' : 'tidak'}</dd>
+            <dt>Domain diizinkan</dt><dd>{c.allowed_domains.length ? c.allowed_domains.join(', ') : 'semua'}</dd><dt>Pengguna tertaut</dt><dd>{c.linked_users}</dd></dl>
+          <div className="row"><button className="small" onClick={() => setProbe(true)}>Uji koneksi ke IdP</button>
+            {c.reachable === true && <span className="badge ok">IdP terjangkau</span>}
+            {c.reachable === false && <span className="err" role="alert">Tidak terjangkau: {c.reach_error}</span>}</div>
+        </>
+      )}
+      <p className="muted">Konfigurasi berasal dari environment server; rahasia klien tidak pernah ditampilkan.</p>
+    </div>
   )
 }
 

@@ -16,7 +16,7 @@ const URL_ = `http://localhost:${PORT}` // "localhost" (bukan IP): RP ID WebAuth
 const MPORT = PORT + 1000, HPORT = PORT + 2000
 const http = require('http')
 const net = require('net')
-const SPORT = PORT + 3000
+const SPORT = PORT + 3000, IPORT = PORT + 4000
 const OUT = path.join(__dirname, 'out')
 const AXE = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8')
 const ADMIN = 'admin@e2e.test', PW = 'e2e-pagar-biru-melompat-1'
@@ -74,9 +74,40 @@ async function main() {
     sock.on('error', () => {})
   })
   await new Promise((r) => smtp.listen(SPORT, '127.0.0.1', r)); procs.push({ kill: () => smtp.close() })
+  // IdP OIDC palsu (auto-setuju): discovery, JWKS, authorize, token (PKCE S256), id_token RS256
+  const idpKeys = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const idpJwk = { ...idpKeys.publicKey.export({ format: 'jwk' }), kid: 'e2e', alg: 'RS256', use: 'sig' }
+  let idpUser = { sub: 'e2e-sub-1', email: 'sso1@e2e.test', email_verified: true, name: 'SSO Satu', groups: [] }
+  const idpCodes = new Map()
+  const b64u = (b) => Buffer.from(b).toString('base64url')
+  const idp = http.createServer((rq, rs) => {
+    const u = new URL(rq.url, `http://localhost:${IPORT}`)
+    const json = (o, c = 200) => { rs.writeHead(c, { 'Content-Type': 'application/json' }); rs.end(JSON.stringify(o)) }
+    if (u.pathname === '/.well-known/openid-configuration') return json({ issuer: `http://localhost:${IPORT}`, authorization_endpoint: `http://localhost:${IPORT}/authorize`, token_endpoint: `http://localhost:${IPORT}/token`, jwks_uri: `http://localhost:${IPORT}/jwks`, response_types_supported: ['code'], subject_types_supported: ['public'], id_token_signing_alg_values_supported: ['RS256'] })
+    if (u.pathname === '/jwks') return json({ keys: [idpJwk] })
+    if (u.pathname === '/authorize') {
+      const code = crypto.randomBytes(12).toString('hex')
+      idpCodes.set(code, { nonce: u.searchParams.get('nonce'), challenge: u.searchParams.get('code_challenge'), method: u.searchParams.get('code_challenge_method'), redirect: u.searchParams.get('redirect_uri'), user: { ...idpUser } })
+      const back = new URL(u.searchParams.get('redirect_uri')); back.searchParams.set('code', code); back.searchParams.set('state', u.searchParams.get('state'))
+      rs.writeHead(302, { Location: back.toString() }); return rs.end()
+    }
+    if (u.pathname === '/token' && rq.method === 'POST') {
+      let body = ''; rq.on('data', (c) => (body += c)); rq.on('end', () => {
+        const f = new URLSearchParams(body); const g = idpCodes.get(f.get('code')); idpCodes.delete(f.get('code'))
+        const basic = (rq.headers.authorization || '').startsWith('Basic ') ? Buffer.from(rq.headers.authorization.slice(6), 'base64').toString() : `${f.get('client_id')}:${f.get('client_secret')}`
+        if (!g || basic !== 'smsc-e2e:rahasia-e2e' || f.get('redirect_uri') !== g.redirect || g.method !== 'S256' || b64u(crypto.createHash('sha256').update(f.get('code_verifier') || '').digest()) !== g.challenge) return json({ error: 'invalid_grant' }, 400)
+        const head = b64u(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid: 'e2e' }))
+        const pay = b64u(JSON.stringify({ iss: `http://localhost:${IPORT}`, aud: 'smsc-e2e', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 300, nonce: g.nonce, ...g.user }))
+        const sig = b64u(crypto.sign('RSA-SHA256', Buffer.from(head + '.' + pay), idpKeys.privateKey))
+        json({ access_token: 'at', token_type: 'Bearer', expires_in: 300, id_token: `${head}.${pay}.${sig}` })
+      }); return
+    }
+    rs.writeHead(404); rs.end()
+  })
+  await new Promise((r) => idp.listen(IPORT, '127.0.0.1', r)); procs.push({ kill: () => idp.close() })
   psql(`CREATE DATABASE ${DB}`)
   const env = { ...process.env, DATABASE_URL: BASE.replace('/postgres?', `/${DB}?`), PUBLIC_BASE_URL: URL_, SESSION_SECRET: 's'.repeat(40), HTTP_ADDR: `127.0.0.1:${PORT}`,
-    AUTO_MIGRATE: 'true', SECURE_COOKIES: 'false', REQUIRE_VPN: 'false', DISPATCH_TICK: '300ms', WEBHOOK_ALLOW_LOOPBACK: 'true', METRICS_ADDR: `127.0.0.1:${MPORT}`, WEBHOOK_TICK: '300ms', SMTP_HOST: '127.0.0.1', SMTP_PORT: String(SPORT), SMTP_MODE: 'none', SMTP_FROM: 'SMSC Gateway <smsc@e2e.test>', EMAIL_TICK: '300ms', LOGIN_BURST: '60', LOGIN_RATE_PER_MIN: '600', REAPER_INTERVAL: '500ms' }
+    AUTO_MIGRATE: 'true', SECURE_COOKIES: 'false', REQUIRE_VPN: 'false', DISPATCH_TICK: '300ms', WEBHOOK_ALLOW_LOOPBACK: 'true', METRICS_ADDR: `127.0.0.1:${MPORT}`, WEBHOOK_TICK: '300ms', OIDC_ISSUER: `http://localhost:${IPORT}`, OIDC_CLIENT_ID: 'smsc-e2e', OIDC_CLIENT_SECRET: 'rahasia-e2e', OIDC_NAME: 'IdP E2E', OIDC_AUTO_PROVISION: 'true', OIDC_ADMIN_GROUPS: 'e2e-admin', SMTP_HOST: '127.0.0.1', SMTP_PORT: String(SPORT), SMTP_MODE: 'none', SMTP_FROM: 'SMSC Gateway <smsc@e2e.test>', EMAIL_TICK: '300ms', LOGIN_BURST: '60', LOGIN_RATE_PER_MIN: '600', REAPER_INTERVAL: '500ms' }
   execFileSync(BIN, ['migrate'], { env })
   execFileSync(BIN, ['admin', 'create', '--email', ADMIN, '--password', PW], { env })
   const srv = spawn(BIN, ['serve'], { env, stdio: 'ignore' }); procs.push(srv)
@@ -108,11 +139,11 @@ async function main() {
   await shot('01-login')
   await page.getByLabel('Email').fill(ADMIN)
   await page.getByLabel('Password').fill('salah-salah-123')
-  await page.getByRole('button', { name: 'Masuk' }).click()
+  await page.getByRole('button', { name: 'Masuk', exact: true }).click()
   await page.getByRole('alert').waitFor()
   check((await page.getByRole('alert').textContent()).includes('Kredensial salah'), 'login salah menampilkan pesan seragam')
   await page.getByLabel('Password').fill(PW)
-  await page.getByRole('button', { name: 'Masuk' }).click()
+  await page.getByRole('button', { name: 'Masuk', exact: true }).click()
   await page.getByRole('heading', { name: 'Overview' }).waitFor()
   check(true, 'login berhasil, Overview tampil')
 
@@ -389,7 +420,7 @@ async function main() {
   const vp = await vctx.newPage()
   await vp.goto(URL_ + '/')
   await vp.getByLabel('Email').fill('viewer@e2e.test'); await vp.getByLabel('Password').fill('pagar-biru-pembaca-12')
-  await vp.getByRole('button', { name: 'Masuk' }).click()
+  await vp.getByRole('button', { name: 'Masuk', exact: true }).click()
   await vp.getByRole('heading', { name: 'Overview' }).waitFor()
   check((await vp.getByRole('button', { name: /Pause semua/ }).count()) === 0, 'viewer tidak melihat tombol kill switch')
   await vp.getByRole('link', { name: 'Transaksi', exact: true }).click()
@@ -438,7 +469,7 @@ async function main() {
   await page.getByRole('button', { name: 'Keluar' }).click()
   await page.getByRole('heading', { name: 'SMSC Gateway' }).waitFor()
   await page.getByLabel('Email').fill(ADMIN); await page.getByLabel('Password').fill(PW)
-  await page.getByRole('button', { name: 'Masuk' }).click()
+  await page.getByRole('button', { name: 'Masuk', exact: true }).click()
   await page.getByRole('heading', { name: 'Verifikasi 2 langkah' }).waitFor()
   check(true, '2FA: setelah password benar muncul langkah kode (belum masuk)')
   await axeCheck(page, 'login langkah 2FA')
@@ -453,7 +484,7 @@ async function main() {
   // login lagi dengan kode pemulihan, lalu nonaktifkan 2FA lewat kode pemulihan lain
   await page.getByRole('button', { name: 'Keluar' }).click()
   await page.getByLabel('Email').fill(ADMIN); await page.getByLabel('Password').fill(PW)
-  await page.getByRole('button', { name: 'Masuk' }).click()
+  await page.getByRole('button', { name: 'Masuk', exact: true }).click()
   await page.getByLabel('Kode', { exact: true }).fill(rcodes[0].toLowerCase().replace('-', ''))
   await page.getByRole('button', { name: 'Verifikasi' }).click()
   await page.getByRole('heading', { name: 'Overview' }).waitFor()
@@ -597,7 +628,7 @@ async function main() {
   const a2 = await a2c.newPage()
   await a2.goto(URL_ + '/devices')
   await a2.getByLabel('Email').fill('admin2@e2e.test'); await a2.getByLabel('Password').fill('bola-merah-menggelinding-5')
-  await a2.getByRole('button', { name: 'Masuk' }).click()
+  await a2.getByRole('button', { name: 'Masuk', exact: true }).click()
   await a2.getByRole('heading', { name: 'Akun' }).waitFor()
   await a2.getByRole('alert').filter({ hasText: /mewajibkan 2FA/ }).waitFor()
   check((await a2.getByRole('navigation', { name: 'Navigasi utama' }).count()) === 0, 'wajib 2FA: admin tanpa 2FA hanya melihat halaman Akun (tanpa navigasi)')
@@ -629,7 +660,7 @@ async function main() {
   const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: false, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } })
   await wp.goto(URL_ + '/')
   await wp.getByLabel('Email').fill('kunci@e2e.test'); await wp.getByLabel('Password').fill('pagar-biru-melompat-31')
-  await wp.getByRole('button', { name: 'Masuk' }).click()
+  await wp.getByRole('button', { name: 'Masuk', exact: true }).click()
   await wp.getByRole('heading', { name: 'Overview' }).waitFor()
   await wp.goto(URL_ + '/account')
   await wp.getByRole('heading', { name: /Kunci keamanan/ }).first().waitFor()
@@ -649,7 +680,7 @@ async function main() {
   // keluar lalu masuk dengan kunci
   await wp.getByRole('button', { name: 'Keluar' }).click()
   await wp.getByLabel('Email').fill('kunci@e2e.test'); await wp.getByLabel('Password').fill('pagar-biru-melompat-31')
-  await wp.getByRole('button', { name: 'Masuk' }).click()
+  await wp.getByRole('button', { name: 'Masuk', exact: true }).click()
   await wp.getByRole('heading', { name: 'Verifikasi 2 langkah' }).waitFor()
   await axeCheck(wp, 'login langkah kunci keamanan')
   await wp.getByRole('button', { name: 'Gunakan kunci keamanan' }).click()
@@ -712,6 +743,67 @@ async function main() {
   await new Promise((r) => setTimeout(r, 500))
   check((await pp.getByRole('button', { name: 'Masuk dengan passkey' }).count()) === 0, 'passkey: tombol hilang setelah admin mematikan fitur')
   await pctx.close()
+
+  // ---- SSO OIDC (IdP palsu auto-setuju, PKCE S256) ----
+  const sctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  const sp = await sctx.newPage()
+  await sp.goto(URL_ + '/')
+  await sp.getByRole('button', { name: 'Masuk dengan IdP E2E' }).waitFor()
+  check(true, 'sso: tombol "Masuk dengan IdP E2E" tampil di halaman login')
+  await axeCheck(sp, 'login dengan tombol SSO')
+  await sp.getByRole('button', { name: 'Masuk dengan IdP E2E' }).click()
+  await sp.getByRole('heading', { name: 'Overview' }).waitFor({ timeout: 20000 })
+  check((await sp.getByText('sso1@e2e.test · viewer').count()) === 1, 'sso: login pertama membuat pengguna (viewer) dan masuk tanpa password')
+  await sp.goto(URL_ + '/account')
+  await sp.getByText(/Tertaut/).waitFor()
+  check((await sp.getByText(/tidak memiliki password lokal/).count()) === 1 && (await sp.getByLabel('Password saat ini').count()) === 0, 'sso: akun SSO-saja tidak melihat form password/2FA lokal')
+  await axeCheck(sp, 'akun SSO-saja')
+  await sp.getByRole('button', { name: 'Keluar' }).click()
+  // sub yang sama + email berubah = pengguna yang sama (identitas = sub)
+  idpUser = { ...idpUser, email: 'ganti-email@e2e.test' }
+  await sp.getByRole('button', { name: 'Masuk dengan IdP E2E' }).click()
+  await sp.getByText('sso1@e2e.test · viewer').waitFor({ timeout: 20000 })
+  check(true, 'sso: identitas dicocokkan lewat sub, bukan email')
+  await sp.getByRole('button', { name: 'Keluar' }).click()
+  // email belum terverifikasi ditolak dengan pesan
+  idpUser = { sub: 'e2e-sub-bad', email: 'bad@e2e.test', email_verified: false, name: 'Bad' }
+  await sp.getByRole('button', { name: 'Masuk dengan IdP E2E' }).click()
+  await sp.getByRole('alert').filter({ hasText: /terverifikasi/ }).waitFor({ timeout: 20000 })
+  check(true, 'sso: email tak terverifikasi ditolak dan pesan tampil di halaman login')
+  // peran dari grup IdP
+  idpUser = { sub: 'e2e-sub-adm', email: 'sso-admin@e2e.test', email_verified: true, name: 'Adm', groups: ['e2e-admin'] }
+  await sp.getByRole('button', { name: 'Masuk dengan IdP E2E' }).click()
+  await sp.getByText('sso-admin@e2e.test · admin').waitFor({ timeout: 20000 })
+  check(true, 'sso: grup IdP dipetakan ke peran admin saat penyediaan')
+  await sp.getByRole('button', { name: 'Keluar' }).click()
+  // admin melihat badge SSO + konfigurasi
+  await page.goto(URL_ + '/settings')
+  await page.getByRole('tab', { name: 'Pengguna' }).click()
+  await page.getByRole('row').filter({ hasText: 'sso1@e2e.test' }).getByText('SSO', { exact: true }).waitFor()
+  check((await page.getByRole('row').filter({ hasText: 'sso1@e2e.test' }).getByText(/tanpa password/).count()) === 1, 'sso: daftar pengguna menandai akun SSO-saja')
+  await page.getByRole('tab', { name: 'SSO' }).click()
+  await page.getByText(`http://localhost:${IPORT}`).first().waitFor()
+  await page.getByRole('button', { name: 'Uji koneksi ke IdP' }).click()
+  await page.getByText('IdP terjangkau').waitFor()
+  check(true, 'sso: admin melihat konfigurasi dan uji koneksi IdP berhasil (tanpa rahasia klien)')
+  check((await page.content()).indexOf('rahasia-e2e') < 0, 'sso: rahasia klien tidak muncul di halaman')
+  await axeCheck(page, 'pengaturan SSO')
+  // penautan dari halaman Akun untuk pengguna lokal
+  await api('POST', '/api/v1/users', { email: 'tautan@e2e.test', role: 'operator', password: 'pagar-biru-melompat-47' }, ck2, cs2)
+  await sp.goto(URL_ + '/')
+  await sp.getByLabel('Email').fill('tautan@e2e.test'); await sp.getByLabel('Password').fill('pagar-biru-melompat-47')
+  await sp.getByRole('button', { name: 'Masuk', exact: true }).click()
+  await sp.getByRole('heading', { name: 'Overview' }).waitFor()
+  idpUser = { sub: 'e2e-sub-tautan', email: 'identitas-idp@e2e.test', email_verified: true, name: 'Tautan' }
+  await sp.goto(URL_ + '/account')
+  await sp.getByRole('button', { name: 'Hubungkan akun SSO' }).click()
+  await sp.getByText(/Tertaut/).waitFor({ timeout: 20000 })
+  check(true, 'sso: pengguna lokal menautkan akunnya dari halaman Akun (email IdP boleh berbeda)')
+  await sp.getByRole('button', { name: 'Keluar' }).click()
+  await sp.getByRole('button', { name: 'Masuk dengan IdP E2E' }).click()
+  await sp.getByText('tautan@e2e.test · operator').waitFor({ timeout: 20000 })
+  check(true, 'sso: login SSO setelah penautan masuk sebagai pengguna lokal tersebut')
+  await sctx.close()
 
   // ---- logout ----
   await page.goto(URL_ + '/'); await page.getByRole('button', { name: 'Keluar' }).click()

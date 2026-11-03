@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { ApiError, get, post, setCsrf } from '../lib/api'
-import type { Me, MfaChallenge } from '../lib/types'
+import { SSO_ERRORS } from '../lib/types'
+import type { AuthMethods, Me, MfaChallenge } from '../lib/types'
 import { getCredential, waErrMsg, webauthnSupported } from '../lib/webauthn'
 import { ErrorBox } from '../components/ui'
 
@@ -13,7 +14,14 @@ export function Login({ onLogin }: { onLogin: (m: Me) => void }) {
   const [err, setErr] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
   const [passkeyOk, setPasskeyOk] = useState(false)
-  useEffect(() => { get<{ passkey_login: boolean }>('/auth/methods').then((m) => setPasskeyOk(m.passkey_login && webauthnSupported())).catch(() => {}) }, [])
+  const [sso, setSso] = useState<{ enabled: boolean; name?: string }>({ enabled: false })
+  const [ssoMsg, setSsoMsg] = useState('')
+  useEffect(() => {
+    get<AuthMethods>('/auth/methods').then((m) => { setPasskeyOk(m.passkey_login && webauthnSupported()); setSso(m.oidc) }).catch(() => {})
+    const code = new URLSearchParams(window.location.search).get('sso_error')
+    if (code) { setSsoMsg(SSO_ERRORS[code] ?? 'Login SSO gagal.'); window.history.replaceState(null, '', window.location.pathname) }
+  }, [])
+  const useSSO = () => { window.location.href = '/api/v1/auth/oidc/login?next=' + encodeURIComponent(window.location.pathname === '/' ? '/' : window.location.pathname + window.location.search) }
   const done = (me: Me) => { setCsrf(me.csrf_token); onLogin(me) }
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -67,12 +75,14 @@ export function Login({ onLogin }: { onLogin: (m: Me) => void }) {
       <form className="card stack" onSubmit={submit}>
         <h1>SMSC Gateway</h1>
         <p className="muted">Masuk ke dashboard</p>
+        {ssoMsg && <div className="err" role="alert">{ssoMsg}</div>}
         <label className="field"><span>Email</span><input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus /></label>
         <label className="field"><span>Password</span><input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
         <ErrorBox error={err} />
         <button className="primary" disabled={busy}>{busy ? 'Masuk…' : 'Masuk'}</button>
-        {passkeyOk && <><p className="muted" style={{ textAlign: 'center', margin: 0 }}>atau</p>
-          <button type="button" disabled={busy} onClick={usePasskey}>Masuk dengan passkey</button></>}
+        {(passkeyOk || sso.enabled) && <p className="muted" style={{ textAlign: 'center', margin: 0 }}>atau</p>}
+        {sso.enabled && <button type="button" disabled={busy} onClick={useSSO}>Masuk dengan {sso.name || 'SSO'}</button>}
+        {passkeyOk && <button type="button" disabled={busy} onClick={usePasskey}>Masuk dengan passkey</button>}
       </form>
     </div>
   )

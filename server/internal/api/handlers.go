@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -24,7 +25,7 @@ func (a *API) setSession(w http.ResponseWriter, tok string) {
 func (a *API) sessionBody(r *http.Request, res core.LoginResult) map[string]any {
 	u := res.User
 	return map[string]any{"id": u.ID, "email": u.Email, "role": u.Role, "tailscale_login": u.TailscaleLogin, "mfa_enabled": u.MFAEnabled,
-		"mfa_setup_required": a.Svc.MFASetupRequired(r.Context(), u), "csrf_token": res.CSRF}
+		"has_password": u.HasPassword, "sso_linked": u.SSOLinked, "mfa_setup_required": a.Svc.MFASetupRequired(r.Context(), u), "csrf_token": res.CSRF}
 }
 
 func (a *API) login(w http.ResponseWriter, r *http.Request) {
@@ -214,6 +215,7 @@ func (a *API) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{"id": p.user.ID, "email": p.user.Email, "role": p.user.Role, "tailscale_login": p.user.TailscaleLogin, "mfa_enabled": p.user.MFAEnabled,
+		"has_password": p.user.HasPassword, "sso_linked": p.user.SSOLinked, "sso_session": p.user.SSOSession,
 		"mfa_setup_required": a.Svc.MFASetupRequired(r.Context(), *p.user), "csrf_token": p.csrf})
 }
 
@@ -1706,7 +1708,8 @@ func (a *API) webauthnLoginFinish(w http.ResponseWriter, r *http.Request) {
 
 // authMethods: informasi publik untuk halaman login (tanpa data pengguna).
 func (a *API) authMethods(w http.ResponseWriter, r *http.Request) {
-	a.writeJSON(w, http.StatusOK, map[string]any{"passkey_login": a.Svc.WebAuthnEnabled() && a.Svc.PasskeyLoginAllowed(r.Context())})
+	a.writeJSON(w, http.StatusOK, map[string]any{"passkey_login": a.Svc.WebAuthnEnabled() && a.Svc.PasskeyLoginAllowed(r.Context()),
+		"oidc": map[string]any{"enabled": a.Svc.OIDCEnabled(), "name": a.Svc.Cfg.OIDC.Name}})
 }
 
 func (a *API) passkeyLoginBegin(w http.ResponseWriter, r *http.Request) {
@@ -1731,4 +1734,107 @@ func (a *API) passkeyLoginFinish(w http.ResponseWriter, r *http.Request) {
 	a.setSession(w, res.Token)
 	a.Svc.Audit(r.Context(), "user:"+res.User.Email, "auth.login", "user", res.User.ID.String(), map[string]any{"method": "passkey"})
 	a.writeJSON(w, http.StatusOK, a.sessionBody(r, res))
+}
+
+// ---------- SSO / OIDC (fase 11) ----------
+
+func (a *API) setBinder(w http.ResponseWriter, v string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{Name: "smsc_oidc", Value: v, Path: "/api/v1/auth/oidc", HttpOnly: true, Secure: a.Svc.Cfg.SecureCookies,
+		SameSite: http.SameSiteLaxMode, MaxAge: maxAge}) // Lax: harus ikut pada navigasi balik dari IdP
+}
+
+// oidcLogin: GET (navigasi peramban). Mengalihkan ke IdP; kegagalan ke halaman login dengan kode ringkas.
+func (a *API) oidcLogin(w http.ResponseWriter, r *http.Request) {
+	authURL, binder, err := a.Svc.OIDCBegin(r.Context(), "login", nil, r.URL.Query().Get("next"))
+	if err != nil {
+		var oe *core.OIDCError
+		if errors.As(err, &oe) {
+			a.Log.Warn("sso: mulai login gagal", "code", oe.Code, "detail", oe.Detail)
+			http.Redirect(w, r, "/?sso_error="+oe.Code, http.StatusFound)
+			return
+		}
+		a.fail(w, r, err)
+		return
+	}
+	a.setBinder(w, binder, 600)
+	http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+func (a *API) oidcCallback(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	binder := ""
+	if c, err := r.Cookie("smsc_oidc"); err == nil {
+		binder = c.Value
+	}
+	var sessUser *uuid.UUID
+	if c, err := r.Cookie(cookieName); err == nil {
+		if u, _, e := a.Svc.SessionUser(r.Context(), c.Value); e == nil {
+			sessUser = &u.ID
+		}
+	}
+	res, err := a.Svc.OIDCCallback(r.Context(), q.Get("state"), q.Get("code"), binder, q.Get("error"), sessUser)
+	a.setBinder(w, "", -1)
+	if err != nil {
+		code, detail := "internal", err.Error()
+		var oe *core.OIDCError
+		if errors.As(err, &oe) {
+			code, detail = oe.Code, oe.Detail
+		} else {
+			var pe *core.Problem
+			if errors.As(err, &pe) && pe.Type == "sso.not_configured" {
+				code = "unavailable"
+			}
+		}
+		a.Log.Warn("sso: callback gagal", "code", code, "detail", detail)
+		a.Svc.Audit(r.Context(), "oidc", "auth.oidc_failed", "settings", "oidc", map[string]any{"code": code})
+		dest := "/?sso_error="
+		if res.Purpose == "link" {
+			dest = "/account?sso_error="
+		}
+		http.Redirect(w, r, dest+code, http.StatusFound)
+		return
+	}
+	if res.Purpose == "link" {
+		http.Redirect(w, r, "/account?sso=linked", http.StatusFound)
+		return
+	}
+	a.setSession(w, res.Login.Token)
+	a.Svc.Audit(r.Context(), "user:"+res.Email, "auth.login", "user", res.UserID.String(), map[string]any{"method": "oidc", "created": res.Created})
+	http.Redirect(w, r, core.SafeNext(res.Next), http.StatusFound)
+}
+
+// oidcLinkBegin: POST (sesi + CSRF). Mengembalikan URL IdP; navigasi dilakukan klien.
+func (a *API) oidcLinkBegin(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	authURL, binder, err := a.Svc.OIDCBegin(r.Context(), "link", &p.user.ID, "/account")
+	if err != nil {
+		var oe *core.OIDCError
+		if errors.As(err, &oe) {
+			a.fail(w, r, core.NewProblem(http.StatusBadGateway, "sso.unavailable", "IdP tidak terjangkau", oe.Detail))
+			return
+		}
+		a.fail(w, r, err)
+		return
+	}
+	a.setBinder(w, binder, 600)
+	a.writeJSON(w, http.StatusOK, map[string]any{"url": authURL})
+}
+
+func (a *API) oidcUnlink(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	if err := a.Svc.OIDCUnlink(r.Context(), p.user.ID); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) getSSO(w http.ResponseWriter, r *http.Request) {
+	a.writeJSON(w, http.StatusOK, a.Svc.SSOConfig(r.Context(), r.URL.Query().Get("probe") == "1"))
 }

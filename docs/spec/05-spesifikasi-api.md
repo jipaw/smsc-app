@@ -41,6 +41,10 @@ Sumber kebenaran skema: [`contracts/openapi.yaml`](../../contracts/openapi.yaml)
 | `auth.mfa_setup_required` | 403 | Kebijakan mewajibkan 2FA untuk akun ini; hanya endpoint akun yang terbuka |
 | `security.enroll_first` | 409 | Admin yang menyalakan kewajiban 2FA harus sudah memakai 2FA |
 | `user.must_disable_first` | 409 | Hapus pengguna hanya untuk akun yang sudah dinonaktifkan |
+| `sso.not_configured` | 404 | SSO OIDC belum dikonfigurasi |
+| `sso.unavailable` | 502 | IdP tidak terjangkau (saat memulai penautan) |
+| `sso.not_linked` | 409 | Akun tidak tertaut ke SSO |
+| `sso.unlink_blocked` | 409 | Akun tanpa password tidak boleh melepas SSO |
 | `passkey.disabled` | 409 | Login/pendaftaran passkey belum diizinkan admin |
 | `webauthn.not_available` | 409 | RP ID server bukan nama domain (mis. IP) |
 | `webauthn.limit` | 409 | Maks. 10 kunci keamanan per akun |
@@ -99,6 +103,8 @@ Tanpa 2FA, `POST /auth/login` langsung mengembalikan profil + cookie seperti bia
 Login dengan kunci keamanan: `POST /auth/login` → `{mfa_required, mfa_token, methods:[webauthn|totp|recovery]}` → `POST /auth/login/webauthn/begin {mfa_token}` → `{ceremony_id, options}` → `navigator.credentials.get()` → `POST /auth/login/webauthn/finish {mfa_token, ceremony_id, credential}`. Pendaftaran: `POST /auth/webauthn/register/begin {password, name}` → `navigator.credentials.create()` → `.../finish {ceremony_id, credential}`.
 
 Login tanpa password (passkey, bila diizinkan admin): `POST /auth/passkey/begin` → `{ceremony_id, options}` → `navigator.credentials.get()` → `POST /auth/passkey/finish {ceremony_id, credential}`; tanpa `mfa_token` dan tanpa langkah kedua. Pendaftaran passkey: `register/begin` dengan `passkey:true`.
+
+SSO (bila dikonfigurasi): navigasi peramban `GET /auth/oidc/login?next=/path` → IdP → `GET /auth/oidc/callback` (selalu 302; gagal → `/?sso_error=<kode>`). Kode: `invalid_state`, `session_mismatch`, `denied`, `token`, `unavailable`, `not_linked`, `unverified_email`, `domain`, `disabled`, `conflict`, `link_conflict`. Penautan dari akun: `POST /auth/oidc/link` → `{url}`; lepas: `DELETE /auth/oidc/link`. `GET /auth/methods` (publik) memberi `oidc.enabled` + `oidc.name`.
 
 ### 3.2 Kirim non-campaign (API key)
 

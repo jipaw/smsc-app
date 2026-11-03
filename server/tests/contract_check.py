@@ -200,6 +200,26 @@ class SoftAuth:
                 "clientExtensionResults": {}}
 
 
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k): return None
+
+
+def noredir(method, path, expect=None):
+    """Permintaan yang TIDAK mengikuti redirect (untuk endpoint SSO), divalidasi terhadap kontrak."""
+    req = urllib.request.Request(URL + path, method=method, headers={"Content-Type": "application/json"})
+    try:
+        r = urllib.request.build_opener(_NoRedirect()).open(req, timeout=15)
+        status, ct, payload, loc = r.status, r.headers.get("Content-Type", ""), r.read(), r.headers.get("Location")
+    except urllib.error.HTTPError as e:
+        status, ct, payload, loc = e.code, e.headers.get("Content-Type", ""), e.read(), e.headers.get("Location")
+    parsed = json.loads(payload) if payload and "json" in ct else None
+    if expect is not None and status != expect:
+        problems.append(f"{method} {path}: status {status}, diharapkan {expect}")
+    validate_response(method, path, status, parsed, ct)
+    return status, loc
+
+
 def main():
     psql(f"CREATE DATABASE {DB}")
     env = dict(os.environ, DATABASE_URL=DSN, PUBLIC_BASE_URL="http://example.test", SESSION_SECRET="s" * 40,
@@ -495,6 +515,18 @@ def run_checks(pw):
     for c in lst["credentials"]:
         call("DELETE", f"/api/v1/auth/webauthn/credentials/{c['id']}", {"password": pw2, "code": "000000"}, 401)
     call("PUT", "/api/v1/settings/security", {"passkey_login": False}, 200)
+
+    # SSO OIDC (fase 11): tidak dikonfigurasi pada server kontrak
+    st, mth = anon("GET", "/api/v1/auth/methods", None, 200)
+    if mth and mth.get("oidc", {}).get("enabled") is not False:
+        problems.append("oidc harus nonaktif tanpa konfigurasi")
+    noredir("GET", "/api/v1/auth/oidc/login", 404)
+    st, loc = noredir("GET", "/api/v1/auth/oidc/callback?state=ngawur&code=x", 302)
+    if not loc or "sso_error=" not in loc:
+        problems.append("callback gagal harus mengalihkan dengan sso_error")
+    call("POST", "/api/v1/auth/oidc/link", {}, 404)
+    call("DELETE", "/api/v1/auth/oidc/link", expect=409)
+    call("GET", "/api/v1/settings/sso", expect=200)
 
     # revoke di akhir
     call("DELETE", f"/api/v1/devices/{dev}", expect=204)

@@ -50,6 +50,7 @@ Opsi A (Compose + sidecar) dan catatan jaringan ada di `docs/04` §4. Verifikasi
 | `WEBHOOK_ENC_KEY` | turunan `SESSION_SECRET` | Kunci enkripsi secret webhook dan rahasia TOTP. Atur terpisah di produksi |
 | `SESSION_SECRET_PREVIOUS`, `WEBHOOK_ENC_KEY_PREVIOUS` | – | Kunci lama (koma) selama rotasi; lihat R-06 |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_MODE`, `SMTP_FROM`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_CA_FILE`, `SMTP_TIMEOUT`, `EMAIL_BACKOFF`, `EMAIL_TICK` | email nonaktif | Pengiriman email undangan; lihat `server/README.md`. Simpan kredensial di secret manager, bukan di repo |
+| `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL`, `OIDC_NAME`, `OIDC_SCOPES`, `OIDC_AUTO_PROVISION`, `OIDC_ALLOWED_DOMAINS`, `OIDC_DEFAULT_ROLE`, `OIDC_GROUPS_CLAIM`, `OIDC_ADMIN_GROUPS`, `OIDC_OPERATOR_GROUPS`, `OIDC_SYNC_ROLES`, `OIDC_LINK_BY_EMAIL`, `OIDC_TRUST_IDP_MFA`, `OIDC_CA_FILE` | SSO mati | SSO OIDC; tabel di `server/README.md`. Secret klien di secret manager |
 | `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS`, `WEBAUTHN_RP_NAME` | host `PUBLIC_BASE_URL` | WebAuthn; lihat `server/README.md` |
 | `LOGIN_RATE_PER_MIN`, `LOGIN_BURST` | `5`, `5` | Batas login & verifikasi 2FA per IP (endpoint akun: 2× per pengguna). Naikkan bila banyak admin berbagi satu IP/NAT |
 | `DEVICE_ROTATE_GRACE` | `60s` | Masa secret device lama setelah rotasi |
@@ -158,6 +159,8 @@ Kunci yang salah **tidak** merusak data diam-diam: pengiriman webhook gagal deng
 Menyalakan: pastikan **Anda** sudah memakai 2FA (Akun), lalu Pengaturan → Keamanan → *Wajib untuk admin* (atau *semua*). Dampak seketika: pengguna dalam cakupan tanpa 2FA — termasuk yang sedang login — hanya dapat membuka halaman Akun sampai mengaktifkan 2FA; API key tidak terpengaruh. Beri tahu pengguna dahulu; halaman Keamanan menampilkan berapa yang akan terdampak. Mematikan: pilih *Opsional* (efek seketika).
 
 Kebijakan password baru berlaku di semua pintu (spec 09); bila admin menerima 422 `terlalu lemah`, pilih frasa panjang yang tidak memuat nama akun. Pengaturan → Retensi juga mengatur masa simpan undangan selesai (default 90 hari).
+
+SSO OIDC: (1) daftarkan klien di IdP (jenis *web application*, authorization code; redirect URI persis `PUBLIC_BASE_URL/api/v1/auth/oidc/callback`; scope `openid email profile` + klaim grup bila perlu); (2) isi `OIDC_*` (lihat `server/README.md`) lalu restart — salah konfigurasi menggagalkan start; (3) Pengaturan → SSO → *Uji koneksi ke IdP*; (4) putuskan kebijakan: `OIDC_AUTO_PROVISION` + `OIDC_ALLOWED_DOMAINS` + pemetaan grup, atau biarkan pengguna menautkan dari Akun. Pastikan **IdP menegakkan MFA** (atau set `OIDC_TRUST_IDP_MFA=false`). Karyawan keluar: nonaktifkan di IdP **dan** di dashboard (sesi aktif hanya dicabut oleh dashboard). `?sso_error=not_linked`: akun belum tertaut — tautkan dari Akun (login password) atau aktifkan penyediaan/penautan email. Admin terkunci di IdP: tetapkan password lokal untuk akunnya sebagai jalur darurat.
 
 Passkey (login tanpa password): nyalakan di Pengaturan → Keamanan setelah memutuskan kebijakan (lihat spec 09 soal passkey tersinkron); pengguna mendaftarkan dari Akun → Tambah kunci → *Daftarkan sebagai passkey*. Passkey hilang/perangkat dicuri: hapus kunci (password + kode) atau reset 2FA oleh admin (menghapus semua kredensial dan mencabut sesi); mematikan fitur menolak login passkey seketika.
 

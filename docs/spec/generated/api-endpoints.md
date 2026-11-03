@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (102 operasi)
+# Daftar endpoint (107 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -13,6 +13,10 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `GET` | `/auth/methods` | Metode login yang tersedia (publik, untuk halaman login) | publik | 200 |
 | `POST` | `/auth/passkey/begin` | Mulai login tanpa password dengan passkey | publik | 200,409,429 |
 | `POST` | `/auth/passkey/finish` | Selesaikan login tanpa password dengan passkey | publik | 200,400,401,409,423,429 |
+| `GET` | `/auth/oidc/login` | Mulai login SSO (navigasi peramban) | publik | 302,404,429 |
+| `GET` | `/auth/oidc/callback` | Callback IdP (redirect_uri) | publik | 302,429 |
+| `POST` | `/auth/oidc/link` | Mulai menautkan akun saya ke SSO | apiKey/sessionCookie | 200,404,502,403 |
+| `DELETE` | `/auth/oidc/link` | Lepas tautan SSO akun saya | apiKey/sessionCookie | 204,409,403 |
 | `GET` | `/auth/webauthn` | Kunci keamanan / passkey milik saya | apiKey/sessionCookie | 200,403 |
 | `POST` | `/auth/webauthn/register/begin` | Mulai mendaftarkan kunci keamanan (butuh password) | apiKey/sessionCookie | 200,401,409,422,429 |
 | `POST` | `/auth/webauthn/register/finish` | Selesaikan pendaftaran kunci keamanan | apiKey/sessionCookie | 201,400,409,422,429 |
@@ -134,6 +138,7 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `GET` | `/invitations` | Daftar undangan (200 terbaru; tanpa token) | apiKey/sessionCookie | 200 |
 | `POST` | `/invitations` | Buat undangan pengguna (tautan sekali pakai) | apiKey/sessionCookie | 201,409,422 |
 | `DELETE` | `/invitations/{invitationId}` | Cabut undangan | apiKey/sessionCookie | 204,404,409 |
+| `GET` | `/settings/sso` | Konfigurasi SSO OIDC yang aktif (tanpa rahasia) | apiKey/sessionCookie | 200 |
 | `GET` | `/settings/email` | Pengaturan SMTP yang sedang aktif (tanpa kredensial) | apiKey/sessionCookie | 200 |
 | `POST` | `/settings/email/test` | Kirim email uji (langsung, tanpa outbox) | apiKey/sessionCookie | 200,409,422,429,502 |
 | `GET` | `/settings/security` | Kebijakan wajib-2FA | apiKey/sessionCookie | 200 |

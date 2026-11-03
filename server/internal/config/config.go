@@ -1,9 +1,12 @@
 package config
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -13,7 +16,31 @@ import (
 	"time"
 )
 
+// OIDCConfig: SSO dengan OpenID Connect (authorization code + PKCE). Kosong OIDC_ISSUER = SSO nonaktif.
+type OIDCConfig struct {
+	Issuer         string
+	ClientID       string
+	ClientSecret   string // boleh kosong (klien publik, PKCE saja)
+	RedirectURL    string
+	Scopes         []string
+	Name           string   // label tombol, mis. "Google Workspace"
+	AllowedDomains []string // batasi domain email untuk penyediaan/penautan otomatis (kosong = semua)
+	AutoProvision  bool     // buat pengguna baru saat login SSO pertama
+	DefaultRole    string   // viewer|operator untuk pengguna baru
+	GroupsClaim    string
+	AdminGroups    []string
+	OperatorGroups []string
+	SyncRoles      bool         // sinkronkan peran dari grup IdP di setiap login
+	LinkByEmail    bool         // tautkan otomatis ke pengguna lokal dengan email yang sama (email_verified wajib)
+	TrustIdPMFA    bool         // sesi SSO dianggap memenuhi kewajiban 2FA (IdP yang menegakkan MFA)
+	HTTPClient     *http.Client // klien untuk IdP (CA privat / pengujian); nil = bawaan
+}
+
+func (o OIDCConfig) Enabled() bool { return o.Issuer != "" }
+
 type Config struct {
+	OIDC OIDCConfig
+
 	DatabaseURL          string
 	HTTPAddr             string
 	PublicBaseURL        string
@@ -183,6 +210,9 @@ func Load() (Config, error) {
 	if len(c.WebAuthnOrigins) == 0 && c.PublicBaseURL != "" {
 		c.WebAuthnOrigins = []string{c.PublicBaseURL}
 	}
+	if err := c.loadOIDC(); err != nil {
+		return c, err
+	}
 	c.SessionSecretPrev = splitList(os.Getenv("SESSION_SECRET_PREVIOUS"))
 	c.WebhookKeyPrev = splitList(os.Getenv("WEBHOOK_ENC_KEY_PREVIOUS"))
 	if c.WebhookKey == "" {
@@ -221,4 +251,76 @@ func envFloat(k string, def float64) float64 {
 		return v
 	}
 	return def
+}
+
+func (c *Config) loadOIDC() error {
+	o := OIDCConfig{
+		Issuer: strings.TrimRight(os.Getenv("OIDC_ISSUER"), "/"), ClientID: os.Getenv("OIDC_CLIENT_ID"), ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
+		RedirectURL: os.Getenv("OIDC_REDIRECT_URL"), Scopes: splitSpaceList(env("OIDC_SCOPES", "openid email profile")), Name: env("OIDC_NAME", "SSO"),
+		AllowedDomains: lowerAll(splitList(os.Getenv("OIDC_ALLOWED_DOMAINS"))), AutoProvision: env("OIDC_AUTO_PROVISION", "false") == "true",
+		DefaultRole: strings.ToLower(env("OIDC_DEFAULT_ROLE", "viewer")), GroupsClaim: env("OIDC_GROUPS_CLAIM", "groups"),
+		AdminGroups: splitList(os.Getenv("OIDC_ADMIN_GROUPS")), OperatorGroups: splitList(os.Getenv("OIDC_OPERATOR_GROUPS")),
+		SyncRoles: env("OIDC_SYNC_ROLES", "false") == "true", LinkByEmail: env("OIDC_LINK_BY_EMAIL", "false") == "true",
+		TrustIdPMFA: env("OIDC_TRUST_IDP_MFA", "true") == "true",
+	}
+	c.OIDC = o
+	if !o.Enabled() {
+		return nil
+	}
+	u, err := url.Parse(o.Issuer)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return fmt.Errorf("OIDC_ISSUER harus URL http(s) yang valid")
+	}
+	if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) && env("OIDC_ALLOW_INSECURE", "false") != "true" {
+		return fmt.Errorf("OIDC_ISSUER harus https (http hanya untuk localhost atau OIDC_ALLOW_INSECURE=true)")
+	}
+	if o.ClientID == "" {
+		return fmt.Errorf("OIDC_CLIENT_ID wajib bila OIDC_ISSUER diisi")
+	}
+	if o.RedirectURL == "" {
+		c.OIDC.RedirectURL = c.PublicBaseURL + "/api/v1/auth/oidc/callback"
+	}
+	if ru, err := url.Parse(c.OIDC.RedirectURL); err != nil || ru.Scheme == "" || ru.Host == "" {
+		return fmt.Errorf("OIDC_REDIRECT_URL harus URL absolut (default: PUBLIC_BASE_URL + /api/v1/auth/oidc/callback)")
+	}
+	if o.DefaultRole != "viewer" && o.DefaultRole != "operator" {
+		return fmt.Errorf("OIDC_DEFAULT_ROLE harus viewer atau operator (admin hanya lewat OIDC_ADMIN_GROUPS atau diangkat manual)")
+	}
+	hasOpenID := false
+	for _, sc := range o.Scopes {
+		hasOpenID = hasOpenID || sc == "openid"
+	}
+	if !hasOpenID {
+		return fmt.Errorf("OIDC_SCOPES harus memuat openid")
+	}
+	if f := os.Getenv("OIDC_CA_FILE"); f != "" {
+		pem, err := os.ReadFile(f)
+		if err != nil {
+			return fmt.Errorf("OIDC_CA_FILE: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return fmt.Errorf("OIDC_CA_FILE: tidak ada sertifikat PEM yang valid")
+		}
+		c.OIDC.HTTPClient = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}}
+	}
+	return nil
+}
+
+func isLoopbackHost(h string) bool {
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+func splitSpaceList(v string) []string { return strings.Fields(v) }
+
+func lowerAll(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, x := range in {
+		out = append(out, strings.ToLower(x))
+	}
+	return out
 }

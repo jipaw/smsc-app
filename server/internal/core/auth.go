@@ -22,6 +22,9 @@ type User struct {
 	Role           string    `json:"role"`
 	TailscaleLogin *string   `json:"tailscale_login"`
 	MFAEnabled     bool      `json:"mfa_enabled"`
+	HasPassword    bool      `json:"has_password"`
+	SSOLinked      bool      `json:"sso_linked"`
+	SSOSession     bool      `json:"-"` // sesi ini dibuat lewat SSO (hanya terisi oleh SessionUser / login SSO)
 }
 
 // Argon2id m=64MiB, t=3, p=1 (spec 09 §3).
@@ -110,13 +113,19 @@ func (s *Service) Login(ctx context.Context, email, password string) (LoginResul
 		return LoginResult{User: u, MFARequired: true, MFAToken: s.mfaChallenge(u.ID, *hash), Methods: s.mfaMethods(ctx, u.ID)}, nil
 	}
 	_, _ = s.Pool.Exec(ctx, `UPDATE users SET failed_logins=0, locked_until=NULL WHERE id=$1`, u.ID)
+	u.HasPassword = true
 	return s.startSession(ctx, u)
 }
 
 func (s *Service) startSession(ctx context.Context, u User) (LoginResult, error) {
+	return s.startSessionSSO(ctx, u, false)
+}
+
+func (s *Service) startSessionSSO(ctx context.Context, u User, sso bool) (LoginResult, error) {
 	token, csrf := randToken(32), randToken(24)
-	_, err := s.Pool.Exec(ctx, `INSERT INTO sessions(id,user_id,token_hash,csrf_token,expires_at) VALUES ($1,$2,$3,$4,now() + interval '7 days')`,
-		newID(), u.ID, s.hmacToken(token), csrf)
+	_, err := s.Pool.Exec(ctx, `INSERT INTO sessions(id,user_id,token_hash,csrf_token,expires_at,sso) VALUES ($1,$2,$3,$4,now() + interval '7 days',$5)`,
+		newID(), u.ID, s.hmacToken(token), csrf, sso)
+	u.SSOSession = sso
 	return LoginResult{Token: token, CSRF: csrf, User: u}, err
 }
 
@@ -129,8 +138,8 @@ func (s *Service) SessionUser(ctx context.Context, token string) (User, string, 
 		FROM users us
 		WHERE se.user_id = us.id AND se.token_hash = ANY($1) AND se.expires_at > now()
 		  AND se.last_seen_at > now() - interval '12 hours' AND NOT us.disabled
-		RETURNING us.id, us.email, us.role, us.tailscale_login, `+mfaAny("us")+`, se.csrf_token`, s.hmacTokens(token)).
-		Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &csrf)
+		RETURNING us.id, us.email, us.role, us.tailscale_login, `+mfaAny("us")+`, us.password_hash IS NOT NULL, us.oidc_subject IS NOT NULL, se.sso, se.csrf_token`, s.hmacTokens(token)).
+		Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.HasPassword, &u.SSOLinked, &u.SSOSession, &csrf)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, "", NewProblem(http.StatusUnauthorized, "auth.unauthenticated", "Tidak terautentikasi", "sesi tidak valid")
 	}
@@ -247,12 +256,12 @@ type UserItem struct {
 }
 
 func (s *Service) ListUsers(ctx context.Context) ([]UserItem, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id,email,role,tailscale_login,`+mfaAny("users")+`,disabled,created_at FROM users ORDER BY created_at`)
+	rows, err := s.Pool.Query(ctx, `SELECT id,email,role,tailscale_login,`+mfaAny("users")+`,password_hash IS NOT NULL,oidc_subject IS NOT NULL,disabled,created_at FROM users ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (UserItem, error) {
 		var u UserItem
-		return u, r.Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.Disabled, &u.CreatedAt)
+		return u, r.Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.HasPassword, &u.SSOLinked, &u.Disabled, &u.CreatedAt)
 	})
 }
