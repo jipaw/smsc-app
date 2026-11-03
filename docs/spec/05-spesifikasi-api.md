@@ -40,6 +40,9 @@ Sumber kebenaran skema: [`contracts/openapi.yaml`](../../contracts/openapi.yaml)
 | `auth.mfa_expired` | 401 | Tantangan 2FA kedaluwarsa/tidak valid; ulangi login |
 | `auth.mfa_setup_required` | 403 | Kebijakan mewajibkan 2FA untuk akun ini; hanya endpoint akun yang terbuka |
 | `security.enroll_first` | 409 | Admin yang menyalakan kewajiban 2FA harus sudah memakai 2FA |
+| `user.must_disable_first` | 409 | Hapus pengguna hanya untuk akun yang sudah dinonaktifkan |
+| `invitation.invalid` | 404 | Token undangan tidak dikenal/kedaluwarsa/dicabut/sudah dipakai (seragam) |
+| `invitation.not_pending` | 409 | Mencabut undangan yang sudah diterima/dicabut |
 | `user.self_change` | 409 | Mengubah peran/status/password akun sendiri lewat endpoint admin |
 | `mfa.already_enabled` | 409 | 2FA sudah aktif |
 | `mfa.not_enabled` | 409 | 2FA belum aktif |
@@ -83,7 +86,7 @@ POST /auth/login {email,password}         -> 200 {mfa_required:true, mfa_token, 
 POST /auth/login/verify {mfa_token,code}  -> 200 profil + csrf_token, cookie sesi di-set           (code = TOTP 6 digit atau kode pemulihan)
 ```
 
-Tanpa 2FA, `POST /auth/login` langsung mengembalikan profil + cookie seperti biasa. Kelola 2FA: `GET /auth/2fa`, `POST /auth/2fa/setup|enable|disable|recovery-codes`; ganti password: `POST /auth/password`; admin: `DELETE /users/{id}/2fa`. Endpoint akun hanya untuk sesi (API key → 403). Bila `GET /settings/security` bernilai `admin`/`all`, akun dalam cakupan tanpa 2FA mendapat `mfa_setup_required: true` pada login/`/auth/me` dan 403 `auth.mfa_setup_required` di endpoint lain. Manajemen pengguna: `GET/POST /users`, `PATCH /users/{id}`, `POST /users/{id}/password`, `DELETE /users/{id}/2fa`.
+Tanpa 2FA, `POST /auth/login` langsung mengembalikan profil + cookie seperti biasa. Kelola 2FA: `GET /auth/2fa`, `POST /auth/2fa/setup|enable|disable|recovery-codes`; ganti password: `POST /auth/password`; admin: `DELETE /users/{id}/2fa`. Endpoint akun hanya untuk sesi (API key → 403). Bila `GET /settings/security` bernilai `admin`/`all`, akun dalam cakupan tanpa 2FA mendapat `mfa_setup_required: true` pada login/`/auth/me` dan 403 `auth.mfa_setup_required` di endpoint lain. Undangan: `POST/GET /invitations`, `DELETE /invitations/{id}`; publik `POST /invitations/lookup|accept`. Manajemen pengguna: `GET/POST /users`, `DELETE /users/{id}`, `PATCH /users/{id}`, `POST /users/{id}/password`, `DELETE /users/{id}/2fa`.
 
 ### 3.2 Kirim non-campaign (API key)
 

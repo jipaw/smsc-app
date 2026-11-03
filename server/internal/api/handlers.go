@@ -1480,3 +1480,94 @@ func (a *API) setUserPassword(w http.ResponseWriter, r *http.Request) {
 	a.Svc.Audit(r.Context(), actorOf(p), "user.password_reset", "user", id.String(), nil)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (a *API) createInvitation(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Email    string `json:"email"`
+		Role     string `json:"role"`
+		TTLHours int    `json:"ttl_hours"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	p := principalOf(r.Context())
+	v, err := a.Svc.CreateInvitation(r.Context(), p.user.ID, in.Email, in.Role, in.TTLHours)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(p), "invitation.create", "invitation", v.ID.String(), map[string]any{"email": v.Email, "role": v.Role})
+	a.writeJSON(w, http.StatusCreated, v)
+}
+
+func (a *API) listInvitations(w http.ResponseWriter, r *http.Request) {
+	items, err := a.Svc.ListInvitations(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *API) revokeInvitation(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "invitationId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	email, err := a.Svc.RevokeInvitation(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(principalOf(r.Context())), "invitation.revoke", "invitation", id.String(), map[string]any{"email": email})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) lookupInvitation(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Token string `json:"token"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	v, err := a.Svc.LookupInvitation(r.Context(), in.Token)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, v)
+}
+
+func (a *API) acceptInvitation(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Token    string `json:"token"`
+		Password string `json:"password"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	u, err := a.Svc.AcceptInvitation(r.Context(), in.Token, in.Password)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), "invite:"+u.Email, "invitation.accept", "user", u.ID.String(), map[string]any{"role": u.Role})
+	a.writeJSON(w, http.StatusCreated, map[string]any{"id": u.ID, "email": u.Email, "role": u.Role})
+}
+
+func (a *API) deleteUser(w http.ResponseWriter, r *http.Request) {
+	id, perr := pathUUID(r, "userId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	p := principalOf(r.Context())
+	email, err := a.Svc.DeleteUser(r.Context(), p.user.ID, id)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.Svc.Audit(r.Context(), actorOf(p), "user.delete", "user", id.String(), map[string]any{"email": email})
+	w.WriteHeader(http.StatusNoContent)
+}

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get, patch, post, put } from '../lib/api'
 import { fmtTime } from '../lib/format'
 import { isAdmin, useMe } from '../lib/session'
-import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
+import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, Invitation, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
 import { Empty, ErrorBox, errMsg, Field, Loading, Modal, useToast } from '../components/ui'
 
 const TABS = ['Policy', 'Daftar blokir', 'API key', 'Webhook', 'Retensi', 'Keamanan', 'Pengguna', 'Audit'] as const
@@ -131,8 +131,10 @@ function Users() {
   const edit = useMutation({ mutationFn: (v: { id: string; body: { role?: Role; disabled?: boolean } }) => patch(`/users/${v.id}`, v.body), onSuccess: refresh, onError: (e) => toast(errMsg(e), true) })
   const setPw = useMutation({ mutationFn: () => post(`/users/${pwFor!.id}/password`, { new_password: newPw }), onSuccess: () => { toast('Password diganti; sesi pengguna dikeluarkan'); setPwFor(null); setNewPw('') } })
   const create = useMutation({ mutationFn: () => post('/users', f), onSuccess: () => { setF({ email: '', role: 'operator', password: '' }); refresh() } })
+  const delUser = useMutation({ mutationFn: (id: string) => del(`/users/${id}`), onSuccess: () => { toast('Pengguna dihapus'); refresh() }, onError: (e) => toast(errMsg(e), true) })
   return (
     <div className="stack">
+      <Invitations />
       <div className="card stack"><div className="grid cols-4"><Field label="Email"><input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
         <Field label="Peran"><select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Role })}><option>admin</option><option>operator</option><option>viewer</option></select></Field>
         <Field label="Password" hint="min. 12 karakter"><input type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field></div>
@@ -146,6 +148,7 @@ function Users() {
             <td className="right"><span className="row">
               {!self && <button className="small" onClick={() => { setPwFor(u); setNewPw('') }}>Set password</button>}
               {!self && <button className={`small${u.disabled ? '' : ' danger'}`} onClick={() => (u.disabled || window.confirm(`Nonaktifkan ${u.email}? Semua sesinya dikeluarkan.`)) && edit.mutate({ id: u.id, body: { disabled: !u.disabled } })}>{u.disabled ? 'Aktifkan' : 'Nonaktifkan'}</button>}
+              {u.disabled && !self && <button className="small danger" onClick={() => window.confirm(`Hapus ${u.email} secara permanen? API key/webhook buatannya tetap ada; jejak audit tetap menyimpan email.`) && delUser.mutate(u.id)}>Hapus</button>}
               {u.mfa_enabled && <button className="small danger" onClick={() => window.confirm(`Reset 2FA ${u.email}? Semua sesinya dikeluarkan dan ia harus menyiapkan 2FA lagi.`) && reset.mutate(u.id)}>Reset 2FA</button>}</span></td></tr>)
       })}</tbody></table></div>
       <Modal open={!!pwFor} onClose={() => setPwFor(null)} title={`Set password — ${pwFor?.email ?? ''}`}>
@@ -157,6 +160,37 @@ function Users() {
         </div>
       </Modal>
     </div>
+  )
+}
+
+function Invitations() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [f, setF] = useState<{ email: string; role: Role; ttl: number }>({ email: '', role: 'operator', ttl: 168 })
+  const [made, setMade] = useState<Invitation | null>(null)
+  const q = useQuery({ queryKey: ['invitations'], queryFn: () => get<{ items: Invitation[] }>('/invitations') })
+  const refresh = () => qc.invalidateQueries({ queryKey: ['invitations'] })
+  const create = useMutation({ mutationFn: () => post<Invitation>('/invitations', { email: f.email, role: f.role, ttl_hours: f.ttl }), onSuccess: (v) => { setMade(v); setF({ ...f, email: '' }); refresh() } })
+  const revoke = useMutation({ mutationFn: (id: string) => del(`/invitations/${id}`), onSuccess: refresh, onError: (e) => toast(errMsg(e), true) })
+  return (
+    <section className="card stack" aria-label="Undang pengguna">
+      <h2>Undang pengguna</h2>
+      <p className="muted">Membuat tautan sekali pakai; penerima menetapkan passwordnya sendiri. Sistem tidak mengirim email — bagikan tautannya lewat jalur yang aman.</p>
+      <div className="grid cols-4">
+        <Field label="Email penerima"><input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
+        <Field label="Peran"><select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Role })}><option>admin</option><option>operator</option><option>viewer</option></select></Field>
+        <Field label="Berlaku"><select value={f.ttl} onChange={(e) => setF({ ...f, ttl: Number(e.target.value) })}><option value={24}>1 hari</option><option value={168}>7 hari</option><option value={720}>30 hari</option></select></Field>
+      </div>
+      <ErrorBox error={create.error} />
+      <div><button className="primary" disabled={!f.email || create.isPending} onClick={() => create.mutate()}>Buat undangan</button></div>
+      {made?.invite_url && <div className="okbox" role="status">Tautan undangan untuk {made.email} — salin sekarang, tidak akan ditampilkan lagi:<br /><span className="mono" data-testid="invite-url">{made.invite_url}</span> <button className="small" onClick={() => navigator.clipboard?.writeText(made.invite_url!)}>Salin</button></div>}
+      {q.data && q.data.items.length > 0 && (
+        <div className="scroll-x"><table><thead><tr><th>Email</th><th>Peran</th><th>Status</th><th>Berlaku sampai</th><th /></tr></thead><tbody>
+          {q.data.items.map((i) => (
+            <tr key={i.id}><td>{i.email}</td><td>{i.role}</td><td>{{ pending: 'menunggu', accepted: 'diterima', expired: 'kedaluwarsa', revoked: 'dicabut' }[i.status]}</td><td className="muted">{fmtTime(i.expires_at)}</td>
+              <td className="right">{(i.status === 'pending' || i.status === 'expired') && <button className="small danger" onClick={() => revoke.mutate(i.id)}>Cabut</button>}</td></tr>))}
+        </tbody></table></div>)}
+    </section>
   )
 }
 

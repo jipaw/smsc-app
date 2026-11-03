@@ -4,15 +4,15 @@ Per commit ini. "Teruji" menyebut bukti yang dijalankan, bukan klaim. Rujukan ke
 
 | Area | Status | Bukti |
 |---|---|---|
-| Kontrak REST (`openapi.yaml`, 85 operasi) | Valid; respons server dicocokkan ke skema | `server/tests/contract_check.py`: 124 respons, 0 ketidaksesuaian |
+| Kontrak REST (`openapi.yaml`, 91 operasi) | Valid; respons server dicocokkan ke skema | `server/tests/contract_check.py`: 140 respons, 0 ketidaksesuaian |
 | Protokol WS (`ws-schema.json`) | Skema + 17 vector valid / 15 invalid; model Kotlin & server memakainya | `contracts/tools/validate_vectors.py`, `android :core` ProtocolVectorsTest, `poc/server/selftest.py` |
-| DDL (`schema.sql`) | Snapshot akhir = migrasi 0001–0004, dibandingkan lewat `pg_dump` (uji positif dan negatif) | `server/tests/schema_sync.sh` |
-| **Server fase 1–5** (Go) | FR-01–26 ✔: + rotasi kredensial, 2FA TOTP, **kewajiban 2FA (default nonaktif)**, manajemen pengguna (peran, nonaktifkan, admin set password) (lihat `server/README.md`) | 65 tes integrasi (20 inti + 13 campaign + 13 fase 3 + 13 fase 4 + 6 fase 5) + 18 unit (termasuk vektor RFC 6238), lulus `-race`; mutasi disengaja pada 2FA/rotasi/gerbang/self-change tertangkap |
-| **Dashboard fase 1–5** (React) | + Campaigns, Webhook, Retensi + tab **Keamanan** (kebijakan 2FA), manajemen pengguna di tabel, shell minimal bagi akun yang wajib 2FA, halaman **Akun** (ganti password, 2FA dengan QR & kode pemulihan), login dua langkah, tombol Putar (API key, secret webhook, kredensial device), Reset 2FA | typecheck, 5 unit, **105 pemeriksaan E2E** di Chromium (axe terang/gelap, mobile 390px, RBAC, wizard, HMAC webhook, `/metrics`, alur 2FA lengkap dengan TOTP dihitung di Node) |
+| DDL (`schema.sql`) | Snapshot akhir = migrasi 0001–0005, dibandingkan lewat `pg_dump` (uji positif dan negatif) | `server/tests/schema_sync.sh` |
+| **Server fase 1–6** (Go) | FR-01–28 ✔: + undangan pengguna (tautan sekali pakai) dan hapus pengguna; + rotasi kredensial, 2FA TOTP, **kewajiban 2FA (default nonaktif)**, manajemen pengguna (peran, nonaktifkan, admin set password) (lihat `server/README.md`) | 71 tes integrasi (20 inti + 13 campaign + 13 fase 3 + 13 fase 4 + 6 fase 5 + 6 fase 6) + 18 unit (termasuk vektor RFC 6238), lulus `-race`; mutasi disengaja pada 2FA/rotasi/gerbang/self-change tertangkap |
+| **Dashboard fase 1–6** (React) | + Campaigns, Webhook, Retensi + undangan (formulir, tautan salin, daftar, cabut), halaman publik `/invite/<token>`, tombol Hapus pengguna, tab **Keamanan** (kebijakan 2FA), manajemen pengguna di tabel, shell minimal bagi akun yang wajib 2FA, halaman **Akun** (ganti password, 2FA dengan QR & kode pemulihan), login dua langkah, tombol Putar (API key, secret webhook, kredensial device), Reset 2FA | typecheck, 5 unit, **114 pemeriksaan E2E** di Chromium (axe terang/gelap, mobile 390px, RBAC, wizard, HMAC webhook, `/metrics`, alur 2FA lengkap dengan TOTP dihitung di Node) |
 | **Android PoC** | Skeleton; belum dijalankan di HP | `:core` 26 tes, `:typecheck` 2 tes, `poc/README.md` |
 | Aplikasi Android produksi | **Belum** | menunggu hasil PoC (R1/R2/R3/R5/R6) |
 | Variabel per-penerima pada "Kirim SMS" cepat | **Belum** (gunakan campaign) | – |
-| WebAuthn/passkey, SSO, daftar password umum, hapus pengguna / undangan email, multi-instance | **Belum** | – |
+| WebAuthn/passkey, SSO, daftar password umum, **pengiriman email undangan** (tidak ada SMTP: admin membagikan tautan), pembersihan otomatis undangan lama, multi-instance | **Belum** | – |
 | Rotasi kredensial **di sisi HP** (menyimpan `new_secret` ke Keystore lalu membalas `ok`) | Server + protokol + vektor siap & teruji dengan simulator; **belum diimplementasikan di aplikasi Android** (PoC membalas `ok=false`, aman: secret lama tetap berlaku) | `TestDeviceCredentialRotation*` |
 | Alert Prometheus (`ops/prometheus/alerts.yml`) | Ditulis; setiap metrik yang dirujuk diverifikasi ada di `/metrics`. **Belum dijalankan di Prometheus/Alertmanager sungguhan** (ambang awal, perlu penyetelan) | `TestAlertRulesReferenceExistingMetrics` |
 
@@ -36,6 +36,13 @@ Per commit ini. "Teruji" menyebut bukti yang dijalankan, bukan klaim. Rujukan ke
 - **Hapus nomor** (`smscd privacy erase --number … [--suppress]`): anonimkan pesan, penerima, dan payload webhook untuk satu nomor; ditolak (`privacy.active_messages`) bila ada pesan aktif; audit hanya menyimpan hash.
 - **Metrik** di listener terpisah `METRICS_ADDR` (default `127.0.0.1:9090`, bukan di port publik). Label berkardinalitas kecil (pola rute, bukan URL), tanpa nomor/isi pesan. Gauge DB di-cache 5 dtk. Nama metrik implementasi (mis. `smsc_message_transitions_total`) menjadi acuan; tabel di spec 10 §Monitoring disesuaikan.
 - Bug yang tertangkap saat fase 3: `smsc_queue_depth` tidak punya seri saat antrean kosong (alert merujuk metrik yang tidak ada) → seri prioritas 0–9 selalu ada; retry delivery yang tak ada membalas 409 (kini 404); satu pemeriksaan E2E flaky (progress bar dihitung sebelum dirender).
+
+## Fase 6 — perilaku yang perlu diketahui
+- **Undangan = tautan, bukan email.** Tidak ada infrastruktur SMTP; admin menyalin `invite_url` (tampil sekali) dan membagikannya lewat jalur aman. Token 256-bit, hanya hash disimpan; berlaku 1–720 jam (default 168). Penerima menetapkan passwordnya sendiri (admin tak pernah tahu), akun dibuat **tanpa** sesi — lalu login biasa (tunduk pada kewajiban 2FA bila menyala).
+- Penerimaan **atomik**: pengguna dibuat + undangan ditandai terpakai dalam satu transaksi (8 penerimaan paralel → tepat satu menang). Password pendek (422) dan email bentrok (409) **tidak** menghabiskan undangan. Semua kegagalan lookup menjawab seragam 404 `invitation.invalid` (tidak membedakan kedaluwarsa/dicabut/dipakai); endpoint publik dibatasi laju seperti login.
+- Undangan baru untuk email yang sama **mencabut** yang lama; email yang sudah pengguna → 409.
+- **Hapus pengguna dua langkah**: harus `disabled` dahulu (409 `user.must_disable_first`), akun sendiri ditolak. Sesi & kode pemulihan terhapus; `created_by` pada API key/webhook/campaign/undangan menjadi `NULL` (objeknya tetap berfungsi); audit tetap menyimpan email. Email yang dihapus dapat diundang lagi.
+- Undangan lama (diterima/kedaluwarsa/dicabut) belum dibersihkan otomatis; daftar hanya menampilkan 200 terbaru.
 
 ## Fase 5 — perilaku yang perlu diketahui
 - **Kewajiban 2FA default `off`**; menyala hanya bila admin memilih (`PUT /settings/security`). Berlaku seketika, termasuk untuk sesi yang sudah login; API key tidak terpengaruh. Admin harus sudah memakai 2FA sendiri untuk menyalakannya. Pembacaan kebijakan yang gagal → gerbang **fail-open** (keputusan sadar: lebih baik 2FA tidak ditegakkan sesaat daripada seluruh tim terkunci saat DB bermasalah). Cache kebijakan 2 dtk di memori (satu instance).

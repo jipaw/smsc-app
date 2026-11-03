@@ -351,6 +351,27 @@ def run_checks(pw):
     call("POST", f"/api/v1/users/{uuid.uuid4()}/password", {"new_password": "baru-sekali-12345"}, 404)
     call("GET", "/api/v1/users", expect=200)
 
+    # undangan + hapus pengguna (fase 6)
+    call("GET", "/api/v1/invitations", expect=200)
+    call("POST", "/api/v1/invitations", {"email": "bukan", "role": "viewer"}, 422)
+    call("POST", "/api/v1/invitations", {"email": "mgmt@ct.test", "role": "viewer"}, 409)  # sudah pengguna
+    st, inv = call("POST", "/api/v1/invitations", {"email": "tamu@ct.test", "role": "operator", "ttl_hours": 24}, 201)
+    call("GET", "/api/v1/invitations", expect=200)
+    anon("POST", "/api/v1/invitations/lookup", {"token": inv["token"]}, 200)
+    anon("POST", "/api/v1/invitations/lookup", {"token": "inv_salah"}, 404)
+    anon("POST", "/api/v1/invitations/accept", {"token": inv["token"], "password": "pendek"}, 422)
+    anon("POST", "/api/v1/invitations/accept", {"token": inv["token"], "password": "tamu-password-1234"}, 201)
+    anon("POST", "/api/v1/invitations/accept", {"token": inv["token"], "password": "tamu-password-1234"}, 404)
+    call("DELETE", f"/api/v1/invitations/{inv['id']}", expect=409)
+    st, inv2 = call("POST", "/api/v1/invitations", {"email": "batal@ct.test", "role": "viewer"}, 201)
+    call("DELETE", f"/api/v1/invitations/{inv2['id']}", expect=204)
+    call("DELETE", f"/api/v1/invitations/{uuid.uuid4()}", expect=404)
+    call("DELETE", f"/api/v1/users/{nu['id']}", expect=204)  # sudah dinonaktifkan di atas
+    call("DELETE", f"/api/v1/users/{nu['id']}", expect=404)
+    call("DELETE", f"/api/v1/users/{me['id']}", expect=409)
+    st, nu2 = call("POST", "/api/v1/users", {"email": "aktif@ct.test", "role": "viewer", "password": "aktif-password-1234"}, 201)
+    call("DELETE", f"/api/v1/users/{nu2['id']}", expect=409)  # belum dinonaktifkan
+
     # revoke di akhir
     call("DELETE", f"/api/v1/devices/{dev}", expect=204)
     call("POST", "/api/v1/auth/logout", expect=204)

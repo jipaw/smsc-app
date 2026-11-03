@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (85 operasi)
+# Daftar endpoint (91 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -17,6 +17,8 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `POST` | `/auth/2fa/recovery-codes` | Terbitkan ulang kode pemulihan (kode lama hangus) | apiKey/sessionCookie | 200,401,409,429 |
 | `POST` | `/auth/logout` | Logout | apiKey/sessionCookie | 204 |
 | `GET` | `/auth/me` | Profil + peran pengguna saat ini | apiKey/sessionCookie | 200 |
+| `POST` | `/invitations/lookup` | Periksa token undangan (halaman undangan, publik) | publik | 200,404,429 |
+| `POST` | `/invitations/accept` | Terima undangan dan buat akun (publik) | publik | 201,404,409,422,429 |
 
 ## Devices
 
@@ -116,9 +118,13 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `DELETE` | `/api-keys/{apiKeyId}` | Cabut | apiKey/sessionCookie | 204 |
 | `GET` | `/users` | Daftar pengguna dashboard (admin) | apiKey/sessionCookie | 200 |
 | `POST` | `/users` | Buat pengguna | apiKey/sessionCookie | 201 |
+| `DELETE` | `/users/{userId}` | Hapus pengguna (harus sudah dinonaktifkan) | apiKey/sessionCookie | 204,404,409 |
 | `PATCH` | `/users/{userId}` | Ubah peran / nonaktifkan pengguna lain | apiKey/sessionCookie | 200,404,409,422 |
 | `POST` | `/users/{userId}/password` | Admin menetapkan password baru untuk pengguna lain | apiKey/sessionCookie | 204,404,409,422 |
 | `DELETE` | `/users/{userId}/2fa` | Reset 2FA pengguna (kehilangan authenticator) | apiKey/sessionCookie | 204,404 |
+| `GET` | `/invitations` | Daftar undangan (200 terbaru; tanpa token) | apiKey/sessionCookie | 200 |
+| `POST` | `/invitations` | Buat undangan pengguna (tautan sekali pakai) | apiKey/sessionCookie | 201,409,422 |
+| `DELETE` | `/invitations/{invitationId}` | Cabut undangan | apiKey/sessionCookie | 204,404,409 |
 | `GET` | `/settings/security` | Kebijakan wajib-2FA | apiKey/sessionCookie | 200 |
 | `PUT` | `/settings/security` | Ubah kebijakan wajib-2FA (default `off`) | apiKey/sessionCookie | 200,409,422 |
 | `GET` | `/audit-logs` | Jejak audit tindakan admin | apiKey/sessionCookie | 200 |

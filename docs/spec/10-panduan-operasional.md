@@ -155,6 +155,8 @@ Kunci yang salah **tidak** merusak data diam-diam: pengiriman webhook gagal deng
 
 Menyalakan: pastikan **Anda** sudah memakai 2FA (Akun), lalu Pengaturan → Keamanan → *Wajib untuk admin* (atau *semua*). Dampak seketika: pengguna dalam cakupan tanpa 2FA — termasuk yang sedang login — hanya dapat membuka halaman Akun sampai mengaktifkan 2FA; API key tidak terpengaruh. Beri tahu pengguna dahulu; halaman Keamanan menampilkan berapa yang akan terdampak. Mematikan: pilih *Opsional* (efek seketika).
 
+Mengundang: Pengaturan → Pengguna → *Undang pengguna* → salin tautan (tampil sekali) → kirim ke penerima lewat jalur aman. Salah kirim / batal: *Cabut*. Tidak ada email otomatis. Pensiun akun: *Nonaktifkan* lalu (opsional) *Hapus*.
+
 Terkunci keluar (HP authenticator hilang, kebijakan menyala): admin lain → Pengguna → *Reset 2FA*; bila tidak ada admin lain: `smscd admin reset-2fa --email …` di server. Pengguna lalu menyiapkan 2FA baru (kebijakan tetap berlaku). Karyawan keluar: *Nonaktifkan* (sesi langsung dicabut) — jangan hapus agar jejak audit tetap bermakna. Lupa password: *Set password* atau `smscd admin reset-password`. Tidak bisa mengubah akun sendiri; minta admin lain.
 
 ### R-07 Kunci/tailnet bermasalah

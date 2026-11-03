@@ -103,6 +103,8 @@ Daftar + editor: nama, isi, daftar variabel terdeteksi, penghitung segmen, tombo
 - **Daftar blokir**: tabel + tambah/impor + hapus.
 - **API key**: buat (nama, scope, kedaluwarsa) → secret tampil sekali dengan tombol salin; **Putar** (pilih masa tumpang tindih; kolom Rotasi menunjukkan sampai kapan secret lama sah); cabut.
 - **Pengguna**: tambah; ubah **peran** dari tabel (berlaku seketika); **Nonaktifkan/Aktifkan**; **Set password** (admin menetapkan, sesi pengguna dicabut); kolom **2FA** dan *Reset 2FA*. Baris akun sendiri tanpa kontrol ubah (server menolak, `user.self_change`).
+- **Undang pengguna** (di tab Pengguna): email + peran + masa berlaku → tautan tampil sekali (salin); daftar undangan (menunggu/diterima/kedaluwarsa/dicabut) dengan *Cabut*. Halaman publik `/invite/<token>`: tampilkan email & peran, penerima mengisi password (min. 12, diulang) → akun dibuat → ke halaman masuk. Token tidak valid → pesan seragam.
+- **Hapus** (baris pengguna): hanya muncul untuk akun nonaktif, dengan konfirmasi.
 - **Keamanan**: kebijakan 2FA — Opsional (default) / Wajib untuk admin / Wajib untuk semua, dengan hitungan pengguna dalam cakupan yang belum memakai 2FA. Akun yang digerbang melihat shell minimal berisi halaman Akun + banner; dashboard terbuka tanpa login ulang begitu 2FA aktif dan kode pemulihan sudah disimpan.
 - **Webhook**: buat/uji/riwayat/kirim ulang; **Putar secret** dengan masa tumpang tindih.
 - **Webhook** (fase 3), **Audit log** (filter aktor/aksi/tanggal, read-only).

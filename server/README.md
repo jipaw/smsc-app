@@ -3,11 +3,11 @@
 Go 1.24 + PostgreSQL 16. Satu biner: REST API, WebSocket device, SSE, dispatcher, reaper, dan dashboard (embed).
 Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 
-## Status (fase 1–5)
+## Status (fase 1–6)
 
 | Sudah | Belum (fase 4) |
 |---|---|
-| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | WebAuthn, SSO, hapus pengguna |
+| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | WebAuthn, SSO, email undangan |
 | Enrollment sekali pakai, registry device/SIM, revoke, perintah jarak jauh | Multi-instance (hanya leader tunggal via advisory lock) |
 | WS hub protokol v1 (hello + rekonsiliasi, heartbeat, sms.event idempoten, sim.report) | |
 | Kirim pesan (normalisasi E.164, GSM-7/UCS-2, template, suppression, Idempotency-Key, `client_ref`) | |
@@ -16,6 +16,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | Mesin status satu pintu, retry + backoff, cancel/retry manual, transaksi + timeline, ekspor CSV aman | |
 | Policy berlapis (global/device/SIM/pesan) + CRUD + tampilan efektif, SSE dengan replay, statistik, audit log | |
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
+| **Fase 6**: undangan pengguna (`/invitations`, tautan sekali pakai) dan `DELETE /users/{id}` (harus dinonaktifkan dahulu) | |
 | **Fase 5**: kewajiban 2FA (`off`/`admin`/`all`, default `off`) dengan gerbang 403 `auth.mfa_setup_required`; manajemen pengguna (`PATCH /users/{id}`, `POST /users/{id}/password`) | |
 | **Fase 4**: 2FA TOTP (+ kode pemulihan, login dua tahap), ganti password, rotasi kredensial device / API key / secret webhook / `SESSION_SECRET` / kunci enkripsi | |
 | **Webhook (fase 3)**: outbox transaksional, HMAC-SHA256, retry/backoff, SSRF guard, riwayat + kirim ulang | |
@@ -58,6 +59,10 @@ smscd secrets reencrypt                               # setelah mengganti WEBHOO
 ```
 
 Endpoint: `POST /auth/login` → (2FA aktif) `{mfa_required, mfa_token}` → `POST /auth/login/verify`; `/auth/2fa`, `/auth/2fa/{setup,enable,disable,recovery-codes}`, `/auth/password`, `/users/{id}/2fa` (admin), `/api-keys/{id}/rotate`, `/webhooks/{id}/rotate-secret`, perintah device `rotate_credential`. Runbook: `docs/spec/10` R-06.
+
+## Undangan dan hapus pengguna (fase 6)
+
+`POST /invitations {email, role, ttl_hours?}` → `{token, invite_url}` (tampil sekali; `invite_url = PUBLIC_BASE_URL + /invite/<token>`). Publik (dibatasi laju): `POST /invitations/lookup {token}`, `POST /invitations/accept {token, password}`. Admin: `GET /invitations`, `DELETE /invitations/{id}`, `DELETE /users/{id}` (setelah `PATCH disabled`). Tidak ada pengiriman email.
 
 ## Kewajiban 2FA dan manajemen pengguna (fase 5)
 

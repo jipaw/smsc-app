@@ -1158,6 +1158,19 @@ paths:
       responses:
         '201': {description: Dibuat}
   /users/{userId}:
+    delete:
+      tags: [Admin]
+      summary: Hapus pengguna (harus sudah dinonaktifkan)
+      description: |
+        Dua langkah agar tidak tak sengaja: nonaktifkan dahulu (`PATCH disabled=true`). Sesi dan kode pemulihan ikut terhapus;
+        `created_by` pada API key/webhook/campaign menjadi null (objeknya tetap ada); audit log tetap menyimpan email pelaku.
+        Akun sendiri ditolak.
+      parameters:
+        - {name: userId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Dihapus}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: 'Akun sendiri (`user.self_change`) atau belum dinonaktifkan (`user.must_disable_first`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
     patch:
       tags: [Admin]
       summary: Ubah peran / nonaktifkan pengguna lain
@@ -1216,6 +1229,112 @@ paths:
       responses:
         '204': {description: Direset}
         '404': {$ref: '#/components/responses/NotFound'}
+  /invitations:
+    get:
+      tags: [Admin]
+      summary: Daftar undangan (200 terbaru; tanpa token)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Invitation'}}
+    post:
+      tags: [Admin]
+      summary: Buat undangan pengguna (tautan sekali pakai)
+      description: |
+        Tidak ada pengiriman email: admin membagikan `invite_url` (tampil sekali). Penerima menetapkan passwordnya sendiri.
+        Undangan baru untuk email yang sama mencabut yang lama. Email yang sudah menjadi pengguna → 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: {type: string, format: email}
+                role: {$ref: '#/components/schemas/Role'}
+                ttl_hours: {type: integer, minimum: 1, maximum: 720, default: 168}
+      responses:
+        '201':
+          description: Dibuat
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/InvitationCreated'}
+        '409': {description: 'Email sudah terdaftar', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  /invitations/{invitationId}:
+    delete:
+      tags: [Admin]
+      summary: Cabut undangan
+      parameters:
+        - {name: invitationId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Dicabut}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: 'Sudah dipakai atau dicabut (`invitation.not_pending`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  /invitations/lookup:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Periksa token undangan (halaman undangan, publik)
+      description: Semua kegagalan (tak dikenal, kedaluwarsa, dicabut, sudah dipakai) menjawab seragam 404 `invitation.invalid`. Dibatasi laju seperti login.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: {type: string}
+      responses:
+        '200':
+          description: Undangan berlaku
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/InvitationInfo'}
+        '404': {description: 'Tidak valid (`invitation.invalid`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /invitations/accept:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Terima undangan dan buat akun (publik)
+      description: |
+        Atomik: pengguna dibuat dan undangan ditandai terpakai dalam satu transaksi. Password < 12 karakter (422) atau email yang
+        sudah terdaftar (409) tidak menghabiskan undangan. Tidak membuat sesi; pengguna lalu login seperti biasa.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: {type: string}
+                password: {type: string, format: password, minLength: 12}
+      responses:
+        '201':
+          description: Akun dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, email, role]
+                properties:
+                  id: {type: string, format: uuid}
+                  email: {type: string, format: email}
+                  role: {$ref: '#/components/schemas/Role'}
+        '404': {description: 'Tidak valid (`invitation.invalid`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '409': {description: 'Email sudah terdaftar', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
   /settings/security:
     get:
       tags: [Admin]
@@ -1638,6 +1757,33 @@ components:
           properties:
             disabled: {type: boolean}
             created_at: {type: string, format: date-time}
+    Invitation:
+      type: object
+      required: [id, email, role, status, created_at, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        role: {$ref: '#/components/schemas/Role'}
+        status: {type: string, enum: [pending, accepted, expired, revoked]}
+        created_by: {type: [string, 'null'], description: 'Email pembuat (null bila akunnya sudah dihapus).'}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        accepted_at: {type: [string, 'null'], format: date-time}
+    InvitationCreated:
+      allOf:
+        - $ref: '#/components/schemas/Invitation'
+        - type: object
+          required: [token, invite_url]
+          properties:
+            token: {type: string, description: 'Tampil sekali. Hanya hash yang disimpan.'}
+            invite_url: {type: string, description: 'PUBLIC_BASE_URL + /invite/<token>; bagikan ke penerima lewat jalur aman.'}
+    InvitationInfo:
+      type: object
+      required: [email, role, expires_at]
+      properties:
+        email: {type: string, format: email}
+        role: {$ref: '#/components/schemas/Role'}
+        expires_at: {type: string, format: date-time}
     SecuritySettings:
       type: object
       required: [require_2fa, users_missing_2fa]

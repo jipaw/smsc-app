@@ -79,6 +79,8 @@ func (a *API) Router() http.Handler {
 		// publik
 		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/login", a.login)
 		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/login/verify", a.loginVerify)
+		r.With(a.limit(a.loginLimit, clientIP)).Post("/invitations/lookup", a.lookupInvitation)
+		r.With(a.limit(a.loginLimit, clientIP)).Post("/invitations/accept", a.acceptInvitation)
 		r.With(a.limit(a.enrollLimit, clientIP)).Post("/device/enroll", a.deviceEnroll)
 
 		// device agent
@@ -150,6 +152,10 @@ func (a *API) Router() http.Handler {
 			r.With(admin).Post("/users", a.createUser)
 			r.With(admin).Delete("/users/{userId}/2fa", a.resetUserMFA)
 			r.With(admin).Patch("/users/{userId}", a.patchUser)
+			r.With(admin).Delete("/users/{userId}", a.deleteUser)
+			r.With(admin).Get("/invitations", a.listInvitations)
+			r.With(admin).Post("/invitations", a.createInvitation)
+			r.With(admin).Delete("/invitations/{invitationId}", a.revokeInvitation)
 			r.With(admin).Post("/users/{userId}/password", a.setUserPassword)
 			r.With(admin).Get("/settings/security", a.getSecurity)
 			r.With(admin).Put("/settings/security", a.setSecurity)

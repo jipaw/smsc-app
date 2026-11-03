@@ -14,12 +14,15 @@ import { Templates } from './pages/Templates'
 import { CampaignDetail, CampaignWizard, Campaigns } from './pages/Campaigns'
 import { Settings } from './pages/Settings'
 import { Account } from './pages/Account'
+import { Invite } from './pages/Invite'
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined) // undefined = memeriksa sesi
   useEffect(() => {
     get<Me>('/auth/me').then((m) => { setCsrf(m.csrf_token); setMe(m) }).catch((e) => { if (e instanceof ApiError && e.status === 401) setMe(null); else setMe(null) })
   }, [])
+  const inviteToken = window.location.pathname.startsWith('/invite/') ? decodeURIComponent(window.location.pathname.slice('/invite/'.length)) : ''
+  if (inviteToken) return <Invite token={inviteToken} />
   if (me === undefined) return <div style={{ padding: 24 }}><Loading what="sesi" /></div>
   if (me === null) return <Login onLogin={setMe} />
   const refreshMe = async () => { const m = await get<Me>('/auth/me'); setCsrf(m.csrf_token); setMe(m) }

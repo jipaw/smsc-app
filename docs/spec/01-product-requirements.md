@@ -72,6 +72,8 @@ Prioritas: **M** = MVP (fase 1), **S** = fase 2, **C** = fase 3. Kriteria peneri
 | FR-24 | Rotasi kredensial tanpa downtime (device, API key, secret webhook, kunci server) | C | KP1 masa tumpang tindih: secret lama & baru sama-sama sah · KP2 rotasi device tidak dapat mengunci HP · KP3 secret baru tak pernah muncul di log/audit |
 | FR-25 | Kewajiban 2FA yang dapat dinyalakan admin (default nonaktif) | C | KP1 default `off` · KP2 akun dalam cakupan tanpa 2FA hanya mencapai endpoint akun, termasuk sesi yang sudah ada · KP3 admin tanpa 2FA tidak bisa menyalakannya · KP4 API key tidak terpengaruh |
 | FR-26 | Manajemen pengguna: ubah peran, nonaktifkan, admin menetapkan password | C | KP1 peran berlaku seketika · KP2 nonaktif mencabut sesi & menolak login · KP3 tidak bisa mengubah diri sendiri · KP4 semuanya diaudit |
+| FR-27 | Undangan pengguna: tautan sekali pakai, penerima menetapkan password sendiri | C | KP1 token tampil sekali, hanya hash disimpan · KP2 sekali pakai (aman terhadap penerimaan paralel) · KP3 kedaluwarsa/dicabut/digantikan → ditolak seragam · KP4 password pendek/email bentrok tidak menghabiskan undangan |
+| FR-28 | Hapus pengguna (harus dinonaktifkan dahulu) | C | KP1 sesi hilang, objek buatannya tetap ada · KP2 audit tetap memuat email pelaku · KP3 akun sendiri ditolak |
 
 ## 4. Kebutuhan non-fungsional
 

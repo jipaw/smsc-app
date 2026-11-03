@@ -40,6 +40,20 @@ CREATE TABLE user_recovery_codes (
   PRIMARY KEY (user_id, code_hash)
 );
 
+CREATE TABLE invitations (
+  id               uuid PRIMARY KEY,
+  email            text NOT NULL,
+  role             user_role NOT NULL,
+  token_hash       bytea NOT NULL UNIQUE,
+  created_by       uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  expires_at       timestamptz NOT NULL,
+  accepted_at      timestamptz,
+  accepted_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  revoked_at       timestamptz
+);
+CREATE INDEX invitations_email_idx ON invitations (lower(email));
+
 CREATE TABLE sessions (
   id          uuid PRIMARY KEY,
   user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
