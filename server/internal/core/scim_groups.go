@@ -154,6 +154,9 @@ func (s *Service) LastSCIMReconcile(ctx context.Context) SCIMReconcileState {
 }
 
 func (s *Service) reconcileOnce(ctx context.Context) {
+	if !s.SCIMEnabled() || len(s.Cfg.SCIM.GroupRoles) == 0 {
+		return // tidak ada yang direkonsiliasi: jangan mencatat run (metrik/alert tidak muncul untuk deployment tanpa SCIM grup)
+	}
 	n, err := s.ReconcileSCIMRoles(ctx)
 	if ctx.Err() != nil {
 		return
@@ -161,8 +164,13 @@ func (s *Service) reconcileOnce(ctx context.Context) {
 	st := SCIMReconcileState{At: time.Now().UTC(), Changed: n}
 	if err != nil {
 		st.Error = err.Error()
+		s.M.SCIMReconcileRuns.WithLabelValues("error").Inc()
 		s.Log.Error("rekonsiliasi peran SCIM gagal", "err", err)
-	} else if n > 0 {
+	} else {
+		s.M.SCIMReconcileRuns.WithLabelValues("ok").Inc()
+		s.M.SCIMReconcileChanged.Add(float64(n))
+	}
+	if err == nil && n > 0 {
 		s.Log.Info("rekonsiliasi peran SCIM", "diubah", n)
 	}
 	// "runs" dinaikkan atomik di SQL; kegagalan menyimpan hanya dicatat (tidak boleh menghentikan worker)

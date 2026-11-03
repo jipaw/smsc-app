@@ -4,9 +4,11 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -39,6 +41,9 @@ type Metrics struct {
 	RetentionRuns prometheus.Counter
 	RetentionRows *prometheus.CounterVec
 
+	SCIMReconcileRuns    *prometheus.CounterVec
+	SCIMReconcileChanged prometheus.Counter
+
 	ScrapeErrors prometheus.Counter
 }
 
@@ -64,9 +69,14 @@ func New(pool *pgxpool.Pool) *Metrics {
 	m.WebhookDuration = prometheus.NewHistogram(prometheus.HistogramOpts{Name: "smsc_webhook_delivery_duration_seconds", Help: "Durasi satu percobaan pengiriman webhook.", Buckets: []float64{.01, .05, .1, .25, .5, 1, 2.5, 5, 10}})
 	m.RetentionRuns = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_retention_runs_total", Help: "Eksekusi job retensi."})
 	m.RetentionRows = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_retention_rows_total", Help: "Baris yang dibersihkan/dianonimkan retensi menurut jenis."}, []string{"kind"})
+	m.SCIMReconcileRuns = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_scim_reconcile_runs_total", Help: "Run rekonsiliasi grup SCIM pada instance ini menurut hasil (ok|error)."}, []string{"result"})
+	m.SCIMReconcileChanged = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_scim_reconcile_changed_total", Help: "Pengguna yang perannya dikoreksi oleh rekonsiliasi SCIM (lonjakan = drift atau perubahan pemetaan)."})
+	for _, r := range []string{"ok", "error"} {
+		m.SCIMReconcileRuns.WithLabelValues(r) // seri ada sejak awal (0)
+	}
 	m.ScrapeErrors = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_scrape_errors_total", Help: "Kegagalan membaca metrik berbasis database saat scrape."})
 	for _, c := range []prometheus.Collector{m.HTTPRequests, m.HTTPDuration, m.MessagesCreated, m.Transitions, m.LeaseExpired, m.EventIngest, m.WSConnections, m.WSConnects, m.WSMessages,
-		m.DispatchAssignments, m.DispatchWait, m.CampaignMaterialized, m.WebhookDeliveries, m.EmailResults, m.WebhookDuration, m.RetentionRuns, m.RetentionRows, m.ScrapeErrors} {
+		m.DispatchAssignments, m.DispatchWait, m.CampaignMaterialized, m.WebhookDeliveries, m.EmailResults, m.WebhookDuration, m.RetentionRuns, m.RetentionRows, m.SCIMReconcileRuns, m.SCIMReconcileChanged, m.ScrapeErrors} {
 		f(c)
 	}
 	f(collectors.NewGoCollector())
@@ -100,11 +110,13 @@ var (
 	dWHOldest     = prometheus.NewDesc("smsc_webhook_oldest_pending_age_seconds", "Umur pengiriman webhook tertunda tertua.", nil, nil)
 	dBattery      = prometheus.NewDesc("smsc_device_battery_percent", "Level baterai terakhir device online/degraded.", []string{"device", "name"}, nil)
 	dCharging     = prometheus.NewDesc("smsc_device_charging", "1 bila device sedang mengisi daya.", []string{"device", "name"}, nil)
+	dScimLast     = prometheus.NewDesc("smsc_scim_reconcile_last_run_timestamp_seconds", "Waktu run rekonsiliasi SCIM terakhir (dari database; seri tidak ada sebelum run pertama).", nil, nil)
+	dScimOK       = prometheus.NewDesc("smsc_scim_reconcile_last_run_ok", "1 bila run rekonsiliasi SCIM terakhir berhasil, 0 bila gagal (dari database).", nil, nil)
 	dPool         = prometheus.NewDesc("smsc_db_pool_connections", "Koneksi pool database menurut state.", []string{"state"}, nil)
 )
 
 func (c *dbCollector) Describe(ch chan<- *prometheus.Desc) {
-	for _, d := range []*prometheus.Desc{dDevices, dSims, dQueue, dInflight, dOldest, dLag, dCampaigns, dWHPending, dWHOldest, dEmailPending, dEmailOldest, dBattery, dCharging, dPool} {
+	for _, d := range []*prometheus.Desc{dDevices, dSims, dQueue, dInflight, dOldest, dLag, dCampaigns, dWHPending, dWHOldest, dEmailPending, dEmailOldest, dScimLast, dScimOK, dBattery, dCharging, dPool} {
 		ch <- d
 	}
 }
@@ -203,5 +215,17 @@ func (c *dbCollector) query() []prometheus.Metric {
 	}
 	add(dEmailPending, float64(ePend))
 	add(dEmailOldest, eAge)
+	var scimAt float64
+	var scimErr string
+	if err := c.pool.QueryRow(ctx, `SELECT extract(epoch FROM (value->>'at')::timestamptz), COALESCE(value->>'error','') FROM settings WHERE key='scim_reconcile_last'`).Scan(&scimAt, &scimErr); err == nil {
+		add(dScimLast, scimAt)
+		ok := 1.0
+		if scimErr != "" {
+			ok = 0
+		}
+		add(dScimOK, ok)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		c.m.ScrapeErrors.Inc()
+	}
 	return out
 }

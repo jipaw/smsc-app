@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,5 +135,54 @@ func TestSCIMReconcileStatusPersistedInDB(t *testing.T) {
 	s.admin.c.do("GET", "/api/v1/settings/scim", nil, &v)
 	if v.Last == nil {
 		t.Fatal("settings harus memuat last_reconcile dari DB")
+	}
+}
+
+// metrik: counter run/changed di leader, gauge dari DB (timestamp, ok); tanpa SCIM grup tidak ada run tercatat.
+func TestSCIMReconcileMetrics(t *testing.T) {
+	s := newSCIMGroups(t)
+	s.e.svc.Cfg.SCIMReconcileInterval = 0
+	ctx := context.Background()
+	u := s.user("metrik@contoh.id", nil)
+	s.group("Gateway Ops", map[string]any{"members": members(u)})
+	_, _ = s.e.pool.Exec(ctx, `UPDATE users SET role='viewer' WHERE id=$1`, u)
+
+	fams, _ := scrape(t, s.e)
+	if v, ok := metricValue(fams, "smsc_scim_reconcile_runs_total", map[string]string{"result": "ok"}); !ok || v != 0 {
+		t.Fatalf("seri awal harus ada (0): %v %v", v, ok)
+	}
+	if _, ok := metricValue(fams, "smsc_scim_reconcile_last_run_ok", nil); ok {
+		t.Fatal("gauge tidak boleh ada sebelum run pertama")
+	}
+	s.e.svc.RunSCIMReconcile(ctx)
+	time.Sleep(5200 * time.Millisecond) // cache DB metrik 5 dtk
+	fams, body := scrape(t, s.e)
+	if v, _ := metricValue(fams, "smsc_scim_reconcile_runs_total", map[string]string{"result": "ok"}); v != 1 {
+		t.Fatalf("runs ok: %v", v)
+	}
+	if v, _ := metricValue(fams, "smsc_scim_reconcile_changed_total", nil); v != 1 {
+		t.Fatalf("changed: %v", v)
+	}
+	if v, ok := metricValue(fams, "smsc_scim_reconcile_last_run_ok", nil); !ok || v != 1 {
+		t.Fatalf("last_run_ok: %v %v", v, ok)
+	}
+	if v, _ := metricValue(fams, "smsc_scim_reconcile_last_run_timestamp_seconds", nil); time.Since(time.Unix(int64(v), 0)) > time.Minute {
+		t.Fatalf("timestamp: %v", v)
+	}
+	if strings.Contains(body, "metrik@contoh.id") {
+		t.Fatal("metrik tidak boleh memuat PII")
+	}
+	// run gagal tercatat: simulasikan dengan status error di DB → gauge ok=0
+	_, _ = s.e.pool.Exec(ctx, `UPDATE settings SET value = value || '{"error":"x"}' WHERE key='scim_reconcile_last'`)
+	time.Sleep(5200 * time.Millisecond)
+	fams, _ = scrape(t, s.e)
+	if v, _ := metricValue(fams, "smsc_scim_reconcile_last_run_ok", nil); v != 0 {
+		t.Fatalf("ok harus 0 saat error: %v", v)
+	}
+	// tanpa pemetaan grup: tidak ada run baru tercatat
+	s.e.svc.Cfg.SCIM.GroupRoles = map[string]string{}
+	s.e.svc.RunSCIMReconcile(ctx)
+	if st := s.e.svc.LastSCIMReconcile(ctx); st.Runs != 1 {
+		t.Fatalf("tanpa pemetaan tidak boleh mencatat run: %+v", st)
 	}
 }

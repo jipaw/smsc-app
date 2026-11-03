@@ -96,3 +96,13 @@ groups:
         expr: smsc_email_oldest_pending_age_seconds > 900
         labels: {severity: warning}
         annotations: {summary: "Email tertunda > 15 menit di outbox (SMTP bermasalah?)"}
+      - alert: SmscScimReconcileFailing
+        expr: smsc_scim_reconcile_last_run_ok == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "Rekonsiliasi grup SCIM terakhir gagal — lihat Pengaturan > SCIM dan log (guard admin terakhir / DB)"}
+      - alert: SmscScimReconcileStale
+        expr: time() - smsc_scim_reconcile_last_run_timestamp_seconds > 10800
+        for: 10m
+        labels: {severity: info}
+        annotations: {summary: "Rekonsiliasi grup SCIM tidak berjalan > 3 jam (leader mati atau SCIM_RECONCILE_INTERVAL=0; abaikan bila memang hanya saat start)"}
