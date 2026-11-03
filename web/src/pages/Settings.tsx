@@ -3,10 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get, patch, post, put } from '../lib/api'
 import { fmtTime } from '../lib/format'
 import { isAdmin, useMe } from '../lib/session'
-import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, Invitation, EmailConfig, SSOView, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
+import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, Invitation, EmailConfig, SSOView, ScimSettings, ScimToken, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
 import { Empty, ErrorBox, errMsg, Field, Loading, Modal, useToast } from '../components/ui'
 
-const TABS = ['Policy', 'Daftar blokir', 'API key', 'Webhook', 'Retensi', 'Keamanan', 'SSO', 'Email', 'Pengguna', 'Audit'] as const
+const TABS = ['Policy', 'Daftar blokir', 'API key', 'Webhook', 'Retensi', 'Keamanan', 'SSO', 'SCIM', 'Email', 'Pengguna', 'Audit'] as const
 
 export function Settings() {
   const me = useMe()
@@ -16,7 +16,7 @@ export function Settings() {
     <div className="stack">
       <h1>Pengaturan</h1>
       <div className="tabs" role="tablist">{TABS.map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{t}</button>)}</div>
-      {tab === 'Policy' && <Policies />}{tab === 'Daftar blokir' && <Suppressions />}{tab === 'API key' && <ApiKeys />}{tab === 'Webhook' && <Webhooks />}{tab === 'Retensi' && <Retention />}{tab === 'Keamanan' && <Security />}{tab === 'SSO' && <SSOSettings />}{tab === 'Email' && <EmailSettings />}{tab === 'Pengguna' && <Users />}{tab === 'Audit' && <Audit />}
+      {tab === 'Policy' && <Policies />}{tab === 'Daftar blokir' && <Suppressions />}{tab === 'API key' && <ApiKeys />}{tab === 'Webhook' && <Webhooks />}{tab === 'Retensi' && <Retention />}{tab === 'Keamanan' && <Security />}{tab === 'SSO' && <SSOSettings />}{tab === 'SCIM' && <ScimSettingsTab />}{tab === 'Email' && <EmailSettings />}{tab === 'Pengguna' && <Users />}{tab === 'Audit' && <Audit />}
     </div>
   )
 }
@@ -144,7 +144,7 @@ function Users() {
         return (
           <tr key={u.id}><td>{u.email}{self && <span className="muted"> (Anda)</span>}</td>
             <td>{self ? u.role : <select aria-label={`Peran ${u.email}`} value={u.role} onChange={(e) => edit.mutate({ id: u.id, body: { role: e.target.value as Role } })}><option>admin</option><option>operator</option><option>viewer</option></select>}</td>
-            <td>{u.disabled ? 'nonaktif' : 'aktif'}{u.sso_linked && <span className="badge muted" title="Tertaut ke SSO"> SSO</span>}{u.has_password === false && <span className="muted" title="Hanya bisa masuk lewat SSO"> · tanpa password</span>}</td><td>{u.mfa_enabled ? 'aktif' : '—'}</td>
+            <td>{u.disabled ? 'nonaktif' : 'aktif'}{u.sso_linked && <span className="badge muted" title="Tertaut ke SSO"> SSO</span>}{u.scim_managed && <span className="badge muted" title="Diprovisi IdP lewat SCIM"> SCIM</span>}{u.has_password === false && <span className="muted" title="Hanya bisa masuk lewat SSO"> · tanpa password</span>}</td><td>{u.mfa_enabled ? 'aktif' : '—'}</td>
             <td className="right"><span className="row">
               {!self && <button className="small" onClick={() => { setPwFor(u); setNewPw('') }}>Set password</button>}
               {!self && <button className={`small${u.disabled ? '' : ' danger'}`} onClick={() => (u.disabled || window.confirm(`Nonaktifkan ${u.email}? Semua sesinya dikeluarkan.`)) && edit.mutate({ id: u.id, body: { disabled: !u.disabled } })}>{u.disabled ? 'Aktifkan' : 'Nonaktifkan'}</button>}
@@ -196,6 +196,46 @@ function Invitations() {
               <td className="right"><span className="row">{mailOk && (i.status === 'pending' || i.status === 'expired') && <button className="small" disabled={resend.isPending} onClick={() => window.confirm(`Buat undangan baru untuk ${i.email} dan kirim ulang? Tautan lama tidak berlaku lagi.`) && resend.mutate(i)}>Kirim ulang</button>}{(i.status === 'pending' || i.status === 'expired') && <button className="small danger" onClick={() => revoke.mutate(i.id)}>Cabut</button>}</span></td></tr>))}
         </tbody></table></div>)}
     </section>
+  )
+}
+
+function ScimSettingsTab() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const cfg = useQuery({ queryKey: ['scim'], queryFn: () => get<ScimSettings>('/settings/scim') })
+  const tokens = useQuery({ queryKey: ['scim-tokens'], queryFn: () => get<{ items: ScimToken[] }>('/scim-tokens'), enabled: !!cfg.data?.enabled })
+  const [name, setName] = useState('')
+  const [secret, setSecret] = useState('')
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['scim-tokens'] }); qc.invalidateQueries({ queryKey: ['scim'] }) }
+  const create = useMutation({ mutationFn: () => post<ScimToken>('/scim-tokens', { name }), onSuccess: (t) => { setSecret(t.token ?? ''); setName(''); refresh() } })
+  const revoke = useMutation({ mutationFn: (id: string) => del(`/scim-tokens/${id}`), onSuccess: () => { toast('Token SCIM dicabut'); refresh() } })
+  if (cfg.isLoading) return <Loading what="pengaturan SCIM" />
+  if (!cfg.data) return <ErrorBox error={cfg.error} />
+  const c = cfg.data
+  return (
+    <div className="card stack" aria-label="Pengaturan SCIM">
+      <h2>Provisioning SCIM 2.0</h2>
+      {!c.enabled ? (
+        <p className="muted">SCIM belum diaktifkan. Atur <span className="mono">SCIM_ENABLED=true</span> di server lalu restart. Dengan SCIM, IdP (Okta, Entra ID, Keycloak, dll.) membuat, mengubah, dan menonaktifkan pengguna di sini secara otomatis.</p>
+      ) : (
+        <>
+          <dl><dt>SCIM base URL (isi di IdP)</dt><dd className="mono">{c.base_url}</dd><dt>Peran bawaan</dt><dd>{c.default_role}</dd>
+            <dt>Boleh memberi peran admin</dt><dd>{c.allow_admin_role ? 'ya' : 'tidak (disarankan)'}</dd>
+            <dt>Mengelola pengguna lokal yang sudah ada</dt><dd>{c.adopt_existing ? 'ya' : 'tidak — hanya pengguna yang dibuat SCIM'}</dd><dt>Pengguna terkelola</dt><dd>{c.managed_users}</dd></dl>
+          <h3>Token</h3>
+          <div className="row"><Field label="Nama token"><input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="okta-prod" /></Field>
+            <button className="primary" disabled={!name || create.isPending} onClick={() => create.mutate()}>Buat token</button></div>
+          <ErrorBox error={create.error} />
+          {secret && <div className="okbox" role="status">Salin sekarang, tidak akan ditampilkan lagi:<br /><span className="mono" data-testid="scim-token">{secret}</span> <button className="small" onClick={() => navigator.clipboard?.writeText(secret)}>Salin</button></div>}
+          {tokens.data && tokens.data.items.length > 0 && (
+            <div className="scroll-x"><table><thead><tr><th>Nama</th><th>Dibuat</th><th>Terakhir dipakai</th><th /></tr></thead><tbody>
+              {tokens.data.items.map((t) => <tr key={t.id}><td>{t.name}</td><td className="muted">{fmtTime(t.created_at)}</td><td className="muted">{t.last_used_at ? fmtTime(t.last_used_at) : '—'}</td>
+                <td className="right"><button className="small danger" onClick={() => window.confirm(`Cabut token "${t.name}"? IdP yang memakainya berhenti menyinkronkan.`) && revoke.mutate(t.id)}>Cabut</button></td></tr>)}
+            </tbody></table></div>)}
+        </>
+      )}
+      <p className="muted">Pengguna SCIM tidak punya password dan masuk lewat SSO. Menonaktifkan di IdP (active=false) mencabut sesinya seketika. Profil lengkap: <span className="mono">contracts/scim.md</span>.</p>
+    </div>
   )
 }
 

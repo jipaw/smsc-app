@@ -173,8 +173,8 @@ func (s *Service) UpdateUser(ctx context.Context, actor, id uuid.UUID, p UserPat
 		}
 	}
 	var u UserItem
-	err := s.Pool.QueryRow(ctx, `SELECT id,email,role,tailscale_login,`+mfaAny("users")+`,password_hash IS NOT NULL,oidc_subject IS NOT NULL,disabled,created_at FROM users WHERE id=$1`, id).
-		Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.HasPassword, &u.SSOLinked, &u.Disabled, &u.CreatedAt)
+	err := s.Pool.QueryRow(ctx, `SELECT id,email,role,tailscale_login,`+mfaAny("users")+`,password_hash IS NOT NULL,oidc_subject IS NOT NULL,disabled,created_at,scim_managed FROM users WHERE id=$1`, id).
+		Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.HasPassword, &u.SSOLinked, &u.Disabled, &u.CreatedAt, &u.SCIMManaged)
 	return u, change, err
 }
 

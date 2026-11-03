@@ -3,11 +3,11 @@
 Go 1.24 + PostgreSQL 16. Satu biner: REST API, WebSocket device, SSE, dispatcher, reaper, dan dashboard (embed).
 Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 
-## Status (fase 1–11)
+## Status (fase 1–12)
 
 | Sudah | Belum (fase 4) |
 |---|---|
-| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | back-channel logout, SCIM |
+| Auth admin (argon2id, sesi, CSRF, lockout), RBAC admin/operator/viewer, API key bertingkat scope | back-channel logout, SCIM Group |
 | Enrollment sekali pakai, registry device/SIM, revoke, perintah jarak jauh | Multi-instance (hanya leader tunggal via advisory lock) |
 | WS hub protokol v1 (hello + rekonsiliasi, heartbeat, sms.event idempoten, sim.report) | |
 | Kirim pesan (normalisasi E.164, GSM-7/UCS-2, template, suppression, Idempotency-Key, `client_ref`) | |
@@ -16,6 +16,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | Mesin status satu pintu, retry + backoff, cancel/retry manual, transaksi + timeline, ekspor CSV aman | |
 | Policy berlapis (global/device/SIM/pesan) + CRUD + tampilan efektif, SSE dengan replay, statistik, audit log | |
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
+| **Fase 12**: SCIM 2.0 `User` di `/scim/v2` (token khusus, filter, PATCH Azure/Okta, pengaman admin) | |
 | **Fase 11**: SSO OIDC (code + PKCE): `/auth/oidc/login|callback|link`, `/settings/sso`; penyediaan otomatis & pemetaan grup opsional | |
 | **Fase 10**: login tanpa password dengan passkey (opt-in admin): `/auth/passkey/begin|finish`, `/auth/methods`, `passkey:true` pada pendaftaran | |
 | **Fase 9**: WebAuthn (kunci keamanan / passkey) sebagai faktor kedua: `/auth/webauthn*`, `/auth/login/webauthn/*` | |
@@ -64,6 +65,17 @@ smscd secrets reencrypt                               # setelah mengganti WEBHOO
 ```
 
 Endpoint: `POST /auth/login` → (2FA aktif) `{mfa_required, mfa_token}` → `POST /auth/login/verify`; `/auth/2fa`, `/auth/2fa/{setup,enable,disable,recovery-codes}`, `/auth/password`, `/users/{id}/2fa` (admin), `/api-keys/{id}/rotate`, `/webhooks/{id}/rotate-secret`, perintah device `rotate_credential`. Runbook: `docs/spec/10` R-06.
+
+## SCIM 2.0 (fase 12)
+
+| Env | Default | Arti |
+|---|---|---|
+| `SCIM_ENABLED` | `false` | Aktifkan `/scim/v2` dan pembuatan token |
+| `SCIM_DEFAULT_ROLE` | `viewer` | Peran bila `roles` tidak diberikan (`viewer`/`operator`) |
+| `SCIM_ALLOW_ADMIN_ROLE` | `false` | Izinkan SCIM memberi/mengubah peran admin |
+| `SCIM_ADOPT_EXISTING` | `false` | Pengguna lokal yang sudah ada terlihat dan dapat dikelola SCIM |
+
+Token: Pengaturan > SCIM atau `POST /api/v1/scim-tokens`. Base URL untuk IdP: `PUBLIC_BASE_URL/scim/v2`. Profil + pemetaan: `contracts/scim.md`.
 
 ## SSO OIDC (fase 11)
 

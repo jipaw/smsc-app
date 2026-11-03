@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (107 operasi)
+# Daftar endpoint (111 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -138,6 +138,10 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `GET` | `/invitations` | Daftar undangan (200 terbaru; tanpa token) | apiKey/sessionCookie | 200 |
 | `POST` | `/invitations` | Buat undangan pengguna (tautan sekali pakai) | apiKey/sessionCookie | 201,409,422 |
 | `DELETE` | `/invitations/{invitationId}` | Cabut undangan | apiKey/sessionCookie | 204,404,409 |
+| `GET` | `/scim-tokens` | Daftar token SCIM aktif (tanpa nilai token) | apiKey/sessionCookie | 200 |
+| `POST` | `/scim-tokens` | Buat token SCIM untuk IdP | apiKey/sessionCookie | 201,409,422 |
+| `DELETE` | `/scim-tokens/{tokenId}` | Cabut token SCIM | apiKey/sessionCookie | 204,404 |
+| `GET` | `/settings/scim` | Konfigurasi SCIM yang aktif | apiKey/sessionCookie | 200 |
 | `GET` | `/settings/sso` | Konfigurasi SSO OIDC yang aktif (tanpa rahasia) | apiKey/sessionCookie | 200 |
 | `GET` | `/settings/email` | Pengaturan SMTP yang sedang aktif (tanpa kredensial) | apiKey/sessionCookie | 200 |
 | `POST` | `/settings/email/test` | Kirim email uji (langsung, tanpa outbox) | apiKey/sessionCookie | 200,409,422,429,502 |

@@ -289,13 +289,14 @@ func (s *Service) oidcLogin(ctx context.Context, res OIDCResult, issuer string, 
 		}
 		var existing uuid.UUID
 		var existingSub *string
-		var existingDisabled bool
-		e2 := s.Pool.QueryRow(ctx, `SELECT id, oidc_subject, disabled FROM users WHERE lower(email)=$1`, email).Scan(&existing, &existingSub, &existingDisabled)
+		var existingDisabled, existingSCIM bool
+		e2 := s.Pool.QueryRow(ctx, `SELECT id, oidc_subject, disabled, scim_managed FROM users WHERE lower(email)=$1`, email).Scan(&existing, &existingSub, &existingDisabled, &existingSCIM)
 		linkedNow := false
 		switch {
 		case e2 == nil:
 			// email sudah milik pengguna lokal: tautkan hanya bila diizinkan eksplisit DAN belum tertaut ke identitas IdP lain
-			if !s.Cfg.OIDC.LinkByEmail || existingSub != nil {
+			// pengguna yang diprovisi SCIM oleh IdP yang sama dipercaya untuk ditautkan lewat email terverifikasi (tanpa password, ini satu-satunya cara masuk)
+			if (!s.Cfg.OIDC.LinkByEmail && !existingSCIM) || existingSub != nil {
 				return res, oerr("not_linked", "email %s sudah terdaftar; tautkan dari halaman Akun atau aktifkan OIDC_LINK_BY_EMAIL", email)
 			}
 			if existingDisabled {
@@ -305,7 +306,7 @@ func (s *Service) oidcLogin(ctx context.Context, res OIDCResult, issuer string, 
 			if err != nil || ct.RowsAffected() != 1 {
 				return res, oerr("conflict", "gagal menautkan (sudah tertaut oleh proses lain?): %v", err)
 			}
-			s.Audit(ctx, "oidc:"+email, "auth.oidc_link", "user", existing.String(), map[string]any{"via": "email", "issuer": issuer})
+			s.Audit(ctx, "oidc:"+email, "auth.oidc_link", "user", existing.String(), map[string]any{"via": map[bool]string{true: "scim", false: "email"}[existingSCIM], "issuer": issuer})
 			// muat ulang SEKALI (tanpa rekursi) sebagai pengguna tertaut
 			if err := s.Pool.QueryRow(ctx, `SELECT id,email,role,tailscale_login,`+mfaAny("users")+`,password_hash IS NOT NULL FROM users WHERE id=$1`, existing).
 				Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.HasPassword); err != nil {

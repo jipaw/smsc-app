@@ -220,10 +220,49 @@ def noredir(method, path, expect=None):
     return status, loc
 
 
+
+SCIM_USER_SCHEMA = {"type": "object", "required": ["schemas", "id", "userName", "active", "meta", "roles"],
+                    "properties": {"schemas": {"type": "array", "contains": {"const": "urn:ietf:params:scim:schemas:core:2.0:User"}},
+                                   "id": {"type": "string", "format": "uuid"}, "userName": {"type": "string"}, "active": {"type": "boolean"},
+                                   "externalId": {"type": "string"}, "displayName": {"type": "string"},
+                                   "roles": {"type": "array", "items": {"type": "object", "required": ["value"], "properties": {"value": {"enum": ["viewer", "operator", "admin"]}}}},
+                                   "emails": {"type": "array", "items": {"type": "object", "required": ["value"]}},
+                                   "meta": {"type": "object", "required": ["resourceType", "created", "lastModified", "location"], "properties": {"resourceType": {"const": "User"}}}}}
+SCIM_LIST_SCHEMA = {"type": "object", "required": ["schemas", "totalResults", "startIndex", "itemsPerPage", "Resources"],
+                    "properties": {"schemas": {"type": "array", "contains": {"const": "urn:ietf:params:scim:api:messages:2.0:ListResponse"}},
+                                   "totalResults": {"type": "integer"}, "Resources": {"type": "array", "items": SCIM_USER_SCHEMA}}}
+SCIM_ERR_SCHEMA = {"type": "object", "required": ["schemas", "status", "detail"],
+                   "properties": {"schemas": {"type": "array", "contains": {"const": "urn:ietf:params:scim:api:messages:2.0:Error"}}, "status": {"type": "string"}}}
+
+
+def scim(token, method, path, body=None, expect=None, schema=None):
+    """Permintaan SCIM (tanpa cookie), respons divalidasi terhadap skema inline (RFC 7643/7644)."""
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(URL + "/scim/v2" + path, data=data, method=method, headers={"Content-Type": "application/scim+json", "Authorization": "Bearer " + token})
+    try:
+        r = urllib.request.build_opener().open(req, timeout=15)
+        status, ct, payload = r.status, r.headers.get("Content-Type", ""), r.read()
+    except urllib.error.HTTPError as e:
+        status, ct, payload = e.code, e.headers.get("Content-Type", ""), e.read()
+    parsed = json.loads(payload) if payload else None
+    global checked
+    checked += 1
+    if expect is not None and status != expect:
+        problems.append(f"SCIM {method} {path}: status {status}, diharapkan {expect}: {payload[:200]!r}")
+    if payload and not ct.startswith("application/scim+json"):
+        problems.append(f"SCIM {method} {path}: Content-Type {ct!r} bukan application/scim+json")
+    if status >= 400 and payload:
+        schema = SCIM_ERR_SCHEMA
+    if schema and parsed is not None:
+        for e in Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(parsed):
+            problems.append(f"SCIM {method} {path} -> {status}: {'/'.join(map(str, e.path))}: {e.message}")
+    return status, parsed
+
+
 def main():
     psql(f"CREATE DATABASE {DB}")
     env = dict(os.environ, DATABASE_URL=DSN, PUBLIC_BASE_URL="http://example.test", SESSION_SECRET="s" * 40,
-               HTTP_ADDR=f"127.0.0.1:{PORT}", AUTO_MIGRATE="true", SECURE_COOKIES="false", REQUIRE_VPN="false", LOGIN_BURST="60", LOGIN_RATE_PER_MIN="600")
+               HTTP_ADDR=f"127.0.0.1:{PORT}", AUTO_MIGRATE="true", SECURE_COOKIES="false", REQUIRE_VPN="false", LOGIN_BURST="60", LOGIN_RATE_PER_MIN="600", SCIM_ENABLED="true")
     admin_pw = "kontrak-pagar-biru-12"
     subprocess.run([BIN, "migrate"], env=env, check=True, capture_output=True)
     subprocess.run([BIN, "admin", "create", "--email", "admin@ct.test", "--password", admin_pw], env=env, check=True, capture_output=True)
@@ -527,6 +566,35 @@ def run_checks(pw):
     call("POST", "/api/v1/auth/oidc/link", {}, 404)
     call("DELETE", "/api/v1/auth/oidc/link", expect=409)
     call("GET", "/api/v1/settings/sso", expect=200)
+
+    # SCIM 2.0 (fase 12): SCIM diaktifkan pada server kontrak
+    call("GET", "/api/v1/settings/scim", expect=200)
+    call("POST", "/api/v1/scim-tokens", {"name": ""}, 422)
+    st, tk = call("POST", "/api/v1/scim-tokens", {"name": "kontrak"}, 201)
+    call("GET", "/api/v1/scim-tokens", expect=200)
+    T = tk["token"]
+    scim("smsc_scim_ngawur", "GET", "/Users", expect=401)
+    scim(T, "GET", "/ServiceProviderConfig", expect=200)
+    scim(T, "GET", "/ResourceTypes", expect=200)
+    scim(T, "GET", "/Schemas", expect=200)
+    st, u = scim(T, "POST", "/Users", {"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "scim-kontrak@ct.test", "externalId": "x-1",
+                 "displayName": "Kontrak", "name": {"givenName": "A", "familyName": "B"}, "roles": [{"value": "operator"}]}, 201, SCIM_USER_SCHEMA)
+    uid = u["id"]
+    scim(T, "POST", "/Users", {"userName": "scim-kontrak@ct.test"}, 409)
+    scim(T, "POST", "/Users", {"userName": "bukan-email"}, 400)
+    scim(T, "GET", f"/Users/{uid}", expect=200, schema=SCIM_USER_SCHEMA)
+    scim(T, "GET", f"/Users/{uuid.uuid4()}", expect=404)
+    scim(T, "GET", '/Users?filter=userName%20eq%20%22scim-kontrak%40ct.test%22', expect=200, schema=SCIM_LIST_SCHEMA)
+    scim(T, "GET", "/Users?filter=userName%20co%20%22x%22", expect=400)
+    scim(T, "GET", "/Users?startIndex=1&count=1", expect=200, schema=SCIM_LIST_SCHEMA)
+    scim(T, "PUT", f"/Users/{uid}", {"schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"], "userName": "scim-kontrak@ct.test", "displayName": "Baru"}, 200, SCIM_USER_SCHEMA)
+    scim(T, "PATCH", f"/Users/{uid}", {"schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], "Operations": [{"op": "Replace", "path": "active", "value": "False"}]}, 200, SCIM_USER_SCHEMA)
+    scim(T, "PATCH", f"/Users/{uid}", {"schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], "Operations": [{"op": "replace", "path": "nope", "value": 1}]}, 400)
+    scim(T, "DELETE", f"/Users/{uid}", expect=204)
+    scim(T, "GET", f"/Users/{uid}", expect=404)
+    st, lt = call("GET", "/api/v1/scim-tokens", expect=200)
+    call("DELETE", f"/api/v1/scim-tokens/{lt['items'][0]['id']}", expect=204)
+    scim(T, "GET", "/Users", expect=401)
 
     # revoke di akhir
     call("DELETE", f"/api/v1/devices/{dev}", expect=204)

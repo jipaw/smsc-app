@@ -1612,6 +1612,69 @@ paths:
         '409': {description: 'Email sudah terdaftar', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+  /scim-tokens:
+    get:
+      tags: [Admin]
+      summary: Daftar token SCIM aktif (tanpa nilai token)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ScimToken'}}
+    post:
+      tags: [Admin]
+      summary: Buat token SCIM untuk IdP
+      description: |
+        Token (`smsc_scim_…`) tampil sekali; hanya hash yang disimpan. Hanya berlaku di `/scim/v2` (bukan REST ini), dan sebaliknya
+        sesi/API key tidak berlaku di SCIM. SCIM harus diaktifkan di server (`SCIM_ENABLED=true`), jika tidak 409 `scim.not_enabled`.
+        Profil SCIM yang didukung: `contracts/scim.md`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, maxLength: 60, example: okta-prod}
+      responses:
+        '201':
+          description: Dibuat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ScimToken'
+                  - type: object
+                    required: [token]
+                    properties:
+                      token: {type: string}
+        '409': {description: 'SCIM belum diaktifkan (`scim.not_enabled`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  /scim-tokens/{tokenId}:
+    delete:
+      tags: [Admin]
+      summary: Cabut token SCIM
+      parameters:
+        - {name: tokenId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Dicabut}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /settings/scim:
+    get:
+      tags: [Admin]
+      summary: Konfigurasi SCIM yang aktif
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ScimSettings'}
   /settings/sso:
     get:
       tags: [Admin]
@@ -2091,6 +2154,7 @@ components:
           properties:
             disabled: {type: boolean}
             created_at: {type: string, format: date-time}
+            scim_managed: {type: boolean, description: 'Diprovisi/dikelola IdP lewat SCIM.'}
     Invitation:
       type: object
       required: [id, email, role, status, created_at, expires_at]
@@ -2120,6 +2184,25 @@ components:
         email: {type: string, format: email}
         role: {$ref: '#/components/schemas/Role'}
         expires_at: {type: string, format: date-time}
+    ScimToken:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        created_at: {type: string, format: date-time}
+        last_used_at: {type: [string, 'null'], format: date-time}
+        created_by: {type: [string, 'null'], description: 'Email pembuat'}
+    ScimSettings:
+      type: object
+      required: [enabled, allow_admin_role, adopt_existing, managed_users]
+      properties:
+        enabled: {type: boolean}
+        base_url: {type: string, description: 'Isi di IdP sebagai SCIM connector base URL.'}
+        default_role: {type: string}
+        allow_admin_role: {type: boolean, description: 'SCIM boleh memberi/mengubah peran admin (default false).'}
+        adopt_existing: {type: boolean, description: 'Pengguna lokal yang ada terlihat/dapat dikelola SCIM (default false).'}
+        managed_users: {type: integer}
     SSOView:
       type: object
       required: [enabled, auto_provision, link_by_email, sync_roles, trust_idp_mfa, allowed_domains, linked_users]

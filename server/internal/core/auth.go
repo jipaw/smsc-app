@@ -251,17 +251,18 @@ func (s *Service) RevokeAPIKey(ctx context.Context, id uuid.UUID) error {
 // UserItem: baris daftar pengguna (admin).
 type UserItem struct {
 	User
-	Disabled  bool      `json:"disabled"`
-	CreatedAt time.Time `json:"created_at"`
+	Disabled    bool      `json:"disabled"`
+	CreatedAt   time.Time `json:"created_at"`
+	SCIMManaged bool      `json:"scim_managed"` // diprovisi/dikelola IdP lewat SCIM
 }
 
 func (s *Service) ListUsers(ctx context.Context) ([]UserItem, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id,email,role,tailscale_login,`+mfaAny("users")+`,password_hash IS NOT NULL,oidc_subject IS NOT NULL,disabled,created_at FROM users ORDER BY created_at`)
+	rows, err := s.Pool.Query(ctx, `SELECT id,email,role,tailscale_login,`+mfaAny("users")+`,password_hash IS NOT NULL,oidc_subject IS NOT NULL,disabled,created_at,scim_managed FROM users ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (UserItem, error) {
 		var u UserItem
-		return u, r.Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.HasPassword, &u.SSOLinked, &u.Disabled, &u.CreatedAt)
+		return u, r.Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.HasPassword, &u.SSOLinked, &u.Disabled, &u.CreatedAt, &u.SCIMManaged)
 	})
 }

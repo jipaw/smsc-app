@@ -127,3 +127,24 @@ func TestOIDCMisconfigurationFailsFast(t *testing.T) {
 		t.Fatalf("OIDC_ALLOW_INSECURE: %v", err)
 	}
 }
+
+func TestSCIMConfig(t *testing.T) {
+	base(t)
+	for _, k := range []string{"SCIM_ENABLED", "SCIM_DEFAULT_ROLE", "SCIM_ALLOW_ADMIN_ROLE", "SCIM_ADOPT_EXISTING"} {
+		t.Setenv(k, "")
+	}
+	c, err := Load()
+	if err != nil || c.SCIM.Enabled || c.SCIM.AllowAdminRole || c.SCIM.AdoptExisting || c.SCIM.DefaultRole != "viewer" {
+		t.Fatalf("default: %v %+v", err, c.SCIM)
+	}
+	t.Setenv("SCIM_ENABLED", "true")
+	t.Setenv("SCIM_DEFAULT_ROLE", "Operator")
+	c, err = Load()
+	if err != nil || !c.SCIM.Enabled || c.SCIM.DefaultRole != "operator" {
+		t.Fatalf("aktif: %v %+v", err, c.SCIM)
+	}
+	t.Setenv("SCIM_DEFAULT_ROLE", "admin")
+	if _, err := Load(); err == nil {
+		t.Fatal("peran bawaan admin harus ditolak")
+	}
+}

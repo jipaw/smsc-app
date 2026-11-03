@@ -41,6 +41,7 @@ Sumber kebenaran skema: [`contracts/openapi.yaml`](../../contracts/openapi.yaml)
 | `auth.mfa_setup_required` | 403 | Kebijakan mewajibkan 2FA untuk akun ini; hanya endpoint akun yang terbuka |
 | `security.enroll_first` | 409 | Admin yang menyalakan kewajiban 2FA harus sudah memakai 2FA |
 | `user.must_disable_first` | 409 | Hapus pengguna hanya untuk akun yang sudah dinonaktifkan |
+| `scim.not_enabled` | 409 | Membuat token SCIM padahal SCIM_ENABLED=false |
 | `sso.not_configured` | 404 | SSO OIDC belum dikonfigurasi |
 | `sso.unavailable` | 502 | IdP tidak terjangkau (saat memulai penautan) |
 | `sso.not_linked` | 409 | Akun tidak tertaut ke SSO |
@@ -105,6 +106,8 @@ Login dengan kunci keamanan: `POST /auth/login` → `{mfa_required, mfa_token, m
 Login tanpa password (passkey, bila diizinkan admin): `POST /auth/passkey/begin` → `{ceremony_id, options}` → `navigator.credentials.get()` → `POST /auth/passkey/finish {ceremony_id, credential}`; tanpa `mfa_token` dan tanpa langkah kedua. Pendaftaran passkey: `register/begin` dengan `passkey:true`.
 
 SSO (bila dikonfigurasi): navigasi peramban `GET /auth/oidc/login?next=/path` → IdP → `GET /auth/oidc/callback` (selalu 302; gagal → `/?sso_error=<kode>`). Kode: `invalid_state`, `session_mismatch`, `denied`, `token`, `unavailable`, `not_linked`, `unverified_email`, `domain`, `disabled`, `conflict`, `link_conflict`. Penautan dari akun: `POST /auth/oidc/link` → `{url}`; lepas: `DELETE /auth/oidc/link`. `GET /auth/methods` (publik) memberi `oidc.enabled` + `oidc.name`.
+
+SCIM 2.0 (provisioning dari IdP) berada di `/scim/v2` dengan token khusus; galat berformat SCIM, bukan RFC 9457. Lihat `contracts/scim.md`. Manajemen token: `GET/POST /scim-tokens`, `DELETE /scim-tokens/{id}`, `GET /settings/scim`.
 
 ### 3.2 Kirim non-campaign (API key)
 

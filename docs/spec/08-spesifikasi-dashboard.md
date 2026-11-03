@@ -12,7 +12,7 @@ Campaigns ── wizard ── detail
 Kirim SMS
 Transaksi ── detail (drawer)
 Template
-Pengaturan ── Policy · Daftar blokir · API key · Pengguna · Webhook · Retensi · Keamanan · SSO · Email · Audit
+Pengaturan ── Policy · Daftar blokir · API key · Pengguna · Webhook · Retensi · Keamanan · SSO · SCIM · Email · Audit
 Akun (tautan email di header) ── Ganti password · 2FA
 ```
 
@@ -114,6 +114,7 @@ Daftar + editor: nama, isi, daftar variabel terdeteksi, penghitung segmen, tombo
 ### 4.9 Akun (semua peran)
 
 - **Kunci keamanan & passkey**: daftar (nama, ditambahkan, terakhir dipakai, lencana *passkey tersinkron*), *Tambah kunci* (nama + password → dialog browser), *Hapus* (password + kode TOTP/pemulihan). Peringatan bila WebAuthn tak tersedia (RP ID IP / browser tak mendukung / bukan HTTPS). Kunci pertama menampilkan kode pemulihan sekali.
+- **SCIM** (Pengaturan > SCIM, admin): status dan SCIM base URL untuk IdP, opsi aktif (peran bawaan, izin admin, adopsi), buat token (tampil sekali) / daftar / cabut. Daftar pengguna menandai akun yang dikelola SCIM.
 - **SSO**: halaman login menampilkan *Masuk dengan {nama IdP}* bila dikonfigurasi dan pesan galat ringkas dari `?sso_error`. Halaman Akun: bagian *Single sign-on* (Tertaut / Hubungkan akun SSO / Lepas tautan); akun SSO-saja tidak melihat form password/2FA. Pengaturan > **SSO** (admin): penyedia, Client ID, redirect URI yang harus didaftarkan, opsi aktif, jumlah tertaut, *Uji koneksi ke IdP*. Daftar pengguna: lencana *SSO* dan *tanpa password*.
 - **Passkey**: kotak centang *Daftarkan sebagai passkey* di formulir Tambah kunci (hanya muncul bila admin mengizinkan); lencana *passkey* pada daftar. **Halaman login**: tombol *Masuk dengan passkey* (hanya bila diizinkan admin dan browser mendukung) di bawah formulir password.
 - **Login langkah 2**: tombol *Gunakan kunci keamanan* bila akun punya kunci; di bawahnya kolom kode TOTP/pemulihan.

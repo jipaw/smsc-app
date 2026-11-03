@@ -39,6 +39,7 @@ type API struct {
 	enrollLimit *limiter
 	keyLimit    *limiter
 	userLimit   *limiter
+	scimLimit   *limiter // per token SCIM
 	acctLimit   *limiter // operasi sensitif akun (ganti password, 2FA), per pengguna
 }
 
@@ -50,7 +51,7 @@ func New(svc *core.Service, h *hub.Hub, b *bus.Bus, log *slog.Logger) *API {
 	if lb <= 0 {
 		lb = 5
 	}
-	return &API{Svc: svc, Hub: h, Bus: b, Log: log, acctLimit: newLimiter(2*lr/60, 2*lb),
+	return &API{Svc: svc, Hub: h, Bus: b, Log: log, acctLimit: newLimiter(2*lr/60, 2*lb), scimLimit: newLimiter(20, 40),
 		loginLimit: newLimiter(lr/60, lb), enrollLimit: newLimiter(10.0/60, 10), keyLimit: newLimiter(20, 40), userLimit: newLimiter(10, 20)}
 }
 
@@ -73,6 +74,21 @@ func (a *API) Router() http.Handler {
 	r.Get("/enroll/{token}", func(w http.ResponseWriter, req *http.Request) { // fallback web: kode untuk input manual
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("Buka aplikasi SMSC dan masukkan token ini:\n" + chi.URLParam(req, "token") + "\n"))
+	})
+
+	r.Route("/scim/v2", func(r chi.Router) {
+		r.Use(a.scimAuth)
+		r.Get("/ServiceProviderConfig", a.scimDiscoverySPC)
+		r.Get("/ResourceTypes", a.scimDiscoveryRT)
+		r.Get("/ResourceTypes/{id}", a.scimDiscoveryRT)
+		r.Get("/Schemas", a.scimDiscoverySchemas)
+		r.Get("/Schemas/{id}", a.scimDiscoverySchemas)
+		r.Get("/Users", a.scimListUsers)
+		r.Post("/Users", a.scimCreateUser)
+		r.Get("/Users/{id}", a.scimGetUser)
+		r.Put("/Users/{id}", a.scimReplaceUser)
+		r.Patch("/Users/{id}", a.scimPatchUser)
+		r.Delete("/Users/{id}", a.scimDeleteUser)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -171,6 +187,10 @@ func (a *API) Router() http.Handler {
 			r.With(admin).Delete("/invitations/{invitationId}", a.revokeInvitation)
 			r.With(admin).Post("/users/{userId}/password", a.setUserPassword)
 			r.With(admin).Get("/settings/sso", a.getSSO)
+			r.With(admin).Get("/settings/scim", a.getSCIMSettings)
+			r.With(admin).Get("/scim-tokens", a.listSCIMTokens)
+			r.With(admin).Post("/scim-tokens", a.createSCIMToken)
+			r.With(admin).Delete("/scim-tokens/{tokenId}", a.deleteSCIMToken)
 			r.With(admin).Get("/settings/email", a.getEmailConfig)
 			r.With(admin).With(a.limit(a.acctLimit, userKey)).Post("/settings/email/test", a.testEmail)
 			r.With(admin).Get("/settings/security", a.getSecurity)

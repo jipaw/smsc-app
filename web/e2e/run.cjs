@@ -107,7 +107,7 @@ async function main() {
   await new Promise((r) => idp.listen(IPORT, '127.0.0.1', r)); procs.push({ kill: () => idp.close() })
   psql(`CREATE DATABASE ${DB}`)
   const env = { ...process.env, DATABASE_URL: BASE.replace('/postgres?', `/${DB}?`), PUBLIC_BASE_URL: URL_, SESSION_SECRET: 's'.repeat(40), HTTP_ADDR: `127.0.0.1:${PORT}`,
-    AUTO_MIGRATE: 'true', SECURE_COOKIES: 'false', REQUIRE_VPN: 'false', DISPATCH_TICK: '300ms', WEBHOOK_ALLOW_LOOPBACK: 'true', METRICS_ADDR: `127.0.0.1:${MPORT}`, WEBHOOK_TICK: '300ms', OIDC_ISSUER: `http://localhost:${IPORT}`, OIDC_CLIENT_ID: 'smsc-e2e', OIDC_CLIENT_SECRET: 'rahasia-e2e', OIDC_NAME: 'IdP E2E', OIDC_AUTO_PROVISION: 'true', OIDC_ADMIN_GROUPS: 'e2e-admin', SMTP_HOST: '127.0.0.1', SMTP_PORT: String(SPORT), SMTP_MODE: 'none', SMTP_FROM: 'SMSC Gateway <smsc@e2e.test>', EMAIL_TICK: '300ms', LOGIN_BURST: '60', LOGIN_RATE_PER_MIN: '600', REAPER_INTERVAL: '500ms' }
+    AUTO_MIGRATE: 'true', SECURE_COOKIES: 'false', REQUIRE_VPN: 'false', DISPATCH_TICK: '300ms', WEBHOOK_ALLOW_LOOPBACK: 'true', METRICS_ADDR: `127.0.0.1:${MPORT}`, WEBHOOK_TICK: '300ms', SCIM_ENABLED: 'true', OIDC_ISSUER: `http://localhost:${IPORT}`, OIDC_CLIENT_ID: 'smsc-e2e', OIDC_CLIENT_SECRET: 'rahasia-e2e', OIDC_NAME: 'IdP E2E', OIDC_AUTO_PROVISION: 'true', OIDC_ADMIN_GROUPS: 'e2e-admin', SMTP_HOST: '127.0.0.1', SMTP_PORT: String(SPORT), SMTP_MODE: 'none', SMTP_FROM: 'SMSC Gateway <smsc@e2e.test>', EMAIL_TICK: '300ms', LOGIN_BURST: '60', LOGIN_RATE_PER_MIN: '600', REAPER_INTERVAL: '500ms' }
   execFileSync(BIN, ['migrate'], { env })
   execFileSync(BIN, ['admin', 'create', '--email', ADMIN, '--password', PW], { env })
   const srv = spawn(BIN, ['serve'], { env, stdio: 'ignore' }); procs.push(srv)
@@ -804,6 +804,50 @@ async function main() {
   await sp.getByText('tautan@e2e.test · operator').waitFor({ timeout: 20000 })
   check(true, 'sso: login SSO setelah penautan masuk sebagai pengguna lokal tersebut')
   await sctx.close()
+
+  // ---- SCIM: IdP memprovisi pengguna, pengguna masuk lewat SSO, deprovisioning mencabut sesi ----
+  await page.goto(URL_ + '/settings')
+  await page.getByRole('tab', { name: 'SCIM' }).click()
+  await page.getByText(`${URL_}/scim/v2`).waitFor()
+  await page.getByLabel('Nama token').fill('okta-e2e')
+  await page.getByRole('button', { name: 'Buat token' }).click()
+  const scimTok = (await page.getByTestId('scim-token').textContent()).trim()
+  check(/^smsc_scim_/.test(scimTok), 'scim: token dibuat admin dan tampil sekali')
+  await axeCheck(page, 'pengaturan SCIM')
+  const scim = async (m, p, body) => { const r = await fetch(URL_ + '/scim/v2' + p, { method: m, headers: { Authorization: 'Bearer ' + scimTok, 'Content-Type': 'application/scim+json' }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, json: await r.json().catch(() => null) } }
+  const created = await scim('POST', '/Users', { schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], userName: 'scim-user@e2e.test', externalId: 'okta-001', displayName: 'SCIM User', roles: [{ value: 'operator' }] })
+  check(created.status === 201 && created.json.active === true && created.json.roles[0].value === 'operator', 'scim: IdP membuat pengguna (201) dengan peran dari roles')
+  check((await scim('POST', '/Users', { userName: 'scim-user@e2e.test' })).status === 409, 'scim: userName ganda ditolak (409 uniqueness)')
+  check((await scim('POST', '/Users', { userName: 'x@e2e.test', roles: [{ value: 'admin' }] })).status === 400, 'scim: peran admin ditolak secara default')
+  await page.getByRole('tab', { name: 'Pengguna' }).click()
+  await page.getByRole('row').filter({ hasText: 'scim-user@e2e.test' }).getByText('SCIM', { exact: true }).waitFor()
+  check(true, 'scim: pengguna hasil provisioning ditandai SCIM di daftar pengguna')
+  // pengguna masuk lewat SSO (email terverifikasi menautkan otomatis)
+  idpUser = { sub: 'e2e-sub-scim', email: 'scim-user@e2e.test', email_verified: true, name: 'SCIM User', groups: [] }
+  const xctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+  const xp = await xctx.newPage()
+  await xp.goto(URL_ + '/')
+  await xp.getByRole('button', { name: 'Masuk dengan IdP E2E' }).click()
+  await xp.getByText('scim-user@e2e.test · operator').waitFor({ timeout: 20000 })
+  check(true, 'scim: pengguna hasil provisioning masuk lewat SSO (tertaut otomatis) tanpa password')
+  // deprovisioning (gaya Azure AD): sesi dicabut seketika
+  const off = await scim('PATCH', `/Users/${created.json.id}`, { schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'], Operations: [{ op: 'Replace', path: 'active', value: 'False' }] })
+  check(off.status === 200 && off.json.active === false, 'scim: PATCH active=False (gaya Azure AD) menonaktifkan pengguna')
+  await xp.reload()
+  await xp.getByRole('button', { name: 'Masuk dengan IdP E2E' }).waitFor({ timeout: 20000 })
+  check(true, 'scim: sesi pengguna yang dinonaktifkan IdP langsung tidak berlaku')
+  await xp.getByRole('button', { name: 'Masuk dengan IdP E2E' }).click()
+  await xp.getByRole('alert').filter({ hasText: /dinonaktifkan/ }).waitFor({ timeout: 20000 })
+  check(true, 'scim: login SSO ditolak untuk akun yang dinonaktifkan IdP')
+  await xctx.close()
+  check((await scim('DELETE', `/Users/${created.json.id}`)).status === 204 && (await scim('GET', `/Users/${created.json.id}`)).status === 404, 'scim: DELETE menghapus pengguna')
+  await page.reload(); await page.getByRole('tab', { name: 'Pengguna' }).click()
+  await page.getByRole('row').filter({ hasText: 'sso1@e2e.test' }).first().waitFor()
+  check((await page.getByRole('row').filter({ hasText: 'scim-user@e2e.test' }).count()) === 0, 'scim: pengguna terhapus hilang dari daftar')
+  await page.getByRole('tab', { name: 'SCIM' }).click()
+  await page.getByRole('row').filter({ hasText: 'okta-e2e' }).getByRole('button', { name: 'Cabut' }).click()
+  await until(async () => (await scim('GET', '/Users')).status === 401, 8000, 'token dicabut')
+  check(true, 'scim: token dicabut admin langsung ditolak')
 
   // ---- logout ----
   await page.goto(URL_ + '/'); await page.getByRole('button', { name: 'Keluar' }).click()

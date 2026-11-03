@@ -39,9 +39,11 @@ export interface MfaStatus { enabled: boolean; totp_enabled: boolean; webauthn_c
 export interface WebAuthnCred { id: string; name: string; created_at: string; last_used_at?: string | null; backed_up: boolean; passkey: boolean; transports: string[] }
 export interface WebAuthnList { enabled: boolean; rp_id?: string; credentials: WebAuthnCred[] }
 export interface SecuritySettings { require_2fa: 'off' | 'admin' | 'all'; passkey_login: boolean; users_missing_2fa: number }
-export interface UserItem { id: string; email: string; role: Role; mfa_enabled?: boolean; has_password?: boolean; sso_linked?: boolean; disabled: boolean; created_at: string }
+export interface UserItem { id: string; email: string; role: Role; mfa_enabled?: boolean; has_password?: boolean; sso_linked?: boolean; scim_managed?: boolean; disabled: boolean; created_at: string }
 export interface Invitation { id: string; email: string; role: Role; status: 'pending' | 'accepted' | 'expired' | 'revoked'; created_by?: string | null; created_at: string; expires_at: string; accepted_at?: string | null; token?: string; invite_url?: string; email_status?: 'queued' | 'sent' | 'failed' | 'cancelled' | null; email_error?: string | null }
 export interface EmailConfig { configured: boolean; host?: string; port?: number; mode?: string; from?: string; auth_enabled: boolean }
+export interface ScimToken { id: string; name: string; created_at: string; last_used_at?: string | null; created_by?: string | null; token?: string }
+export interface ScimSettings { enabled: boolean; base_url?: string; default_role?: string; allow_admin_role: boolean; adopt_existing: boolean; managed_users: number }
 export interface MfaSetup { secret: string; otpauth_uri: string }
 export interface Page<T> { items: T[]; next_cursor: string | null }
 export interface Overview {

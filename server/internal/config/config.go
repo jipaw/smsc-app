@@ -38,8 +38,17 @@ type OIDCConfig struct {
 
 func (o OIDCConfig) Enabled() bool { return o.Issuer != "" }
 
+// SCIMConfig: provisioning SCIM 2.0 dari IdP. Nonaktif secara default.
+type SCIMConfig struct {
+	Enabled        bool
+	DefaultRole    string // peran pengguna baru tanpa atribut roles: viewer|operator
+	AllowAdminRole bool   // izinkan SCIM memberi/mengubah peran admin (default false: kompromi IdP tidak boleh mencetak admin)
+	AdoptExisting  bool   // pengguna lokal yang sudah ada terlihat/dapat dikelola SCIM (default false)
+}
+
 type Config struct {
 	OIDC OIDCConfig
+	SCIM SCIMConfig
 
 	DatabaseURL          string
 	HTTPAddr             string
@@ -209,6 +218,11 @@ func Load() (Config, error) {
 	c.WebAuthnOrigins = splitList(os.Getenv("WEBAUTHN_ORIGINS"))
 	if len(c.WebAuthnOrigins) == 0 && c.PublicBaseURL != "" {
 		c.WebAuthnOrigins = []string{c.PublicBaseURL}
+	}
+	c.SCIM = SCIMConfig{Enabled: env("SCIM_ENABLED", "false") == "true", DefaultRole: strings.ToLower(env("SCIM_DEFAULT_ROLE", "viewer")),
+		AllowAdminRole: env("SCIM_ALLOW_ADMIN_ROLE", "false") == "true", AdoptExisting: env("SCIM_ADOPT_EXISTING", "false") == "true"}
+	if c.SCIM.Enabled && c.SCIM.DefaultRole != "viewer" && c.SCIM.DefaultRole != "operator" {
+		return c, fmt.Errorf("SCIM_DEFAULT_ROLE harus viewer atau operator")
 	}
 	if err := c.loadOIDC(); err != nil {
 		return c, err

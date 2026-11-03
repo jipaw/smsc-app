@@ -30,10 +30,15 @@ CREATE TABLE users (
   password_changed_at timestamptz,
   oidc_issuer         text,
   oidc_subject        text,
-  oidc_linked_at      timestamptz
+  oidc_linked_at      timestamptz,
+  scim_managed        boolean NOT NULL DEFAULT false,
+  scim_external_id    text,
+  scim_attrs          jsonb NOT NULL DEFAULT '{}',
+  scim_updated_at     timestamptz
 );
 CREATE UNIQUE INDEX users_email_uq ON users (lower(email));
 CREATE UNIQUE INDEX users_oidc_uq ON users (oidc_issuer, oidc_subject) WHERE oidc_subject IS NOT NULL;
+CREATE UNIQUE INDEX users_scim_external_uq ON users (scim_external_id) WHERE scim_external_id IS NOT NULL;
 CREATE UNIQUE INDEX users_ts_login_uq ON users (tailscale_login) WHERE tailscale_login IS NOT NULL;
 
 CREATE TABLE user_recovery_codes (
@@ -111,6 +116,16 @@ CREATE TABLE oidc_flows (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX oidc_flows_expires_idx ON oidc_flows (expires_at);
+
+CREATE TABLE scim_tokens (
+  id           uuid PRIMARY KEY,
+  name         text NOT NULL,
+  token_hash   bytea NOT NULL UNIQUE,
+  created_by   uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  last_used_at timestamptz,
+  revoked_at   timestamptz
+);
 
 CREATE TABLE sessions (
   id          uuid PRIMARY KEY,
