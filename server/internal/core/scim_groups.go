@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -134,7 +135,7 @@ func (s *Service) auditRoleChanges(ctx context.Context, actor, via string, ch []
 	}
 }
 
-// SCIMReconcileState: hasil rekonsiliasi terakhir pada instance ini (hanya leader yang menjalankannya).
+// SCIMReconcileState: hasil rekonsiliasi terakhir (disimpan di settings.scim_reconcile_last).
 type SCIMReconcileState struct {
 	At      time.Time `json:"at"`
 	Changed int       `json:"changed"`
@@ -142,10 +143,14 @@ type SCIMReconcileState struct {
 	Runs    int       `json:"runs"`
 }
 
-func (s *Service) LastSCIMReconcile() SCIMReconcileState {
-	s.reconMu.Lock()
-	defer s.reconMu.Unlock()
-	return s.reconState
+// LastSCIMReconcile membaca hasil run terakhir dari tabel settings (dibagi semua instance, bertahan melewati restart).
+func (s *Service) LastSCIMReconcile(ctx context.Context) SCIMReconcileState {
+	var st SCIMReconcileState
+	var raw []byte
+	if err := s.Pool.QueryRow(ctx, `SELECT value FROM settings WHERE key='scim_reconcile_last'`).Scan(&raw); err == nil {
+		_ = json.Unmarshal(raw, &st)
+	}
+	return st
 }
 
 func (s *Service) reconcileOnce(ctx context.Context) {
@@ -160,10 +165,12 @@ func (s *Service) reconcileOnce(ctx context.Context) {
 	} else if n > 0 {
 		s.Log.Info("rekonsiliasi peran SCIM", "diubah", n)
 	}
-	s.reconMu.Lock()
-	st.Runs = s.reconState.Runs + 1
-	s.reconState = st
-	s.reconMu.Unlock()
+	// "runs" dinaikkan atomik di SQL; kegagalan menyimpan hanya dicatat (tidak boleh menghentikan worker)
+	raw, _ := json.Marshal(st)
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO settings(key,value) VALUES ('scim_reconcile_last', $1::jsonb || '{"runs":1}'::jsonb)
+		ON CONFLICT (key) DO UPDATE SET value = $1::jsonb || jsonb_build_object('runs', COALESCE((settings.value->>'runs')::int,0)+1), updated_at=now()`, raw); err != nil && ctx.Err() == nil {
+		s.Log.Error("menyimpan status rekonsiliasi SCIM gagal", "err", err)
+	}
 }
 
 // RunSCIMReconcile menjalankan rekonsiliasi saat start lalu berkala (SCIM_RECONCILE_INTERVAL; <=0 = hanya sekali).

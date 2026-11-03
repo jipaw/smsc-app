@@ -51,7 +51,7 @@ func TestSCIMPeriodicReconcileFixesDrift(t *testing.T) {
 	// tunggu satu tick berkala tambahan (bukan hanya run awal)
 	var st SCIMReconcileState
 	for i := 0; i < 60; i++ {
-		if st = s.e.svc.LastSCIMReconcile(); st.Runs >= 4 {
+		if st = s.e.svc.LastSCIMReconcile(ctx); st.Runs >= 4 {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -93,7 +93,7 @@ func TestSCIMReconcileRunOnceAndStop(t *testing.T) {
 	if s.roleOfUser(u) != "operator" {
 		t.Fatalf("peran: %s", s.roleOfUser(u))
 	}
-	if st := s.e.svc.LastSCIMReconcile(); st.Runs != 1 || st.Changed != 1 {
+	if st := s.e.svc.LastSCIMReconcile(context.Background()); st.Runs != 1 || st.Changed != 1 {
 		t.Fatalf("state: %+v", st)
 	}
 	// konteks sudah batal: tidak mencatat state baru dan kembali
@@ -106,5 +106,33 @@ func TestSCIMReconcileRunOnceAndStop(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("harus berhenti saat ctx batal")
+	}
+}
+
+// status tersimpan di database: terbaca dari SQL langsung (jadi dari instance mana pun) dan runs bertambah atomik.
+func TestSCIMReconcileStatusPersistedInDB(t *testing.T) {
+	s := newSCIMGroups(t)
+	s.e.svc.Cfg.SCIMReconcileInterval = 0
+	ctx := context.Background()
+	if st := s.e.svc.LastSCIMReconcile(ctx); st.Runs != 0 {
+		t.Fatalf("awal: %+v", st)
+	}
+	var v struct {
+		Last *struct{} `json:"last_reconcile"`
+	}
+	s.admin.c.do("GET", "/api/v1/settings/scim", nil, &v)
+	if v.Last != nil {
+		t.Fatal("belum ada run: last_reconcile harus kosong")
+	}
+	s.e.svc.RunSCIMReconcile(ctx)
+	s.e.svc.RunSCIMReconcile(ctx)
+	var runs int
+	var errTxt string
+	if err := s.e.pool.QueryRow(ctx, `SELECT (value->>'runs')::int, COALESCE(value->>'error','') FROM settings WHERE key='scim_reconcile_last'`).Scan(&runs, &errTxt); err != nil || runs != 2 || errTxt != "" {
+		t.Fatalf("db: %d %q %v", runs, errTxt, err)
+	}
+	s.admin.c.do("GET", "/api/v1/settings/scim", nil, &v)
+	if v.Last == nil {
+		t.Fatal("settings harus memuat last_reconcile dari DB")
 	}
 }

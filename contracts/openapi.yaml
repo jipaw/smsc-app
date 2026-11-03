@@ -2232,12 +2232,12 @@ components:
         reconcile_interval_seconds: {type: integer, description: 'Interval rekonsiliasi berkala (SCIM_RECONCILE_INTERVAL); 0 = hanya saat start.'}
         last_reconcile:
           type: object
-          description: 'Rekonsiliasi terakhir pada instance yang melayani permintaan ini (hanya leader yang menjalankannya; kosong bila belum/bukan leader).'
+          description: 'Rekonsiliasi terakhir (disimpan di database, bertahan melewati restart); kosong bila belum pernah berjalan.'
           required: [at, changed, runs]
           properties:
             at: {type: string, format: date-time}
             changed: {type: integer, description: 'Jumlah pengguna yang perannya dikoreksi pada run itu.'}
-            runs: {type: integer, description: 'Jumlah run sejak proses start.'}
+            runs: {type: integer, description: 'Jumlah run kumulatif.'}
             error: {type: string, description: 'Pesan error run terakhir bila gagal.'}
     SSOView:
       type: object

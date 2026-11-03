@@ -137,7 +137,7 @@ type SCIMView struct {
 	// pemetaan grup → peran dari environment (nama grup huruf kecil); admin hanya muncul bila SCIM_ALLOW_ADMIN_ROLE
 	GroupRoles map[string]string `json:"group_roles"`
 	Groups     int               `json:"groups"`
-	// rekonsiliasi berkala (instance ini; hanya leader yang menjalankannya)
+	// rekonsiliasi berkala (status run terakhir tersimpan di database)
 	ReconcileIntervalSec int                 `json:"reconcile_interval_seconds"`
 	LastReconcile        *SCIMReconcileState `json:"last_reconcile,omitempty"`
 }
@@ -154,7 +154,7 @@ func (s *Service) SCIMConfig(ctx context.Context) SCIMView {
 			v.GroupRoles[g] = r
 		}
 		v.ReconcileIntervalSec = int(s.Cfg.SCIMReconcileInterval / time.Second)
-		if st := s.LastSCIMReconcile(); st.Runs > 0 {
+		if st := s.LastSCIMReconcile(ctx); st.Runs > 0 {
 			v.LastReconcile = &st
 		}
 	}

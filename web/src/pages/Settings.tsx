@@ -230,7 +230,7 @@ function ScimSettingsTab() {
             : <p className="muted">Pemetaan dari environment: {Object.entries(c.group_roles ?? {}).map(([g, r]) => `${g} → ${r}`).join(' · ')}</p>}
           {Object.keys(c.group_roles ?? {}).length > 0 && (
             <p className="muted" aria-label="Rekonsiliasi SCIM">Rekonsiliasi pemetaan: {c.reconcile_interval_seconds ? `tiap ${Math.round(c.reconcile_interval_seconds / 60)} menit` : 'hanya saat start'}
-              {c.last_reconcile ? ` · terakhir ${new Date(c.last_reconcile.at).toLocaleString()}, ${c.last_reconcile.changed} diubah${c.last_reconcile.error ? `, galat: ${c.last_reconcile.error}` : ''}` : ' · belum ada run di instance ini'}</p>)}
+              {c.last_reconcile ? ` · terakhir ${new Date(c.last_reconcile.at).toLocaleString()}, ${c.last_reconcile.changed} diubah${c.last_reconcile.error ? `, galat: ${c.last_reconcile.error}` : ''}` : ' · belum pernah berjalan'}</p>)}
           {groups.data && groups.data.items.length > 0 && (
             <div className="scroll-x"><table aria-label="Grup SCIM"><thead><tr><th>Grup dari IdP</th><th>Anggota</th><th>Peran hasil pemetaan</th></tr></thead><tbody>
               {groups.data.items.map((g) => <tr key={g.id}><td>{g.display_name}</td><td>{g.members}</td><td>{g.mapped_role ?? <span className="muted">tidak dipetakan</span>}</td></tr>)}
