@@ -52,8 +52,10 @@ PATCH grup: `add`/`replace`/`remove` pada `members` (array `value`), `remove` de
 
 Setiap perubahan grup (buat/ubah/hapus/anggota/nama) menghitung ulang peran semua anggota terdampak **dalam satu transaksi**; bila ada yang akan
 menurunkan **admin aktif terakhir**, seluruh perubahan dibatalkan (409 `mutability`). Akun admin tidak disentuh perubahan grup bila `SCIM_ALLOW_ADMIN_ROLE=false`.
-Perubahan peran akibat grup diaudit (`scim.user_update`, `via=group`). Saat server start (leader), pemetaan diterapkan ulang ke semua anggota grup
-(rekonsiliasi), sehingga mengubah `SCIM_*_GROUPS` lalu restart berlaku tanpa menunggu IdP.
+Perubahan peran akibat grup diaudit (`scim.user_update`, `via=group`). Saat server start (leader) lalu **setiap `SCIM_RECONCILE_INTERVAL`** (default 1 jam; `0` = hanya saat start),
+pemetaan diterapkan ulang ke semua anggota grup (rekonsiliasi): mengubah `SCIM_*_GROUPS` lalu restart berlaku tanpa menunggu IdP, dan penyimpangan
+(mis. peran diubah langsung di DB) dikoreksi tanpa restart. Run yang gagal (mis. guard admin terakhir) hanya dicatat dan diulang pada tick berikutnya;
+perubahan diaudit sebagai `scim.user_update` oleh `system` dengan `via=reconcile`.
 
 ## Aturan keamanan
 

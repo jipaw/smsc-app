@@ -95,8 +95,9 @@ type Config struct {
 	WebAuthnOrigins []string
 
 	// retensi & metrik (fase 3)
-	RetentionInterval time.Duration
-	MetricsAddr       string // listener terpisah; kosong = nonaktif
+	RetentionInterval     time.Duration
+	SCIMReconcileInterval time.Duration // 0 = hanya saat start
+	MetricsAddr           string        // listener terpisah; kosong = nonaktif
 }
 
 func env(k, def string) string {
@@ -117,36 +118,37 @@ func envDur(k string, def time.Duration) time.Duration {
 
 func Load() (Config, error) {
 	c := Config{
-		DatabaseURL:          os.Getenv("DATABASE_URL"),
-		HTTPAddr:             env("HTTP_ADDR", "127.0.0.1:8080"),
-		PublicBaseURL:        strings.TrimRight(os.Getenv("PUBLIC_BASE_URL"), "/"),
-		SessionSecret:        os.Getenv("SESSION_SECRET"),
-		DefaultRegion:        env("DEFAULT_REGION", "ID"),
-		TrustTailscale:       env("TRUST_TAILSCALE_HEADERS", "false") == "true",
-		AutoMigrate:          env("AUTO_MIGRATE", "false") == "true",
-		DispatchTick:         envDur("DISPATCH_TICK", 5*time.Second),
-		ReaperInterval:       envDur("REAPER_INTERVAL", 2*time.Second),
-		OfflineAfter:         envDur("OFFLINE_AFTER", 90*time.Second),
-		HeartbeatIntervalSec: 30,
-		EnrollTTL:            envDur("ENROLL_TTL", 15*time.Minute),
-		DeviceRotateGrace:    envDur("DEVICE_ROTATE_GRACE", 60*time.Second),
-		LoginRatePerMin:      envFloat("LOGIN_RATE_PER_MIN", 5),
-		LoginBurst:           envFloat("LOGIN_BURST", 5),
-		SecureCookies:        env("SECURE_COOKIES", "true") == "true",
-		RequireVPN:           env("REQUIRE_VPN", "true") == "true",
-		CampaignTick:         envDur("CAMPAIGN_TICK", time.Second),
-		NoCapacityAfter:      envDur("NO_CAPACITY_AFTER", 10*time.Minute),
-		CampaignQueueCap:     20000,
-		WebhookTimeout:       envDur("WEBHOOK_TIMEOUT", 10*time.Second),
-		WebhookBackoff:       []time.Duration{30 * time.Second, 2 * time.Minute, 10 * time.Minute, time.Hour, 6 * time.Hour},
-		WebhookAllowLoopback: env("WEBHOOK_ALLOW_LOOPBACK", "false") == "true",
-		WebhookKey:           os.Getenv("WEBHOOK_ENC_KEY"),
-		WebhookWorkers:       8,
-		WebhookTick:          envDur("WEBHOOK_TICK", time.Second),
-		EmailBackoff:         []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute, 2 * time.Hour},
-		EmailTick:            envDur("EMAIL_TICK", 2*time.Second),
-		RetentionInterval:    envDur("RETENTION_INTERVAL", time.Hour),
-		MetricsAddr:          env("METRICS_ADDR", "127.0.0.1:9090"),
+		DatabaseURL:           os.Getenv("DATABASE_URL"),
+		HTTPAddr:              env("HTTP_ADDR", "127.0.0.1:8080"),
+		PublicBaseURL:         strings.TrimRight(os.Getenv("PUBLIC_BASE_URL"), "/"),
+		SessionSecret:         os.Getenv("SESSION_SECRET"),
+		DefaultRegion:         env("DEFAULT_REGION", "ID"),
+		TrustTailscale:        env("TRUST_TAILSCALE_HEADERS", "false") == "true",
+		AutoMigrate:           env("AUTO_MIGRATE", "false") == "true",
+		DispatchTick:          envDur("DISPATCH_TICK", 5*time.Second),
+		ReaperInterval:        envDur("REAPER_INTERVAL", 2*time.Second),
+		OfflineAfter:          envDur("OFFLINE_AFTER", 90*time.Second),
+		HeartbeatIntervalSec:  30,
+		EnrollTTL:             envDur("ENROLL_TTL", 15*time.Minute),
+		DeviceRotateGrace:     envDur("DEVICE_ROTATE_GRACE", 60*time.Second),
+		LoginRatePerMin:       envFloat("LOGIN_RATE_PER_MIN", 5),
+		LoginBurst:            envFloat("LOGIN_BURST", 5),
+		SecureCookies:         env("SECURE_COOKIES", "true") == "true",
+		RequireVPN:            env("REQUIRE_VPN", "true") == "true",
+		CampaignTick:          envDur("CAMPAIGN_TICK", time.Second),
+		NoCapacityAfter:       envDur("NO_CAPACITY_AFTER", 10*time.Minute),
+		CampaignQueueCap:      20000,
+		WebhookTimeout:        envDur("WEBHOOK_TIMEOUT", 10*time.Second),
+		WebhookBackoff:        []time.Duration{30 * time.Second, 2 * time.Minute, 10 * time.Minute, time.Hour, 6 * time.Hour},
+		WebhookAllowLoopback:  env("WEBHOOK_ALLOW_LOOPBACK", "false") == "true",
+		WebhookKey:            os.Getenv("WEBHOOK_ENC_KEY"),
+		WebhookWorkers:        8,
+		WebhookTick:           envDur("WEBHOOK_TICK", time.Second),
+		EmailBackoff:          []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute, 2 * time.Hour},
+		EmailTick:             envDur("EMAIL_TICK", 2*time.Second),
+		RetentionInterval:     envDur("RETENTION_INTERVAL", time.Hour),
+		SCIMReconcileInterval: envDur("SCIM_RECONCILE_INTERVAL", time.Hour),
+		MetricsAddr:           env("METRICS_ADDR", "127.0.0.1:9090"),
 	}
 	if v, err := strconv.Atoi(env("HEARTBEAT_INTERVAL_SEC", "30")); err == nil {
 		c.HeartbeatIntervalSec = v

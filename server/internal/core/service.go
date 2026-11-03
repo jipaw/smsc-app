@@ -36,14 +36,16 @@ type DeviceLink interface {
 }
 
 type Service struct {
-	sec    secCache  // kebijakan keamanan (cache pendek)
-	waSt   waState   // instance WebAuthn (dibuat sekali)
-	oidcSt oidcState // discovery OIDC (di-cache)
-	Pool   *pgxpool.Pool
-	Cfg    config.Config
-	Log    *slog.Logger
-	Bus    *bus.Bus
-	M      *metrics.Metrics
+	sec        secCache  // kebijakan keamanan (cache pendek)
+	waSt       waState   // instance WebAuthn (dibuat sekali)
+	oidcSt     oidcState // discovery OIDC (di-cache)
+	reconMu    sync.Mutex
+	reconState SCIMReconcileState
+	Pool       *pgxpool.Pool
+	Cfg        config.Config
+	Log        *slog.Logger
+	Bus        *bus.Bus
+	M          *metrics.Metrics
 
 	link     DeviceLink
 	wake     chan struct{}

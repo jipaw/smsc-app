@@ -134,6 +134,57 @@ func (s *Service) auditRoleChanges(ctx context.Context, actor, via string, ch []
 	}
 }
 
+// SCIMReconcileState: hasil rekonsiliasi terakhir pada instance ini (hanya leader yang menjalankannya).
+type SCIMReconcileState struct {
+	At      time.Time `json:"at"`
+	Changed int       `json:"changed"`
+	Error   string    `json:"error,omitempty"`
+	Runs    int       `json:"runs"`
+}
+
+func (s *Service) LastSCIMReconcile() SCIMReconcileState {
+	s.reconMu.Lock()
+	defer s.reconMu.Unlock()
+	return s.reconState
+}
+
+func (s *Service) reconcileOnce(ctx context.Context) {
+	n, err := s.ReconcileSCIMRoles(ctx)
+	if ctx.Err() != nil {
+		return
+	}
+	st := SCIMReconcileState{At: time.Now().UTC(), Changed: n}
+	if err != nil {
+		st.Error = err.Error()
+		s.Log.Error("rekonsiliasi peran SCIM gagal", "err", err)
+	} else if n > 0 {
+		s.Log.Info("rekonsiliasi peran SCIM", "diubah", n)
+	}
+	s.reconMu.Lock()
+	st.Runs = s.reconState.Runs + 1
+	s.reconState = st
+	s.reconMu.Unlock()
+}
+
+// RunSCIMReconcile menjalankan rekonsiliasi saat start lalu berkala (SCIM_RECONCILE_INTERVAL; <=0 = hanya sekali).
+// Kegagalan (mis. guard admin terakhir, DB sesaat mati) hanya dicatat dan dicoba lagi pada tick berikutnya.
+func (s *Service) RunSCIMReconcile(ctx context.Context) {
+	s.reconcileOnce(ctx)
+	if s.Cfg.SCIMReconcileInterval <= 0 {
+		return
+	}
+	t := time.NewTicker(s.Cfg.SCIMReconcileInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.reconcileOnce(ctx)
+		}
+	}
+}
+
 // ReconcileSCIMRoles menerapkan ulang pemetaan ke semua pengguna terkelola (mis. setelah SCIM_*_GROUPS diubah dan server restart).
 func (s *Service) ReconcileSCIMRoles(ctx context.Context) (int, error) {
 	if !s.SCIMEnabled() || len(s.Cfg.SCIM.GroupRoles) == 0 {

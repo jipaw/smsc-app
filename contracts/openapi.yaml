@@ -2229,6 +2229,16 @@ components:
         managed_users: {type: integer}
         groups: {type: integer, description: 'Jumlah grup SCIM yang diterima.'}
         group_roles: {type: object, additionalProperties: {type: string, enum: [viewer, operator, admin]}, description: 'Pemetaan nama grup (huruf kecil) → peran dari environment.'}
+        reconcile_interval_seconds: {type: integer, description: 'Interval rekonsiliasi berkala (SCIM_RECONCILE_INTERVAL); 0 = hanya saat start.'}
+        last_reconcile:
+          type: object
+          description: 'Rekonsiliasi terakhir pada instance yang melayani permintaan ini (hanya leader yang menjalankannya; kosong bila belum/bukan leader).'
+          required: [at, changed, runs]
+          properties:
+            at: {type: string, format: date-time}
+            changed: {type: integer, description: 'Jumlah pengguna yang perannya dikoreksi pada run itu.'}
+            runs: {type: integer, description: 'Jumlah run sejak proses start.'}
+            error: {type: string, description: 'Pesan error run terakhir bila gagal.'}
     SSOView:
       type: object
       required: [enabled, auto_provision, link_by_email, sync_roles, trust_idp_mfa, allowed_domains, linked_users]
