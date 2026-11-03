@@ -28,6 +28,7 @@ const (
 var (
 	errWACeremony = NewProblem(http.StatusBadRequest, "webauthn.ceremony_invalid", "Upacara tidak valid", "sesi WebAuthn tidak ditemukan, sudah dipakai, atau kedaluwarsa; ulangi dari awal")
 	errWAFailed   = NewProblem(http.StatusUnauthorized, "auth.webauthn_failed", "Verifikasi kunci keamanan gagal", "kunci keamanan tidak dikenali atau respons tidak valid")
+	errPasskeyOff = NewProblem(http.StatusConflict, "passkey.disabled", "Login passkey dinonaktifkan", "admin belum mengizinkan login tanpa password dengan passkey (Pengaturan > Keamanan)")
 	errWADisabled = NewProblem(http.StatusConflict, "webauthn.not_available", "WebAuthn tidak tersedia", "RP ID server tidak valid (alamat IP?); atur WEBAUTHN_RP_ID dan PUBLIC_BASE_URL dengan nama domain")
 )
 
@@ -83,6 +84,7 @@ type WebAuthnCredential struct {
 	CreatedAt       time.Time  `json:"created_at"`
 	LastUsedAt      *time.Time `json:"last_used_at"`
 	BackedUp        bool       `json:"backed_up"` // passkey tersinkron (BS), mis. iCloud / Google
+	Passkey         bool       `json:"passkey"`   // dapat dipakai untuk login tanpa password
 	Transports      []string   `json:"transports"`
 	rawCredentialID []byte
 }
@@ -105,7 +107,7 @@ func (s *Service) loadWAUser(ctx context.Context, uid uuid.UUID, email string) (
 }
 
 func (s *Service) ListWebAuthn(ctx context.Context, uid uuid.UUID) ([]WebAuthnCredential, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id, name, created_at, last_used_at, data FROM webauthn_credentials WHERE user_id=$1 ORDER BY created_at`, uid)
+	rows, err := s.Pool.Query(ctx, `SELECT id, name, created_at, last_used_at, data, passkey FROM webauthn_credentials WHERE user_id=$1 ORDER BY created_at`, uid)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +116,7 @@ func (s *Service) ListWebAuthn(ctx context.Context, uid uuid.UUID) ([]WebAuthnCr
 	for rows.Next() {
 		var c WebAuthnCredential
 		var raw []byte
-		if err := rows.Scan(&c.ID, &c.Name, &c.CreatedAt, &c.LastUsedAt, &raw); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.CreatedAt, &c.LastUsedAt, &raw, &c.Passkey); err != nil {
 			return nil, err
 		}
 		var cred webauthn.Credential
@@ -130,7 +132,7 @@ func (s *Service) ListWebAuthn(ctx context.Context, uid uuid.UUID) ([]WebAuthnCr
 }
 
 // storeCeremony menyimpan state upacara (challenge dll.); sekali pakai dan berumur 5 menit.
-func (s *Service) storeCeremony(ctx context.Context, uid uuid.UUID, kind, name string, sd *webauthn.SessionData) (uuid.UUID, error) {
+func (s *Service) storeCeremony(ctx context.Context, uid *uuid.UUID, kind, name string, sd *webauthn.SessionData) (uuid.UUID, error) {
 	_, _ = s.Pool.Exec(ctx, `DELETE FROM webauthn_ceremonies WHERE expires_at < now()`)
 	raw, err := json.Marshal(sd)
 	if err != nil {
@@ -147,21 +149,19 @@ func (s *Service) storeCeremony(ctx context.Context, uid uuid.UUID, kind, name s
 }
 
 // takeCeremony mengambil DAN menghapus (atomik) — satu upacara hanya bisa diselesaikan sekali, juga bila gagal.
-func (s *Service) takeCeremony(ctx context.Context, id, uid uuid.UUID, kind string) (webauthn.SessionData, string, error) {
+// uid nil = upacara tanpa pengguna (login passkey). kinds: jenis yang diterima; yang cocok dikembalikan.
+func (s *Service) takeCeremony(ctx context.Context, id uuid.UUID, uid *uuid.UUID, kinds ...string) (sd webauthn.SessionData, name, kind string, err error) {
 	var raw []byte
-	var name *string
-	err := s.Pool.QueryRow(ctx, `DELETE FROM webauthn_ceremonies WHERE id=$1 AND user_id=$2 AND kind=$3 AND expires_at > now() RETURNING data, name`, id, uid, kind).Scan(&raw, &name)
-	if err != nil {
-		return webauthn.SessionData{}, "", errWACeremony
+	var n *string
+	e := s.Pool.QueryRow(ctx, `DELETE FROM webauthn_ceremonies WHERE id=$1 AND user_id IS NOT DISTINCT FROM $2::uuid AND kind = ANY($3) AND expires_at > now() RETURNING data, name, kind`,
+		id, uid, kinds).Scan(&raw, &n, &kind)
+	if e != nil || json.Unmarshal(raw, &sd) != nil {
+		return sd, "", "", errWACeremony
 	}
-	var sd webauthn.SessionData
-	if json.Unmarshal(raw, &sd) != nil {
-		return sd, "", errWACeremony
+	if n != nil {
+		name = *n
 	}
-	if name == nil {
-		return sd, "", nil
-	}
-	return sd, *name, nil
+	return sd, name, kind, nil
 }
 
 type WebAuthnBegin struct {
@@ -170,7 +170,7 @@ type WebAuthnBegin struct {
 }
 
 // WebAuthnRegisterBegin: butuh password (seperti menyiapkan TOTP). Kunci yang sudah terdaftar dikecualikan agar tidak ganda.
-func (s *Service) WebAuthnRegisterBegin(ctx context.Context, uid uuid.UUID, email, password, name string) (WebAuthnBegin, error) {
+func (s *Service) WebAuthnRegisterBegin(ctx context.Context, uid uuid.UUID, email, password, name string, passkey bool) (WebAuthnBegin, error) {
 	wa, err := s.webAuthn()
 	if err != nil {
 		return WebAuthnBegin{}, errWADisabled
@@ -192,11 +192,32 @@ func (s *Service) WebAuthnRegisterBegin(ctx context.Context, uid uuid.UUID, emai
 	if len(u.creds) >= waMaxCredentials {
 		return WebAuthnBegin{}, NewProblem(http.StatusConflict, "webauthn.limit", "Terlalu banyak kunci", "maksimal 10 kunci keamanan per akun; hapus yang tidak dipakai")
 	}
-	creation, sd, err := wa.BeginRegistration(u, webauthn.WithExclusions(webauthn.Credentials(u.creds).CredentialDescriptors()))
+	excl := u.creds
+	opts := []webauthn.RegistrationOption{}
+	kind := "register"
+	if passkey {
+		if !s.PasskeyLoginAllowed(ctx) {
+			return WebAuthnBegin{}, errPasskeyOff
+		}
+		// passkey = kredensial discoverable (resident) dengan verifikasi pengguna WAJIB; hanya kunci yang sudah passkey dikecualikan
+		excl = nil
+		for _, c := range u.creds {
+			if s.isPasskeyCred(ctx, uid, c.ID) {
+				excl = append(excl, c)
+			}
+		}
+		rk := true
+		opts = append(opts, webauthn.WithAuthenticatorSelection(protocol.AuthenticatorSelection{
+			ResidentKey: protocol.ResidentKeyRequirementRequired, RequireResidentKey: &rk, UserVerification: protocol.VerificationRequired,
+		}), webauthn.WithExtensions(protocol.AuthenticationExtensions{"credProps": true}))
+		kind = "register_passkey"
+	}
+	opts = append(opts, webauthn.WithExclusions(webauthn.Credentials(excl).CredentialDescriptors()))
+	creation, sd, err := wa.BeginRegistration(u, opts...)
 	if err != nil {
 		return WebAuthnBegin{}, err
 	}
-	cid, err := s.storeCeremony(ctx, uid, "register", name, sd)
+	cid, err := s.storeCeremony(ctx, &uid, kind, name, sd)
 	return WebAuthnBegin{CeremonyID: cid, Options: creation}, err
 }
 
@@ -207,9 +228,13 @@ func (s *Service) WebAuthnRegisterFinish(ctx context.Context, uid uuid.UUID, ema
 	if err != nil {
 		return WebAuthnCredential{}, nil, errWADisabled
 	}
-	sd, name, err := s.takeCeremony(ctx, ceremony, uid, "register")
+	sd, name, kind, err := s.takeCeremony(ctx, ceremony, &uid, "register", "register_passkey")
 	if err != nil {
 		return WebAuthnCredential{}, nil, err
+	}
+	passkey := kind == "register_passkey"
+	if passkey && !s.PasskeyLoginAllowed(ctx) {
+		return WebAuthnCredential{}, nil, errPasskeyOff
 	}
 	u, err := s.loadWAUser(ctx, uid, email)
 	if err != nil {
@@ -222,6 +247,22 @@ func (s *Service) WebAuthnRegisterFinish(ctx context.Context, uid uuid.UUID, ema
 	cred, err := wa.CreateCredential(u, sd, parsed)
 	if err != nil {
 		return WebAuthnCredential{}, nil, Validation(FieldError{"credential", "verifikasi pendaftaran gagal: " + shortErr(err)})
+	}
+	if passkey {
+		// verifikasi pengguna (PIN/biometrik) wajib agar passkey sah menggantikan password + faktor kedua
+		if !cred.Flags.UserVerified {
+			return WebAuthnCredential{}, nil, Validation(FieldError{"credential", "authenticator tidak melakukan verifikasi pengguna (PIN/biometrik); tidak dapat dipakai sebagai passkey"})
+		}
+		var ext struct {
+			Ext struct {
+				CredProps struct {
+					RK *bool `json:"rk"`
+				} `json:"credProps"`
+			} `json:"clientExtensionResults"`
+		}
+		if json.Unmarshal(credential, &ext) == nil && ext.Ext.CredProps.RK != nil && !*ext.Ext.CredProps.RK {
+			return WebAuthnCredential{}, nil, Validation(FieldError{"credential", "authenticator tidak membuat kredensial yang dapat ditemukan (resident key); gunakan sebagai kunci keamanan biasa"})
+		}
 	}
 	raw, err := json.Marshal(cred)
 	if err != nil {
@@ -236,11 +277,11 @@ func (s *Service) WebAuthnRegisterFinish(ctx context.Context, uid uuid.UUID, ema
 	if err := tx.QueryRow(ctx, `SELECT `+mfaAny("users")+` FROM users WHERE id=$1 FOR UPDATE`, uid).Scan(&hadMFA); err != nil {
 		return WebAuthnCredential{}, nil, err
 	}
-	out := WebAuthnCredential{ID: newID(), Name: name, CreatedAt: time.Now(), BackedUp: cred.Flags.BackupState, Transports: []string{}}
+	out := WebAuthnCredential{ID: newID(), Name: name, CreatedAt: time.Now(), BackedUp: cred.Flags.BackupState, Transports: []string{}, Passkey: passkey}
 	for _, t := range cred.Transport {
 		out.Transports = append(out.Transports, string(t))
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO webauthn_credentials(id,user_id,credential_id,name,data) VALUES ($1,$2,$3,$4,$5)`, out.ID, uid, cred.ID, name, raw); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO webauthn_credentials(id,user_id,credential_id,name,data,passkey) VALUES ($1,$2,$3,$4,$5,$6)`, out.ID, uid, cred.ID, name, raw, passkey); err != nil {
 		if isUnique(err, "") {
 			return WebAuthnCredential{}, nil, NewProblem(http.StatusConflict, "resource.conflict", "Konflik", "kunci keamanan ini sudah terdaftar")
 		}
@@ -317,7 +358,7 @@ func (s *Service) WebAuthnLoginBegin(ctx context.Context, mfaToken string) (WebA
 	if err != nil {
 		return WebAuthnBegin{}, err
 	}
-	cid, err := s.storeCeremony(ctx, cu.ID, "login", "", sd)
+	cid, err := s.storeCeremony(ctx, &cu.ID, "login", "", sd)
 	return WebAuthnBegin{CeremonyID: cid, Options: assertion}, err
 }
 
@@ -332,7 +373,7 @@ func (s *Service) WebAuthnLoginFinish(ctx context.Context, mfaToken string, cere
 	if err != nil {
 		return LoginResult{}, err
 	}
-	sd, _, err := s.takeCeremony(ctx, ceremony, cu.ID, "login")
+	sd, _, _, err := s.takeCeremony(ctx, ceremony, &cu.ID, "login")
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -369,3 +410,86 @@ func shortErr(err error) string {
 }
 
 var _ = pgx.ErrNoRows
+
+func (s *Service) isPasskeyCred(ctx context.Context, uid uuid.UUID, credID []byte) bool {
+	var pk bool
+	_ = s.Pool.QueryRow(ctx, `SELECT passkey FROM webauthn_credentials WHERE user_id=$1 AND credential_id=$2`, uid, credID).Scan(&pk)
+	return pk
+}
+
+// PasskeyLoginBegin: login tanpa password — pengguna belum diketahui (kredensial discoverable). Verifikasi pengguna WAJIB.
+func (s *Service) PasskeyLoginBegin(ctx context.Context) (WebAuthnBegin, error) {
+	wa, err := s.webAuthn()
+	if err != nil {
+		return WebAuthnBegin{}, errWADisabled
+	}
+	if !s.PasskeyLoginAllowed(ctx) {
+		return WebAuthnBegin{}, errPasskeyOff
+	}
+	assertion, sd, err := wa.BeginDiscoverableLogin(webauthn.WithUserVerification(protocol.VerificationRequired))
+	if err != nil {
+		return WebAuthnBegin{}, err
+	}
+	cid, err := s.storeCeremony(ctx, nil, "passkey_login", "", sd)
+	return WebAuthnBegin{CeremonyID: cid, Options: assertion}, err
+}
+
+// PasskeyLoginFinish memverifikasi assertion discoverable. Passkey = kepemilikan perangkat + verifikasi pengguna, jadi TIDAK ada
+// langkah kedua. Syarat: kredensial bertanda passkey, akun aktif & tidak terkunci, UV benar-benar terjadi, sign count tidak mundur.
+func (s *Service) PasskeyLoginFinish(ctx context.Context, ceremony uuid.UUID, credential json.RawMessage) (LoginResult, error) {
+	wa, err := s.webAuthn()
+	if err != nil {
+		return LoginResult{}, errWADisabled
+	}
+	if !s.PasskeyLoginAllowed(ctx) {
+		return LoginResult{}, errPasskeyOff
+	}
+	sd, _, _, err := s.takeCeremony(ctx, ceremony, nil, "passkey_login")
+	if err != nil {
+		return LoginResult{}, err
+	}
+	parsed, err := protocol.ParseCredentialRequestResponseBytes(credential)
+	if err != nil {
+		return LoginResult{}, errWAFailed
+	}
+	var found User
+	handler := func(rawID, userHandle []byte) (webauthn.User, error) {
+		uid, e := uuid.FromBytes(userHandle)
+		if e != nil {
+			return nil, errors.New("user handle tidak valid")
+		}
+		var locked *time.Time
+		var disabled, isPasskey bool
+		if e := s.Pool.QueryRow(ctx, `SELECT u.id,u.email,u.role,u.tailscale_login,`+mfaAny("u")+`,u.locked_until,u.disabled,
+			EXISTS (SELECT 1 FROM webauthn_credentials w WHERE w.user_id=u.id AND w.credential_id=$2 AND w.passkey)
+			FROM users u WHERE u.id=$1`, uid, rawID).Scan(&found.ID, &found.Email, &found.Role, &found.TailscaleLogin, &found.MFAEnabled, &locked, &disabled, &isPasskey); e != nil {
+			return nil, errors.New("pengguna tidak ditemukan")
+		}
+		if disabled || !isPasskey {
+			return nil, errors.New("akun nonaktif atau kredensial bukan passkey")
+		}
+		if locked != nil && locked.After(time.Now()) {
+			return nil, errLocked
+		}
+		return s.loadWAUser(ctx, uid, found.Email)
+	}
+	_, cred, err := wa.ValidatePasskeyLogin(handler, sd, parsed)
+	if err != nil {
+		if errors.Is(err, errLocked) {
+			return LoginResult{}, NewProblem(http.StatusLocked, "auth.locked", "Akun terkunci", "terlalu banyak percobaan, coba lagi nanti")
+		}
+		return LoginResult{}, errWAFailed
+	}
+	if cred.Authenticator.CloneWarning {
+		s.Audit(ctx, "user:"+found.Email, "auth.webauthn_clone_warning", "user", found.ID.String(), nil)
+		return LoginResult{}, errWAFailed
+	}
+	raw, _ := json.Marshal(cred)
+	if _, err := s.Pool.Exec(ctx, `UPDATE webauthn_credentials SET data=$3, last_used_at=now() WHERE user_id=$1 AND credential_id=$2`, found.ID, cred.ID, raw); err != nil {
+		return LoginResult{}, err
+	}
+	_, _ = s.Pool.Exec(ctx, `UPDATE users SET failed_logins=0, locked_until=NULL WHERE id=$1`, found.ID)
+	return s.startSession(ctx, found)
+}
+
+var errLocked = errors.New("akun terkunci")

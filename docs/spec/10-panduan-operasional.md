@@ -159,6 +159,8 @@ Menyalakan: pastikan **Anda** sudah memakai 2FA (Akun), lalu Pengaturan → Keam
 
 Kebijakan password baru berlaku di semua pintu (spec 09); bila admin menerima 422 `terlalu lemah`, pilih frasa panjang yang tidak memuat nama akun. Pengaturan → Retensi juga mengatur masa simpan undangan selesai (default 90 hari).
 
+Passkey (login tanpa password): nyalakan di Pengaturan → Keamanan setelah memutuskan kebijakan (lihat spec 09 soal passkey tersinkron); pengguna mendaftarkan dari Akun → Tambah kunci → *Daftarkan sebagai passkey*. Passkey hilang/perangkat dicuri: hapus kunci (password + kode) atau reset 2FA oleh admin (menghapus semua kredensial dan mencabut sesi); mematikan fitur menolak login passkey seketika.
+
 Kunci keamanan: Akun → *Kunci keamanan & passkey*. Pastikan dashboard diakses lewat nama domain HTTPS (di Tailscale: nama `*.ts.net`) — alamat IP tidak dapat dipakai untuk WebAuthn. `WEBAUTHN_RP_ID` harus sama dengan domain yang dipakai pengguna; **mengganti domain berarti semua kunci harus didaftarkan ulang** (pengguna masuk dengan kode pemulihan/TOTP, atau admin mereset 2FA). Sarankan minimal dua kunci per akun (cadangan).
 
 Mengundang: Pengaturan → Pengguna → *Undang pengguna* → salin tautan (tampil sekali) dan kirim lewat jalur aman, atau centang *Kirim tautan ke email penerima* (butuh SMTP; uji dulu di Pengaturan → Email). Email gagal (kolom *Email* = gagal, arahkan kursor untuk alasan): periksa SMTP lalu *Kirim ulang* atau bagikan tautan manual. Salah kirim / batal: *Cabut* (email yang masih antre ikut dibatalkan). Pensiun akun: *Nonaktifkan* lalu (opsional) *Hapus*.

@@ -181,6 +181,9 @@ class SoftAuth:
 
     def create(self, options):
         self.count = 0
+        u = options['publicKey'].get('user') or {}
+        if u.get('id'):
+            import base64; self.handle = base64.urlsafe_b64decode(u['id'] + '=' * (-len(u['id']) % 4))
         att = self._map(self._text("fmt"), self._text("none"), self._text("attStmt"), self._map(), self._text("authData"), self._bytes(self._authdata(0x45, True)))
         return {"id": self._b64(self.cred), "rawId": self._b64(self.cred), "type": "public-key",
                 "response": {"clientDataJSON": self._b64(self._cd("webauthn.create", options["publicKey"]["challenge"])), "attestationObject": self._b64(att)},
@@ -193,7 +196,7 @@ class SoftAuth:
         cd = self._cd("webauthn.get", options["publicKey"]["challenge"]); ad = self._authdata(0x05, False)
         sig = self.key.sign(ad + hashlib.sha256(cd).digest(), self.ec.ECDSA(hashes.SHA256()))
         return {"id": self._b64(self.cred), "rawId": self._b64(self.cred), "type": "public-key",
-                "response": {"clientDataJSON": self._b64(cd), "authenticatorData": self._b64(ad), "signature": self._b64(sig)},
+                "response": {"clientDataJSON": self._b64(cd), "authenticatorData": self._b64(ad), "signature": self._b64(sig), **({"userHandle": self._b64(self.handle)} if getattr(self, "handle", None) else {})},
                 "clientExtensionResults": {}}
 
 
@@ -468,6 +471,30 @@ def run_checks(pw):
     kid = lst["credentials"][0]["id"]
     call("DELETE", f"/api/v1/auth/webauthn/credentials/{kid}", {"password": pw2, "code": "000000"}, 401)
     call("DELETE", f"/api/v1/auth/webauthn/credentials/{kid}", {"password": pw2, "code": wr["recovery_codes"][0]}, 204)
+
+    # passkey (fase 10): default mati; nyalakan lalu daftarkan dan login tanpa password
+    anon_get = lambda p: anon("GET", p, None, 200)
+    st, mth = anon_get("/api/v1/auth/methods")
+    if mth and mth.get("passkey_login") is not False:
+        problems.append("passkey_login harus mati secara default")
+    call("POST", "/api/v1/auth/webauthn/register/begin", {"password": pw2, "passkey": True}, 409)
+    anon("POST", "/api/v1/auth/passkey/begin", {}, 409)
+    call("PUT", "/api/v1/settings/security", {}, 422)
+    call("PUT", "/api/v1/settings/security", {"passkey_login": True}, 200)
+    anon_get("/api/v1/auth/methods")
+    pk = SoftAuth()
+    st, pb = call("POST", "/api/v1/auth/webauthn/register/begin", {"password": pw2, "name": "Passkey Kontrak", "passkey": True}, 200)
+    call("POST", "/api/v1/auth/webauthn/register/finish", {"ceremony_id": pb["ceremony_id"], "credential": pk.create(pb["options"])}, 201)
+    st, lb = anon("POST", "/api/v1/auth/passkey/begin", {}, 200)
+    anon("POST", "/api/v1/auth/passkey/finish", {"ceremony_id": str(uuid.uuid4()), "credential": {}}, 400)
+    anon("POST", "/api/v1/auth/passkey/finish", {"ceremony_id": lb["ceremony_id"], "credential": pk.get(lb["options"])}, 200)
+    st, lb = anon("POST", "/api/v1/auth/passkey/begin", {}, 200)
+    bad = SoftAuth(); bad.handle = pk.handle
+    anon("POST", "/api/v1/auth/passkey/finish", {"ceremony_id": lb["ceremony_id"], "credential": bad.get(lb["options"])}, 401)
+    st, lst = call("GET", "/api/v1/auth/webauthn", expect=200)
+    for c in lst["credentials"]:
+        call("DELETE", f"/api/v1/auth/webauthn/credentials/{c['id']}", {"password": pw2, "code": "000000"}, 401)
+    call("PUT", "/api/v1/settings/security", {"passkey_login": False}, 200)
 
     # revoke di akhir
     call("DELETE", f"/api/v1/devices/{dev}", expect=204)

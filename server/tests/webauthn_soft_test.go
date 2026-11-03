@@ -24,6 +24,10 @@ type softAuth struct {
 	RPID      string
 	Origin    string
 	Flags     byte // bit tambahan (mis. 0x08 BE)
+	// untuk passkey
+	UserHandle []byte // dikembalikan pada assertion (dipelajari dari opsi pendaftaran)
+	NoUV       bool   // authenticator tidak melakukan verifikasi pengguna
+	RKProp     *bool  // nilai credProps.rk yang dilaporkan klien (nil = tidak dilaporkan)
 }
 
 func newSoft(t *testing.T) *softAuth {
@@ -100,16 +104,27 @@ func challengeOf(opts map[string]any) string {
 
 // Create menghasilkan respons navigator.credentials.create() untuk opsi dari server.
 func (a *softAuth) Create(opts map[string]any) json.RawMessage {
+	if u, ok := opts["publicKey"].(map[string]any)["user"].(map[string]any); ok {
+		a.UserHandle, _ = b64.DecodeString(u["id"].(string))
+	}
 	return a.CreateWith(challengeOf(opts), a.Origin)
 }
 
 func (a *softAuth) CreateWith(challenge, origin string) json.RawMessage {
 	a.SignCount = 0
-	att := cborMap(cborText("fmt"), cborText("none"), cborText("attStmt"), cborMap(), cborText("authData"), cborBytes(a.authData(0x01|0x04|0x40, true)))
+	flags := byte(0x01 | 0x04 | 0x40)
+	if a.NoUV {
+		flags = 0x01 | 0x40
+	}
+	att := cborMap(cborText("fmt"), cborText("none"), cborText("attStmt"), cborMap(), cborText("authData"), cborBytes(a.authData(flags, true)))
+	ext := map[string]any{}
+	if a.RKProp != nil {
+		ext["credProps"] = map[string]any{"rk": *a.RKProp}
+	}
 	return mustJSON(map[string]any{
 		"id": b64.EncodeToString(a.CredID), "rawId": b64.EncodeToString(a.CredID), "type": "public-key",
 		"response":               map[string]any{"clientDataJSON": b64.EncodeToString(clientData("webauthn.create", challenge, origin)), "attestationObject": b64.EncodeToString(att), "transports": []string{"internal"}},
-		"clientExtensionResults": map[string]any{},
+		"clientExtensionResults": ext,
 	})
 }
 
@@ -122,7 +137,11 @@ func (a *softAuth) Assert(opts map[string]any) json.RawMessage {
 // AssertWith: kontrol penuh (challenge/origin) untuk skenario serangan. badSig = tanda tangan dirusak.
 func (a *softAuth) AssertWith(challenge, origin string, badSig bool) json.RawMessage {
 	cd := clientData("webauthn.get", challenge, origin)
-	ad := a.authData(0x01|0x04, false)
+	af := byte(0x01 | 0x04)
+	if a.NoUV {
+		af = 0x01
+	}
+	ad := a.authData(af, false)
 	h := sha256.Sum256(cd)
 	sig, err := ecdsa.SignASN1(rand.Reader, a.priv, sha256Sum(append(append([]byte{}, ad...), h[:]...)))
 	if err != nil {
@@ -131,9 +150,13 @@ func (a *softAuth) AssertWith(challenge, origin string, badSig bool) json.RawMes
 	if badSig {
 		sig[len(sig)-1] ^= 0xff
 	}
+	resp := map[string]any{"clientDataJSON": b64.EncodeToString(cd), "authenticatorData": b64.EncodeToString(ad), "signature": b64.EncodeToString(sig)}
+	if len(a.UserHandle) > 0 {
+		resp["userHandle"] = b64.EncodeToString(a.UserHandle)
+	}
 	return mustJSON(map[string]any{
 		"id": b64.EncodeToString(a.CredID), "rawId": b64.EncodeToString(a.CredID), "type": "public-key",
-		"response":               map[string]any{"clientDataJSON": b64.EncodeToString(cd), "authenticatorData": b64.EncodeToString(ad), "signature": b64.EncodeToString(sig)},
+		"response":               resp,
 		"clientExtensionResults": map[string]any{},
 	})
 }

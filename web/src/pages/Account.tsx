@@ -139,13 +139,16 @@ function SecurityKeys() {
   const [busy, setBusy] = useState(false)
   const [codes, setCodes] = useState<string[] | null>(null)
   const [rm, setRm] = useState<string | null>(null)
+  const [asPasskey, setAsPasskey] = useState(false)
+  const methods = useQuery({ queryKey: ['auth-methods'], queryFn: () => get<{ passkey_login: boolean }>('/auth/methods') })
+  const passkeyOn = !!methods.data?.passkey_login
   const [rmPw, setRmPw] = useState('')
   const [rmCode, setRmCode] = useState('')
   const refresh = () => { qc.invalidateQueries({ queryKey: ['webauthn'] }); qc.invalidateQueries({ queryKey: ['mfa'] }); qc.invalidateQueries({ queryKey: ['users'] }) }
   const add = async () => {
     setBusy(true); setErr(null)
     try {
-      const b = await post<{ ceremony_id: string; options: { publicKey: never } }>('/auth/webauthn/register/begin', { password: pw, name })
+      const b = await post<{ ceremony_id: string; options: { publicKey: never } }>('/auth/webauthn/register/begin', { password: pw, name, passkey: asPasskey && passkeyOn })
       const credential = await createCredential(b.options)
       const r = await post<{ recovery_codes: string[] }>('/auth/webauthn/register/finish', { ceremony_id: b.ceremony_id, credential })
       setPw(''); setName(''); refresh()
@@ -169,7 +172,7 @@ function SecurityKeys() {
       {q.data.credentials.length === 0 ? <p className="muted">Belum ada kunci keamanan.</p> : (
         <table><thead><tr><th>Nama</th><th>Ditambahkan</th><th>Terakhir dipakai</th><th /></tr></thead><tbody>
           {q.data.credentials.map((c) => (
-            <tr key={c.id}><td>{c.name}{c.backed_up && <span className="badge muted" title="Tersinkron ke akun cloud (passkey)"> passkey tersinkron</span>}</td><td className="muted">{fmtTime(c.created_at)}</td><td className="muted">{c.last_used_at ? fmtTime(c.last_used_at) : '—'}</td>
+            <tr key={c.id}><td>{c.name}{c.passkey && <span className="badge ok" title="Dapat dipakai untuk login tanpa password"> passkey</span>}{c.backed_up && <span className="badge muted" title="Tersinkron ke akun cloud (passkey)"> passkey tersinkron</span>}</td><td className="muted">{fmtTime(c.created_at)}</td><td className="muted">{c.last_used_at ? fmtTime(c.last_used_at) : '—'}</td>
               <td className="right"><button className="small danger" onClick={() => { setRm(c.id); setRmPw(''); setRmCode('') }}>Hapus</button></td></tr>))}
         </tbody></table>)}
       {rm && (
@@ -184,6 +187,7 @@ function SecurityKeys() {
         <div className="stack">
           <h3>Tambah kunci</h3>
           <Field label="Nama kunci" hint="Mis. “YubiKey kantor”, “MacBook”."><input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} /></Field>
+          {passkeyOn && <label className="row" style={{ alignItems: 'flex-start' }}><input type="checkbox" checked={asPasskey} onChange={(e) => setAsPasskey(e.target.checked)} /><span>Daftarkan sebagai <strong>passkey</strong> (login tanpa password)<br /><span className="muted">Butuh PIN/biometrik. Passkey menggantikan password <em>dan</em> faktor kedua saat login; perangkat harus dijaga. Tersinkron ke akun cloud bila memakai passkey platform.</span></span></label>}
           <Field label="Password" hint="Diminta ulang untuk keamanan."><input type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
           <ErrorBox error={err} />
           <div><button className="primary" disabled={!pw || busy} onClick={add}>{busy ? 'Menunggu kunci…' : 'Tambah kunci keamanan'}</button></div>

@@ -23,36 +23,50 @@ const (
 
 type SecuritySettings struct {
 	Require2FA      string `json:"require_2fa"`
+	PasskeyLogin    bool   `json:"passkey_login"`     // izinkan login tanpa password dengan passkey (default mati)
 	UsersMissing2FA int    `json:"users_missing_2fa"` // pengguna aktif dalam cakupan yang belum punya 2FA
 }
 
 type secCache struct {
-	mu    sync.Mutex
-	level string
-	at    time.Time
+	mu      sync.Mutex
+	loaded  bool
+	level   string
+	passkey bool
+	at      time.Time
 }
 
-func (s *Service) mfaLevel(ctx context.Context) string {
+// secPolicy membaca kebijakan keamanan (cache 2 dtk). Gagal membaca → fail-open untuk 2FA wajib (jangan mengunci semua orang)
+// DAN fail-closed untuk login passkey (fitur opsional yang melewati password).
+func (s *Service) secPolicy(ctx context.Context) (level string, passkey bool) {
 	s.sec.mu.Lock()
 	defer s.sec.mu.Unlock()
-	if s.sec.level != "" && time.Since(s.sec.at) < 2*time.Second {
-		return s.sec.level
+	if s.sec.loaded && time.Since(s.sec.at) < 2*time.Second {
+		return s.sec.level, s.sec.passkey
 	}
-	level := Require2FAOff
+	level = Require2FAOff
 	var raw []byte
 	if err := s.Pool.QueryRow(ctx, `SELECT value FROM settings WHERE key='security'`).Scan(&raw); err == nil {
 		var v struct {
-			Require2FA string `json:"require_2fa"`
+			Require2FA   string `json:"require_2fa"`
+			PasskeyLogin bool   `json:"passkey_login"`
 		}
-		if json.Unmarshal(raw, &v) == nil && (v.Require2FA == Require2FAAdmin || v.Require2FA == Require2FAAll) {
-			level = v.Require2FA
+		if json.Unmarshal(raw, &v) == nil {
+			if v.Require2FA == Require2FAAdmin || v.Require2FA == Require2FAAll {
+				level = v.Require2FA
+			}
+			passkey = v.PasskeyLogin
 		}
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return Require2FAOff // gagal membaca: jangan mengunci semua orang
+		return Require2FAOff, false
 	}
-	s.sec.level, s.sec.at = level, time.Now()
-	return level
+	s.sec.loaded, s.sec.level, s.sec.passkey, s.sec.at = true, level, passkey, time.Now()
+	return level, passkey
 }
+
+func (s *Service) mfaLevel(ctx context.Context) string { l, _ := s.secPolicy(ctx); return l }
+
+// PasskeyLoginAllowed: admin mengizinkan login tanpa password dengan passkey.
+func (s *Service) PasskeyLoginAllowed(ctx context.Context) bool { _, p := s.secPolicy(ctx); return p }
 
 func inScope(level, role string) bool {
 	return level == Require2FAAll || (level == Require2FAAdmin && role == "admin")
@@ -65,31 +79,43 @@ func (s *Service) MFASetupRequired(ctx context.Context, u User) bool {
 
 func (s *Service) GetSecurity(ctx context.Context) (SecuritySettings, error) {
 	s.sec.mu.Lock()
-	s.sec.level = "" // paksa baca ulang
+	s.sec.loaded = false // paksa baca ulang
 	s.sec.mu.Unlock()
-	out := SecuritySettings{Require2FA: s.mfaLevel(ctx)}
+	lvl, pk := s.secPolicy(ctx)
+	out := SecuritySettings{Require2FA: lvl, PasskeyLogin: pk}
 	err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE NOT disabled AND NOT `+mfaAny("users")+`
 		AND ($1='all' OR ($1='admin' AND role='admin'))`, out.Require2FA).Scan(&out.UsersMissing2FA)
 	return out, err
 }
 
-// SetSecurity mengubah kebijakan. Menyalakan kewajiban ditolak bila admin yang meminta sendiri belum memakai 2FA
-// (mencegah mengunci diri sendiri); pengguna lain yang belum punya 2FA baru dipaksa pada permintaan berikutnya.
-func (s *Service) SetSecurity(ctx context.Context, actor uuid.UUID, level string) (SecuritySettings, error) {
-	if level != Require2FAOff && level != Require2FAAdmin && level != Require2FAAll {
-		return SecuritySettings{}, Validation(FieldError{"require_2fa", "harus off, admin, atau all"})
+// SetSecurity mengubah kebijakan; nil = tidak diubah. Menyalakan kewajiban 2FA ditolak bila admin yang meminta sendiri belum
+// memakai 2FA (mencegah mengunci diri sendiri); pengguna lain baru dipaksa pada permintaan berikutnya.
+func (s *Service) SetSecurity(ctx context.Context, actor uuid.UUID, level *string, passkey *bool) (SecuritySettings, error) {
+	if level == nil && passkey == nil {
+		return SecuritySettings{}, Validation(FieldError{"body", "isi minimal salah satu: require_2fa, passkey_login"})
 	}
-	if level != Require2FAOff {
-		st, err := s.MFAStatus(ctx, actor)
-		if err != nil {
-			return SecuritySettings{}, err
+	curLevel, curPasskey := s.secPolicy(ctx)
+	if level != nil {
+		l := *level
+		if l != Require2FAOff && l != Require2FAAdmin && l != Require2FAAll {
+			return SecuritySettings{}, Validation(FieldError{"require_2fa", "harus off, admin, atau all"})
 		}
-		if !st.Enabled {
-			return SecuritySettings{}, NewProblem(http.StatusConflict, "security.enroll_first", "Aktifkan 2FA Anda dahulu",
-				"admin yang menyalakan kewajiban 2FA harus sudah memakai 2FA, agar tidak terkunci sendiri")
+		if l != Require2FAOff {
+			st, err := s.MFAStatus(ctx, actor)
+			if err != nil {
+				return SecuritySettings{}, err
+			}
+			if !st.Enabled {
+				return SecuritySettings{}, NewProblem(http.StatusConflict, "security.enroll_first", "Aktifkan 2FA Anda dahulu",
+					"admin yang menyalakan kewajiban 2FA harus sudah memakai 2FA, agar tidak terkunci sendiri")
+			}
 		}
+		curLevel = l
 	}
-	raw, _ := json.Marshal(map[string]string{"require_2fa": level})
+	if passkey != nil {
+		curPasskey = *passkey
+	}
+	raw, _ := json.Marshal(map[string]any{"require_2fa": curLevel, "passkey_login": curPasskey})
 	if _, err := s.Pool.Exec(ctx, `INSERT INTO settings(key,value) VALUES ('security',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`, raw); err != nil {
 		return SecuritySettings{}, err
 	}

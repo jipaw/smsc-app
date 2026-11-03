@@ -1,5 +1,5 @@
-import { FormEvent, useState } from 'react'
-import { ApiError, post, setCsrf } from '../lib/api'
+import { FormEvent, useEffect, useState } from 'react'
+import { ApiError, get, post, setCsrf } from '../lib/api'
 import type { Me, MfaChallenge } from '../lib/types'
 import { getCredential, waErrMsg, webauthnSupported } from '../lib/webauthn'
 import { ErrorBox } from '../components/ui'
@@ -12,6 +12,8 @@ export function Login({ onLogin }: { onLogin: (m: Me) => void }) {
   const [code, setCode] = useState('')
   const [err, setErr] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
+  const [passkeyOk, setPasskeyOk] = useState(false)
+  useEffect(() => { get<{ passkey_login: boolean }>('/auth/methods').then((m) => setPasskeyOk(m.passkey_login && webauthnSupported())).catch(() => {}) }, [])
   const done = (me: Me) => { setCsrf(me.csrf_token); onLogin(me) }
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -26,6 +28,14 @@ export function Login({ onLogin }: { onLogin: (m: Me) => void }) {
     setBusy(true); setErr(null)
     try { done(await post<Me>('/auth/login/verify', { mfa_token: mfaToken, code: code.trim() })) }
     catch (x) { setErr(x); setCode('') } finally { setBusy(false) }
+  }
+  const usePasskey = async () => {
+    setBusy(true); setErr(null)
+    try {
+      const b = await post<{ ceremony_id: string; options: { publicKey: never } }>('/auth/passkey/begin')
+      const credential = await getCredential(b.options)
+      done(await post<Me>('/auth/passkey/finish', { ceremony_id: b.ceremony_id, credential }))
+    } catch (x) { setErr(x instanceof ApiError ? x : new Error(waErrMsg(x))) } finally { setBusy(false) }
   }
   const useKey = async () => {
     setBusy(true); setErr(null)
@@ -61,6 +71,8 @@ export function Login({ onLogin }: { onLogin: (m: Me) => void }) {
         <label className="field"><span>Password</span><input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
         <ErrorBox error={err} />
         <button className="primary" disabled={busy}>{busy ? 'Masuk…' : 'Masuk'}</button>
+        {passkeyOk && <><p className="muted" style={{ textAlign: 'center', margin: 0 }}>atau</p>
+          <button type="button" disabled={busy} onClick={usePasskey}>Masuk dengan passkey</button></>}
       </form>
     </div>
   )

@@ -237,6 +237,7 @@ function Security() {
   const toast = useToast()
   const q = useQuery({ queryKey: ['security'], queryFn: () => get<SecuritySettings>('/settings/security') })
   const save = useMutation({ mutationFn: (v: string) => put<SecuritySettings>('/settings/security', { require_2fa: v }), onSuccess: () => { toast('Kebijakan keamanan disimpan'); qc.invalidateQueries({ queryKey: ['security'] }) } })
+  const savePk = useMutation({ mutationFn: (on: boolean) => put<SecuritySettings>('/settings/security', { passkey_login: on }), onSuccess: () => { toast('Kebijakan keamanan disimpan'); qc.invalidateQueries({ queryKey: ['security'] }); qc.invalidateQueries({ queryKey: ['auth-methods'] }) } })
   if (q.isLoading) return <Loading what="kebijakan keamanan" />
   if (!q.data) return <ErrorBox error={q.error} />
   return (
@@ -250,6 +251,10 @@ function Security() {
             <span><strong>{l}</strong><br /><span className="muted">{d}</span></span></label>))}
       </fieldset>
       <ErrorBox error={save.error} />
+      <h2>Login tanpa password (passkey)</h2>
+      <p className="muted">Pengguna dapat mendaftarkan passkey (butuh PIN/biometrik) dan masuk tanpa mengetik password maupun kode 2FA — passkey sudah menggabungkan kepemilikan perangkat dan verifikasi pengguna. Passkey tersinkron ke akun cloud (iCloud/Google) memperluas permukaan serangan ke akun tersebut; nyalakan hanya bila kebijakan organisasi mengizinkan. Mematikan menolak login passkey (kunci tersimpan tetap sah sebagai faktor kedua).</p>
+      <label className="row"><input type="checkbox" checked={q.data.passkey_login} disabled={savePk.isPending} onChange={(e) => savePk.mutate(e.target.checked)} /> Izinkan login tanpa password dengan passkey</label>
+      <ErrorBox error={savePk.error} />
       <div>{q.data.users_missing_2fa > 0 ? <span className="badge warn">{q.data.users_missing_2fa} pengguna dalam cakupan belum memakai 2FA</span> : <span className="badge ok">Semua pengguna dalam cakupan sudah memakai 2FA (atau kebijakan opsional)</span>}</div>
     </div>
   )

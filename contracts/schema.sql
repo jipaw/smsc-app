@@ -79,14 +79,15 @@ CREATE TABLE webauthn_credentials (
   name          text NOT NULL,
   data          jsonb NOT NULL,
   created_at    timestamptz NOT NULL DEFAULT now(),
-  last_used_at  timestamptz
+  last_used_at  timestamptz,
+  passkey       boolean NOT NULL DEFAULT false
 );
 CREATE INDEX webauthn_credentials_user_idx ON webauthn_credentials (user_id);
 
 CREATE TABLE webauthn_ceremonies (
   id         uuid PRIMARY KEY,
-  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  kind       text NOT NULL CHECK (kind IN ('register','login')),
+  user_id    uuid REFERENCES users(id) ON DELETE CASCADE,
+  kind       text NOT NULL CHECK (kind IN ('register','register_passkey','login','passkey_login')),
   data       jsonb NOT NULL,
   name       text,
   expires_at timestamptz NOT NULL,

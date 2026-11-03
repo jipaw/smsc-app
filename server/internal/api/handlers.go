@@ -1423,18 +1423,19 @@ func (a *API) getSecurity(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) setSecurity(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Require2FA string `json:"require_2fa"`
+		Require2FA   *string `json:"require_2fa"`
+		PasskeyLogin *bool   `json:"passkey_login"`
 	}
 	if !a.decode(w, r, &in) {
 		return
 	}
 	p := principalOf(r.Context())
-	st, err := a.Svc.SetSecurity(r.Context(), p.user.ID, in.Require2FA)
+	st, err := a.Svc.SetSecurity(r.Context(), p.user.ID, in.Require2FA, in.PasskeyLogin)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	a.Svc.Audit(r.Context(), actorOf(p), "security.update", "settings", "security", map[string]any{"require_2fa": st.Require2FA})
+	a.Svc.Audit(r.Context(), actorOf(p), "security.update", "settings", "security", map[string]any{"require_2fa": st.Require2FA, "passkey_login": st.PasskeyLogin})
 	a.writeJSON(w, http.StatusOK, st)
 }
 
@@ -1614,11 +1615,14 @@ func (a *API) webauthnRegisterBegin(w http.ResponseWriter, r *http.Request) {
 	if p == nil {
 		return
 	}
-	var in struct{ Password, Name string }
+	var in struct {
+		Password, Name string
+		Passkey        bool `json:"passkey"`
+	}
 	if !a.decode(w, r, &in) {
 		return
 	}
-	out, err := a.Svc.WebAuthnRegisterBegin(r.Context(), p.user.ID, p.user.Email, in.Password, in.Name)
+	out, err := a.Svc.WebAuthnRegisterBegin(r.Context(), p.user.ID, p.user.Email, in.Password, in.Name, in.Passkey)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -1646,7 +1650,7 @@ func (a *API) webauthnRegisterFinish(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	a.Svc.Audit(r.Context(), actorOf(p), "auth.webauthn_register", "user", p.user.ID.String(), map[string]any{"credential_id": cred.ID.String(), "first_factor": len(codes) > 0})
+	a.Svc.Audit(r.Context(), actorOf(p), "auth.webauthn_register", "user", p.user.ID.String(), map[string]any{"credential_id": cred.ID.String(), "first_factor": len(codes) > 0, "passkey": cred.Passkey})
 	a.writeJSON(w, http.StatusCreated, map[string]any{"credential": cred, "recovery_codes": codes})
 }
 
@@ -1697,5 +1701,34 @@ func (a *API) webauthnLoginFinish(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setSession(w, res.Token)
 	a.Svc.Audit(r.Context(), "user:"+res.User.Email, "auth.login", "user", res.User.ID.String(), map[string]any{"mfa": true, "method": "webauthn"})
+	a.writeJSON(w, http.StatusOK, a.sessionBody(r, res))
+}
+
+// authMethods: informasi publik untuk halaman login (tanpa data pengguna).
+func (a *API) authMethods(w http.ResponseWriter, r *http.Request) {
+	a.writeJSON(w, http.StatusOK, map[string]any{"passkey_login": a.Svc.WebAuthnEnabled() && a.Svc.PasskeyLoginAllowed(r.Context())})
+}
+
+func (a *API) passkeyLoginBegin(w http.ResponseWriter, r *http.Request) {
+	out, err := a.Svc.PasskeyLoginBegin(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) passkeyLoginFinish(w http.ResponseWriter, r *http.Request) {
+	var in webauthnFinishIn
+	if !a.decode(w, r, &in) {
+		return
+	}
+	res, err := a.Svc.PasskeyLoginFinish(r.Context(), in.CeremonyID, in.Credential)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.setSession(w, res.Token)
+	a.Svc.Audit(r.Context(), "user:"+res.User.Email, "auth.login", "user", res.User.ID.String(), map[string]any{"method": "passkey"})
 	a.writeJSON(w, http.StatusOK, a.sessionBody(r, res))
 }

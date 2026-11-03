@@ -79,6 +79,9 @@ func (a *API) Router() http.Handler {
 		// publik
 		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/login", a.login)
 		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/login/verify", a.loginVerify)
+		r.Get("/auth/methods", a.authMethods)
+		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/passkey/begin", a.passkeyLoginBegin)
+		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/passkey/finish", a.passkeyLoginFinish)
 		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/login/webauthn/begin", a.webauthnLoginBegin)
 		r.With(a.limit(a.loginLimit, clientIP)).Post("/auth/login/webauthn/finish", a.webauthnLoginFinish)
 		r.With(a.limit(a.loginLimit, clientIP)).Post("/invitations/lookup", a.lookupInvitation)

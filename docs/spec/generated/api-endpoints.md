@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (99 operasi)
+# Daftar endpoint (102 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -10,6 +10,9 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `POST` | `/auth/login` | Login dashboard | publik | 200,401,423,429 |
 | `POST` | `/auth/login/verify` | Selesaikan login dengan kode 2FA | publik | 200,401,423,429 |
 | `POST` | `/auth/password` | Ganti password sendiri | apiKey/sessionCookie | 204,401,403,422,429 |
+| `GET` | `/auth/methods` | Metode login yang tersedia (publik, untuk halaman login) | publik | 200 |
+| `POST` | `/auth/passkey/begin` | Mulai login tanpa password dengan passkey | publik | 200,409,429 |
+| `POST` | `/auth/passkey/finish` | Selesaikan login tanpa password dengan passkey | publik | 200,400,401,409,423,429 |
 | `GET` | `/auth/webauthn` | Kunci keamanan / passkey milik saya | apiKey/sessionCookie | 200,403 |
 | `POST` | `/auth/webauthn/register/begin` | Mulai mendaftarkan kunci keamanan (butuh password) | apiKey/sessionCookie | 200,401,409,422,429 |
 | `POST` | `/auth/webauthn/register/finish` | Selesaikan pendaftaran kunci keamanan | apiKey/sessionCookie | 201,400,409,422,429 |

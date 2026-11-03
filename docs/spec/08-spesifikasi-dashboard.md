@@ -106,6 +106,7 @@ Daftar + editor: nama, isi, daftar variabel terdeteksi, penghitung segmen, tombo
 - **Undang pengguna** (di tab Pengguna): email + peran + masa berlaku → tautan tampil sekali (salin); daftar undangan (menunggu/diterima/kedaluwarsa/dicabut) dengan *Cabut*. Halaman publik `/invite/<token>`: tampilkan email & peran, penerima mengisi password (min. 12, diulang) → akun dibuat → ke halaman masuk. Token tidak valid → pesan seragam.
 - **Email undangan**: kotak centang *Kirim tautan ke email penerima* (nonaktif + keterangan bila SMTP belum dikonfigurasi); kolom *Email* (antre/terkirim/gagal/dibatalkan, tooltip alasan gagal; daftar menyegar sendiri selagi ada yang antre); *Kirim ulang* membuat undangan baru dan mengirimnya. Tab **Email**: ringkasan SMTP (tanpa kredensial), peringatan bila tanpa enkripsi, email uji.
 - **Hapus** (baris pengguna): hanya muncul untuk akun nonaktif, dengan konfirmasi.
+- **Keamanan (lanjutan)**: kotak centang *Izinkan login tanpa password dengan passkey* (default mati) dengan peringatan soal passkey tersinkron.
 - **Keamanan**: kebijakan 2FA — Opsional (default) / Wajib untuk admin / Wajib untuk semua, dengan hitungan pengguna dalam cakupan yang belum memakai 2FA. Akun yang digerbang melihat shell minimal berisi halaman Akun + banner; dashboard terbuka tanpa login ulang begitu 2FA aktif dan kode pemulihan sudah disimpan.
 - **Webhook**: buat/uji/riwayat/kirim ulang; **Putar secret** dengan masa tumpang tindih.
 - **Webhook** (fase 3), **Audit log** (filter aktor/aksi/tanggal, read-only).
@@ -113,6 +114,7 @@ Daftar + editor: nama, isi, daftar variabel terdeteksi, penghitung segmen, tombo
 ### 4.9 Akun (semua peran)
 
 - **Kunci keamanan & passkey**: daftar (nama, ditambahkan, terakhir dipakai, lencana *passkey tersinkron*), *Tambah kunci* (nama + password → dialog browser), *Hapus* (password + kode TOTP/pemulihan). Peringatan bila WebAuthn tak tersedia (RP ID IP / browser tak mendukung / bukan HTTPS). Kunci pertama menampilkan kode pemulihan sekali.
+- **Passkey**: kotak centang *Daftarkan sebagai passkey* di formulir Tambah kunci (hanya muncul bila admin mengizinkan); lencana *passkey* pada daftar. **Halaman login**: tombol *Masuk dengan passkey* (hanya bila diizinkan admin dan browser mendukung) di bawah formulir password.
 - **Login langkah 2**: tombol *Gunakan kunci keamanan* bila akun punya kunci; di bawahnya kolom kode TOTP/pemulihan.
 
 

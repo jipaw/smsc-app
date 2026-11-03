@@ -117,6 +117,67 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
         '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/methods:
+    get:
+      tags: [Auth]
+      security: []
+      summary: Metode login yang tersedia (publik, untuk halaman login)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [passkey_login]
+                properties:
+                  passkey_login: {type: boolean, description: 'WebAuthn tersedia di server DAN admin mengizinkan login passkey.'}
+  /auth/passkey/begin:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Mulai login tanpa password dengan passkey
+      description: |
+        Pengguna belum diketahui (kredensial discoverable); `allowCredentials` kosong dan `userVerification: required`. Mengembalikan
+        `ceremony_id` sekali pakai (5 menit) + opsi untuk `navigator.credentials.get()`. Dibatasi laju seperti login.
+      responses:
+        '200':
+          description: Opsi + ceremony
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WebAuthnBegin'}
+        '409': {description: 'Login passkey dinonaktifkan (`passkey.disabled`) / WebAuthn tidak tersedia', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+  /auth/passkey/finish:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Selesaikan login tanpa password dengan passkey
+      description: |
+        `credential` = hasil `navigator.credentials.get()` termasuk `response.userHandle` (wajib untuk discoverable). Syarat: kredensial
+        bertanda passkey, verifikasi pengguna terjadi, akun aktif dan tidak terkunci, sign count tidak mundur. **Tidak ada langkah kedua**
+        (passkey = dua faktor). Respons seragam 401 untuk semua kegagalan verifikasi.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ceremony_id, credential]
+              properties:
+                ceremony_id: {type: string, format: uuid}
+                credential: {type: object, additionalProperties: true}
+      responses:
+        '200':
+          description: Cookie sesi di-set; badan = profil + `csrf_token`.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+        '400': {description: 'Upacara tidak valid/kedaluwarsa/terpakai', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '401': {description: 'Verifikasi gagal (`auth.webauthn_failed`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '409': {description: 'Login passkey dinonaktifkan', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '423': {description: 'Akun terkunci (`auth.locked`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
   /auth/webauthn:
     get:
       tags: [Auth]
@@ -147,6 +208,7 @@ paths:
               properties:
                 password: {type: string, format: password}
                 name: {type: string, maxLength: 40, example: YubiKey kantor}
+                passkey: {type: boolean, default: false, description: 'true = daftarkan sebagai PASSKEY untuk login tanpa password: resident key + verifikasi pengguna wajib, dan authenticator yang tidak melakukan UV ditolak. Butuh `passkey_login` menyala (409 `passkey.disabled`).'}
       responses:
         '200':
           description: Opsi + ceremony
@@ -1549,9 +1611,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [require_2fa]
+              minProperties: 1
               properties:
                 require_2fa: {type: string, enum: ['off', admin, all]}
+                passkey_login: {type: boolean, description: 'Izinkan login tanpa password dengan passkey (default false). Passkey = kepemilikan perangkat + verifikasi pengguna, sehingga tidak ada langkah kedua; mematikannya menolak login dan pendaftaran passkey baru, kunci tersimpan tetap sah sebagai faktor kedua.'}
       responses:
         '200':
           description: Kebijakan baru
@@ -1989,9 +2052,10 @@ components:
         auth_enabled: {type: boolean}
     SecuritySettings:
       type: object
-      required: [require_2fa, users_missing_2fa]
+      required: [require_2fa, passkey_login, users_missing_2fa]
       properties:
         require_2fa: {type: string, enum: ['off', admin, all]}
+        passkey_login: {type: boolean}
         users_missing_2fa: {type: integer, description: 'Pengguna aktif dalam cakupan yang belum punya 2FA.'}
     MfaChallenge:
       type: object
@@ -2015,13 +2079,14 @@ components:
         recovery_codes_remaining: {type: integer}
     WebAuthnCredential:
       type: object
-      required: [id, name, created_at, backed_up, transports]
+      required: [id, name, created_at, backed_up, passkey, transports]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
         created_at: {type: string, format: date-time}
         last_used_at: {type: [string, 'null'], format: date-time}
         backed_up: {type: boolean, description: 'Passkey tersinkron (BS), mis. iCloud / Google Password Manager.'}
+        passkey: {type: boolean, description: 'Dapat dipakai untuk login tanpa password.'}
         transports: {type: array, items: {type: string}}
     WebAuthnList:
       type: object
