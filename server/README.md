@@ -18,6 +18,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
 | **Fase 13**: SCIM `Group` → peran (`SCIM_ADMIN_GROUPS`/`SCIM_OPERATOR_GROUPS`/`SCIM_VIEWER_GROUPS`), peran efektif = tertinggi(roles, grup), rekonsiliasi saat start | |
 | **Fase 14–15**: rekonsiliasi grup SCIM berkala (`SCIM_RECONCILE_INTERVAL`); status run terakhir tersimpan di database (`settings.scim_reconcile_last`) dan tampil di Pengaturan → SCIM | |
+| **Fase 18**: anotasi restart/deploy/pergantian leader di Grafana, metrik `smsc_build_info` dan `smsc_leader`, alert `SmscRestartLoop` | |
 | **Fase 17**: dashboard Grafana SCIM + rekonsiliasi (`ops/grafana/smsc-scim.json`) | |
 | **Fase 16**: metrik Prometheus rekonsiliasi SCIM + 2 alert | |
 | **Fase 12**: SCIM 2.0 `User` di `/scim/v2` (token khusus, filter, PATCH Azure/Okta, pengaman admin) | |

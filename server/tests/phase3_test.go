@@ -850,7 +850,7 @@ func TestAlertRulesReferenceExistingMetrics(t *testing.T) {
 	// device dengan baterai agar seri baterai ada
 	e.sql(`UPDATE devices SET battery_level=80, charging=true`)
 	e.sql(`INSERT INTO settings(key,value) VALUES ('scim_reconcile_last', '{"at":"2026-01-01T00:00:00Z","changed":0,"runs":1}') ON CONFLICT (key) DO NOTHING`) // gauge rekonsiliasi SCIM hanya ada setelah run pertama
-	time.Sleep(5200 * time.Millisecond) // cache DB metrik 5 dtk
+	time.Sleep(5200 * time.Millisecond)                                                                                                                        // cache DB metrik 5 dtk
 	fams, _ := scrape(t, e)
 	names := map[string]bool{}
 	for _, n := range regexp.MustCompile(`smsc_[a-z0-9_]+`).FindAllString(string(raw), -1) {

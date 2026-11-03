@@ -93,6 +93,7 @@ func serve(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, log *slog
 	_ = leaderConn.QueryRow(ctx, `SELECT pg_try_advisory_lock(727002)`).Scan(&leader)
 	if leader {
 		log.Info("menjadi leader: dispatcher dan reaper aktif")
+		svc.M.Leader.Set(1)
 		go svc.RunDispatcher(leaderCtx)
 		go svc.RunReaper(leaderCtx)
 		go svc.RunCampaigns(leaderCtx)

@@ -106,3 +106,7 @@ groups:
         for: 10m
         labels: {severity: info}
         annotations: {summary: "Rekonsiliasi grup SCIM tidak berjalan > 3 jam (leader mati atau SCIM_RECONCILE_INTERVAL=0; abaikan bila memang hanya saat start)"}
+      - alert: SmscRestartLoop
+        expr: changes(process_start_time_seconds[15m]) > 3
+        labels: {severity: warning}
+        annotations: {summary: "Server restart > 3 kali dalam 15 menit (crash loop?) — lihat log dan anotasi Restart di dashboard Grafana"}

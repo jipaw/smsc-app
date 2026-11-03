@@ -1,9 +1,10 @@
 # Server SMSC. Butuh Go 1.24+, PostgreSQL 16 (untuk tes), Node 22 (untuk dashboard).
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 DB ?= postgres://nobody@localhost:55432/postgres?sslmode=disable
 
 .PHONY: build test unit integration contract schema load web e2e verify
 build:
-	go build -o bin/smscd ./cmd/smscd
+	go build -ldflags "-X github.com/jipaw/smsc-app/server/internal/buildinfo.Version=$(VERSION)" -o bin/smscd ./cmd/smscd
 
 unit:
 	go test ./internal/...

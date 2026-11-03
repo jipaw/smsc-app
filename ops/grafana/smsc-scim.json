@@ -16,14 +16,14 @@
  ],
  "timezone": "browser",
  "schemaVersion": 39,
- "version": 1,
+ "version": 2,
  "editable": true,
  "refresh": "1m",
  "time": {
   "from": "now-24h",
   "to": "now"
  },
- "description": "Rekonsiliasi grup SCIM → peran dan lalu lintas SCIM. Sumber: /metrics server SMSC.",
+ "description": "Rekonsiliasi grup SCIM → peran dan lalu lintas SCIM. Sumber: /metrics server SMSC. Anotasi: restart proses, deploy (label versi smsc_build_info berubah), dan pergantian leader.",
  "panels": [
   {
    "id": 1,
@@ -733,6 +733,52 @@
   "list": []
  },
  "annotations": {
-  "list": []
+  "list": [
+   {
+    "name": "Restart",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "${DS_PROMETHEUS}"
+    },
+    "enable": true,
+    "iconColor": "orange",
+    "expr": "changes(process_start_time_seconds[$__interval]) > 0",
+    "step": "60s",
+    "titleFormat": "Restart",
+    "textFormat": "instance {{instance}}",
+    "tagKeys": "",
+    "useValueForTime": false
+   },
+   {
+    "name": "Deploy (versi berubah)",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "${DS_PROMETHEUS}"
+    },
+    "enable": true,
+    "iconColor": "blue",
+    "expr": "smsc_build_info unless smsc_build_info offset $__interval",
+    "step": "60s",
+    "titleFormat": "Deploy {{version}}",
+    "textFormat": "revisi {{revision}} · {{go_version}}",
+    "tagKeys": "",
+    "useValueForTime": false
+   },
+   {
+    "name": "Pergantian leader",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "${DS_PROMETHEUS}"
+    },
+    "enable": true,
+    "iconColor": "purple",
+    "expr": "changes(smsc_leader[$__interval]) > 0",
+    "step": "60s",
+    "titleFormat": "Leader berganti",
+    "textFormat": "instance {{instance}}",
+    "tagKeys": "",
+    "useValueForTime": false
+   }
+  ]
  }
 }

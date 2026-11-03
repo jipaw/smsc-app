@@ -17,7 +17,13 @@ func TestGrafanaSCIMDashboard(t *testing.T) {
 		t.Fatal(err)
 	}
 	var d struct {
-		UID    string `json:"uid"`
+		UID         string `json:"uid"`
+		Annotations struct {
+			List []struct {
+				Name string `json:"name"`
+				Expr string `json:"expr"`
+			} `json:"list"`
+		} `json:"annotations"`
 		Panels []struct {
 			ID      int    `json:"id"`
 			Type    string `json:"type"`
@@ -46,8 +52,17 @@ func TestGrafanaSCIMDashboard(t *testing.T) {
 	ids := map[int]bool{}
 	names := map[string]bool{}
 	re := regexp.MustCompile(`smsc_[a-z0-9_]+`)
+	_ = re
 	routeRe := regexp.MustCompile(`route=~"([^"]+)"`)
 	var routeFilter string
+	if len(d.Annotations.List) < 3 {
+		t.Fatalf("anotasi restart/deploy/leader wajib ada: %d", len(d.Annotations.List))
+	}
+	for _, a := range d.Annotations.List {
+		for _, n := range regexp.MustCompile(`(?:smsc|process)_[a-z0-9_]+`).FindAllString(a.Expr, -1) {
+			names[n] = true
+		}
+	}
 	for _, p := range d.Panels {
 		if ids[p.ID] {
 			t.Errorf("id panel ganda: %d", p.ID)
@@ -89,5 +104,36 @@ func TestGrafanaSCIMDashboard(t *testing.T) {
 	}
 	if routeFilter == "" || matched == 0 {
 		t.Fatalf("filter route %q tidak cocok dengan seri nyata", routeFilter)
+	}
+}
+
+// metrik untuk anotasi: build_info (versi/revisi), leader, dan process_start_time_seconds (restart).
+func TestBuildInfoLeaderAndStartTimeMetrics(t *testing.T) {
+	e := newEnv(t)
+	fams, body := scrape(t, e)
+	bi := fams["smsc_build_info"]
+	if bi == nil || len(bi.GetMetric()) != 1 || bi.GetMetric()[0].GetGauge().GetValue() != 1 {
+		t.Fatalf("smsc_build_info harus 1 seri bernilai 1: %v", bi)
+	}
+	lbl := map[string]string{}
+	for _, l := range bi.GetMetric()[0].GetLabel() {
+		lbl[l.GetName()] = l.GetValue()
+	}
+	if lbl["version"] == "" || lbl["go_version"] == "" {
+		t.Fatalf("label build_info: %v", lbl)
+	}
+	if v, ok := metricValue(fams, "smsc_leader", nil); !ok || v != 0 {
+		t.Fatalf("smsc_leader awal harus 0: %v %v", v, ok)
+	}
+	e.svc.M.Leader.Set(1)
+	fams, _ = scrape(t, e)
+	if v, _ := metricValue(fams, "smsc_leader", nil); v != 1 {
+		t.Fatalf("smsc_leader: %v", v)
+	}
+	if v, ok := metricValue(fams, "process_start_time_seconds", nil); !ok || time.Since(time.Unix(int64(v), 0)) > time.Hour {
+		t.Fatalf("process_start_time_seconds: %v %v", v, ok)
+	}
+	if strings.Contains(body, "password") {
+		t.Fatal("metrik tidak boleh memuat rahasia")
 	}
 }
