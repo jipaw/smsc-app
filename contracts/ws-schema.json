@@ -192,6 +192,7 @@
         "state": { "enum": ["sending", "part_sent", "sent", "part_delivered", "delivered", "failed"] },
         "part_index": { "type": ["integer", "null"], "minimum": 0 },
         "parts_total": { "type": "integer", "minimum": 1 },
+        "parts_sent": { "type": ["integer", "null"], "minimum": 0 },
         "error_code": { "oneOf": [{ "$ref": "#/$defs/errorCode" }, { "type": "null" }] },
         "android_result_code": { "type": ["integer", "null"] },
         "at": { "$ref": "#/$defs/ts" }

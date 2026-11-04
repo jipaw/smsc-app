@@ -183,7 +183,15 @@ class CommandProcessor(
     /** Hasil sentIntent untuk satu part. */
     fun onPartSent(messageId: String, attempt: Int, partIndex: Int, resultCode: Int) = synchronized(lock) {
         val job = store.get(messageId)?.takeIf { it.attempt == attempt } ?: return@synchronized
-        if (job.terminal) return@synchronized
+        if (partIndex !in 0 until job.partsTotal) return@synchronized      // indeks di luar rentang (intent usang/rusak): abaikan
+        if (job.terminal) {
+            // Bagian yang sukses terkirim SETELAH job gagal (modem tetap mengirim sisa bagian) dicatat diam-diam agar hitungan yang
+            // dilaporkan sms.state akurat; tidak membuat event dan tidak mengubah state (FAILED tetap FAILED).
+            if (job.state == JobState.FAILED && resultCode == AndroidSms.RESULT_OK && partIndex !in job.sentParts) {
+                store.put(job.copy(sentParts = job.sentParts + partIndex, updatedAtMs = wallClock.nowMs()))
+            }
+            return@synchronized
+        }
         if (resultCode == AndroidSms.RESULT_OK) {
             if (partIndex in job.sentParts) return@synchronized
             val updated = job.copy(sentParts = job.sentParts + partIndex, updatedAtMs = wallClock.nowMs())
@@ -247,7 +255,7 @@ class CommandProcessor(
         job: SmsJob, state: String, partIndex: Int? = null, error: String? = null, android: Int? = null,
     ) = SmsEvent(
         eventId = newId(), messageId = job.messageId, attempt = job.attempt, state = state, partIndex = partIndex,
-        partsTotal = job.partsTotal.coerceAtLeast(1), errorCode = error, androidResultCode = android,
+        partsTotal = job.partsTotal.coerceAtLeast(1), errorCode = error, androidResultCode = android, partsSent = job.sentParts.size,
         at = Time.iso(wallClock.nowMs()),
     )
 }

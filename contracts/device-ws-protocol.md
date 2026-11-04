@@ -157,6 +157,7 @@ Server menurunkan status device menjadi `degraded` jika: baterai < 15% dan tidak
   "state": "sent",
   "part_index": null,
   "parts_total": 2,
+  "parts_sent": 2,
   "error_code": null,
   "android_result_code": -1,
   "at": "2026-11-01T10:15:33.870Z"
@@ -164,6 +165,8 @@ Server menurunkan status device menjadi `degraded` jika: baterai < 15% dan tidak
 ```
 
 `state`: `sending`, `part_sent`, `sent`, `part_delivered`, `delivered`, `failed`. Device mengagregasi per-part: `sent` hanya ketika **semua** part `RESULT_OK`; `failed` jika salah satu part gagal pada tahap sent; `delivered` ketika semua laporan delivery diterima. Event `part_*` bersifat informatif.
+
+`parts_sent` (opsional, boleh null, ≥ 0): jumlah bagian yang sudah `RESULT_OK` saat event dibuat. **Wajib diisi device pada `failed` untuk pesan multi-bagian.** Server memakainya untuk membedakan gagal total dari gagal **parsial** (`0 < parts_sent < parts_total`): bila `parts_sent > 0` pesan TIDAK diantre ulang otomatis (bagian yang sudah sampai akan ganda), dan bila `< parts_total` ditandai `partial` di API/dashboard. Nilainya adalah cuplikan saat event dibuat; bagian yang sukses terkirim sesudahnya baru terlihat lewat `sms.state`.
 
 Pemetaan hasil Android → `error_code`:
 

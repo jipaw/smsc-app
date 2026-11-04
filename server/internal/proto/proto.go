@@ -163,6 +163,7 @@ type SmsEvent struct {
 	State             string  `json:"state"`
 	PartIndex         *int    `json:"part_index,omitempty"`
 	PartsTotal        int     `json:"parts_total"`
+	PartsSent         *int    `json:"parts_sent,omitempty"` // bagian yang sudah RESULT_OK saat event dibuat (wajib pada failed multi-bagian)
 	ErrorCode         *string `json:"error_code,omitempty"`
 	AndroidResultCode *int    `json:"android_result_code,omitempty"`
 	At                string  `json:"at"`

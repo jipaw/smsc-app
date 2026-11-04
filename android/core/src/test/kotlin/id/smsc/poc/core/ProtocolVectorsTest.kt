@@ -38,6 +38,14 @@ class ProtocolVectorsTest {
         }
     }
 
+    @Test fun `sms event gagal parsial membawa parts_sent`() {
+        val f = File(dir, "sms.event.failed-partial.json")
+        val e = Codec.payload<SmsEvent>(Codec.decode(f.readText()))
+        assertEquals(1, e.partsSent)
+        assertEquals(3, e.partsTotal)
+        assertEquals("failed", e.state)
+    }
+
     @Test fun `round trip envelope menjaga field kontrak`() {
         val ev = SmsEvent("0192f3c0-7a1e-7c3e-9a55-000000000800", "0192f3c0-7a1e-7c3e-9a55-000000000100", 1, "sent", null, 2, null, -1, "2026-11-01T10:15:33.870Z")
         val wire = Codec.encode(Codec.envelope(MessageType.SMS_EVENT, ev))

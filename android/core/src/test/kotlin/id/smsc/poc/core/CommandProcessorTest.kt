@@ -187,6 +187,45 @@ class CommandProcessorTest {
         assertEquals("generic_failure", s.errorCode)
     }
 
+    @Test fun `event failed multi-bagian membawa parts_sent agar server tidak mengantre ulang`() {
+        gateGap = 0
+        gateway.parts = 3
+        p.onSmsSend(cmd()); p.pump()
+        p.onPartSent("m1", 1, 0, AndroidSms.RESULT_OK)
+        p.onPartSent("m1", 1, 1, AndroidSms.ERROR_GENERIC_FAILURE)
+        val failed = events.last { it.state == "failed" }
+        assertEquals(1, failed.partsSent)
+        assertEquals(3, failed.partsTotal)
+        assertEquals("generic_failure", failed.errorCode)
+        // event lain juga mengisi hitungan terkini
+        assertEquals(1, events.first { it.state == "part_sent" }.partsSent)
+    }
+
+    @Test fun `bagian yang sukses setelah job gagal dicatat diam-diam dan state tetap failed`() {
+        gateGap = 0
+        gateway.parts = 3
+        p.onSmsSend(cmd()); p.pump()
+        p.onPartSent("m1", 1, 0, AndroidSms.ERROR_GENERIC_FAILURE)       // bagian 0 gagal => FAILED, parts_sent 0
+        val eventsAfterFail = events.size
+        p.onPartSent("m1", 1, 1, AndroidSms.RESULT_OK); p.onPartSent("m1", 1, 2, AndroidSms.RESULT_OK)
+        p.onPartSent("m1", 1, 2, AndroidSms.RESULT_OK)                    // duplikat tidak menggandakan
+        assertEquals(eventsAfterFail, events.size)                        // tanpa event baru
+        val s = p.onSmsStatus(SmsStatus("m1", 1))
+        assertEquals("failed", s.state)
+        assertEquals(2, s.partsSent)                                      // hitungan sms.state akurat
+        assertEquals("generic_failure", s.errorCode)
+    }
+
+    @Test fun `indeks bagian di luar rentang diabaikan dan tidak menggeser hitungan`() {
+        gateGap = 0
+        gateway.parts = 1
+        p.onSmsSend(cmd()); p.pump()
+        p.onPartSent("m1", 1, 0, AndroidSms.RESULT_OK)
+        val before = store.get("m1")
+        p.onPartSent("m1", 1, 5, AndroidSms.RESULT_OK)
+        assertEquals(before, store.get("m1"))
+    }
+
     @Test fun `inflight hanya memuat job tak-terminal`() {
         gateway.parts = 2
         p.onSmsSend(cmd("a")); p.onSmsSend(cmd("b")); p.pump()

@@ -96,7 +96,7 @@ keputusan selama `STATUS_QUERY_WAIT` (default 15 dtk; maks. 2 pertanyaan per per
 
 Jawaban dengan `attempt` berbeda, untuk pesan yang bukan `sending`, atau dari device lain diabaikan.
 
-**Multi-bagian.** Hitungan `parts_sent`/`parts_delivered` menentukan kepercayaan: `sent` hanya diterima bila semua bagian terkirim,
+**Multi-bagian.** Event `failed` dari device WAJIB membawa `parts_sent`; `> 0` ⇒ tidak diantre ulang, `< parts_total` ⇒ parsial. Hitungan `parts_sent`/`parts_delivered` menentukan kepercayaan: `sent` hanya diterima bila semua bagian terkirim,
 `delivered` bila semua bagian diterima (selainnya diturunkan ke `sent`/`sending`). Kemajuan (`parts_sent + parts_delivered` naik sejak
 jawaban sebelumnya) dicatat sebagai event `status_progress` dan mengembalikan satu kuota tanya, sehingga pesan panjang yang terus
 bergerak tidak dinilai `unknown` karena kuota habis; tanpa kemajuan kuota habis seperti biasa. `failed` setelah sebagian bagian

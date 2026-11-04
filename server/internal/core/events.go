@@ -41,9 +41,8 @@ func (s *Service) OnSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.S
 // eventOpts: NoRetry = jangan antre ulang walau kodenya bisa dicoba ulang (kegagalan parsial multi-bagian: sebagian bagian
 // sudah sampai ke penerima, mengirim ulang seluruh pesan membuat bagian itu ganda); Extra = data tambahan pada catatan event.
 type eventOpts struct {
-	NoRetry     bool
-	Extra       map[string]any
-	PartialSent *int // bila diisi dan pesan menjadi failed: tandai kegagalan parsial dengan jumlah bagian terkirim ini
+	NoRetry bool
+	Extra   map[string]any
 }
 
 func (s *Service) onSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.SmsEvent, o eventOpts) error {
@@ -80,6 +79,19 @@ func (s *Service) onSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.S
 		}
 		if ev.AndroidResultCode != nil {
 			data["android_result_code"] = *ev.AndroidResultCode
+		}
+		// kegagalan setelah sebagian bagian terkirim: jangan antre ulang (bagian itu akan ganda); parsial bila belum semua terkirim
+		sentN := 0
+		if ev.PartsSent != nil {
+			sentN = *ev.PartsSent
+		}
+		noRetry := o.NoRetry || (ev.State == "failed" && sentN > 0)
+		isPartial := ev.State == "failed" && sentN > 0 && sentN < ev.PartsTotal
+		if ev.State == "failed" && sentN > 0 {
+			data["parts_sent"] = sentN
+			if isPartial {
+				data["partial"] = true
+			}
 		}
 		stale := ev.Attempt != cur.Attempt
 		if stale { // V3: dicatat tetapi tidak mengubah status
@@ -150,13 +162,13 @@ func (s *Service) onSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.S
 				if err != nil {
 					return err
 				}
-				if retryable[code] && !o.NoRetry && cur.Attempt < cur.MaxAttempts && cur.ExpiresAt.After(time.Now()) {
+				if retryable[code] && !noRetry && cur.Attempt < cur.MaxAttempts && cur.ExpiresAt.After(time.Now()) {
 					next, nb := cur.Attempt+1, time.Now().Add(backoff(eff, cur.Attempt, code))
 					return do(StatusQueued, "requeued", TransitionOpts{NewAttempt: &next, NotBefore: &nb, ErrorCode: &code})
 				}
-				if o.PartialSent != nil {
+				if isPartial {
 					// ditulis sebelum transisi agar webhook message.failed (dibaca ulang dalam transisi) sudah memuat penanda parsial
-					if _, err := tx.Exec(ctx, `UPDATE messages SET partial_sent=$2 WHERE id=$1`, mid, *o.PartialSent); err != nil {
+					if _, err := tx.Exec(ctx, `UPDATE messages SET partial_sent=$2 WHERE id=$1`, mid, sentN); err != nil {
 						return err
 					}
 					s.M.MessagesPartial.Inc()

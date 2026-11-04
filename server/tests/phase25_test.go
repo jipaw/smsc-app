@@ -3,9 +3,12 @@ package tests
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type partialView struct {
@@ -123,4 +126,43 @@ func TestPartialFlagSurvivesWithoutWebhook(t *testing.T) {
 		t.Fatalf("%d %+v", st, m)
 	}
 	_ = e
+}
+
+// jalur event biasa (bukan sms.state): failed multi-bagian dengan parts_sent => parsial, tidak diantre ulang walau retryable.
+func newUUID() string { return uuid.NewString() }
+
+func TestFailedEventWithPartsSentIsPartialAndNotRetried(t *testing.T) {
+	e, admin, dev, s := newTakeoverEnv(t)
+	cases := []struct {
+		name         string
+		total, sent  int
+		wantStatus   string
+		wantPartial  bool
+		wantAttempts int
+	}{
+		{"parsial-1-dari-3", 3, 1, "failed", true, 1},
+		{"semua-bagian-terkirim-lalu-gagal", 2, 2, "failed", false, 1}, // tidak parsial, tetap tidak diantre ulang
+		{"tak-ada-bagian-terkirim", 3, 0, "queued", false, 2},          // gagal total retryable => retry biasa
+	}
+	for _, c := range cases {
+		id := craftSending(t, e, admin, dev, "1 second")
+		e.sql(`UPDATE messages SET parts=$2 WHERE id=$1`, id, c.total)
+		sent := c.sent
+		ev := map[string]any{"event_id": newUUID(), "message_id": id, "attempt": 1, "state": "failed", "parts_total": c.total, "error_code": "generic_failure", "at": time.Now().UTC().Format(time.RFC3339)}
+		if sent > 0 {
+			ev["parts_sent"] = sent
+		}
+		raw, _ := json.Marshal(ev)
+		if err := e.svc.OnSmsEventRaw(context.Background(), dev, raw); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		var m partialView
+		if st := admin.do("GET", "/api/v1/messages/"+id, nil, &m); st != 200 || m.Status != c.wantStatus || m.Partial != c.wantPartial || m.Attempt != c.wantAttempts {
+			t.Fatalf("%s: %d %+v", c.name, st, m)
+		}
+		if c.wantPartial && (m.PartsSent == nil || *m.PartsSent != c.sent) {
+			t.Fatalf("%s: parts_sent %v", c.name, m.PartsSent)
+		}
+	}
+	_ = s
 }

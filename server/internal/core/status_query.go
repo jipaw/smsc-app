@@ -111,10 +111,10 @@ func (s *Service) OnSmsState(ctx context.Context, deviceID uuid.UUID, st proto.S
 				c := "generic_failure"
 				ev.ErrorCode = &c
 			}
-			if sent > 0 {
-				o.NoRetry = true
-				o.PartialSent = &sent
-				extra["partial"] = true
+			if st.PartsSent != nil || sent > 0 {
+				ev.PartsSent = &sent // onSmsEvent memutuskan NoRetry/parsial dari hitungan ini (jalur sama dengan event failed)
+			}
+			if sent > 0 && sent < total {
 				s.M.StatusQueries.WithLabelValues("partial").Inc()
 			}
 		}

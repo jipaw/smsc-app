@@ -147,6 +147,8 @@ data class SmsEvent(
     @SerialName("error_code") val errorCode: String? = null,
     @SerialName("android_result_code") val androidResultCode: Int? = null,
     val at: String,
+    /** Bagian yang sudah RESULT_OK saat event dibuat; server memakainya untuk membedakan gagal total vs parsial (tidak diantre ulang). */
+    @SerialName("parts_sent") val partsSent: Int? = null,
 )
 
 @Serializable
