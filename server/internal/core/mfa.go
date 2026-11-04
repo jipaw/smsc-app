@@ -391,6 +391,7 @@ func (s *Service) SetPasswordByEmail(ctx context.Context, email, password string
 	if err != nil {
 		return uuid.Nil, NotFound("pengguna")
 	}
+	_, _ = s.Pool.Exec(ctx, `DELETE FROM login_failures WHERE user_id=$1`, id) // reset oleh admin juga membuka kunci per sumber
 	_, err = s.Pool.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, id)
 	return id, err
 }

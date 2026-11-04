@@ -1,4 +1,4 @@
-// smscd: server SMSC Gateway. Perintah: serve (default) | migrate | admin create.
+// smscd: server SMSC Gateway. Perintah: serve (default) | migrate | doctor | admin | secrets | privacy.
 package main
 
 import (
@@ -33,6 +33,12 @@ func main() {
 	if len(args) > 0 && args[0] != "" && args[0][0] != '-' {
 		cmd, args = args[0], args[1:]
 	}
+	if cmd == "health" { // HEALTHCHECK image distroless (tanpa shell/curl): GET /readyz di HTTP_ADDR
+		os.Exit(health())
+	}
+	if cmd == "doctor" {
+		os.Exit(doctor(context.Background(), os.Stdout))
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -64,7 +70,7 @@ func main() {
 	case "serve":
 		serve(ctx, cfg, pool, log)
 	default:
-		fmt.Fprintln(os.Stderr, "perintah tidak dikenal:", cmd, "(serve | migrate | admin create|reset-2fa|reset-password | secrets reencrypt | privacy erase)")
+		fmt.Fprintln(os.Stderr, "perintah tidak dikenal:", cmd, "(serve | migrate | doctor | health | admin create|reset-2fa|reset-password | secrets reencrypt | privacy erase)")
 		os.Exit(2)
 	}
 }
@@ -235,4 +241,23 @@ func privacyCmd(ctx context.Context, args []string, cfg config.Config, pool *pgx
 		os.Exit(1)
 	}
 	fmt.Printf("selesai: %d pesan dianonimkan, %d penerima campaign dihapus, %d payload webhook dibersihkan, masuk daftar blokir: %v\n", res.Messages, res.Recipients, res.Deliveries, res.Suppressed)
+}
+
+func health() int {
+	addr := os.Getenv("HTTP_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:8080"
+	}
+	c := &http.Client{Timeout: 4 * time.Second}
+	resp, err := c.Get("http://" + addr + "/readyz")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "tidak sehat:", err)
+		return 1
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintln(os.Stderr, "tidak sehat: /readyz", resp.StatusCode)
+		return 1
+	}
+	return 0
 }

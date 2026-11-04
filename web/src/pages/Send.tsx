@@ -78,7 +78,7 @@ export function Send() {
         <div className="card stack" role="status">
           <h2>Hasil</h2>
           <div className="okbox">{result.messages.length} pesan masuk antrean. <Link to="/transactions">Lihat di Transaksi →</Link></div>
-          {result.rejected.length > 0 && <div className="err"><strong>{result.rejected.length} ditolak:</strong><ul>{result.rejected.map((r) => <li key={r.index}>baris {r.index + 1}: <span className="mono">{r.to}</span> — {{ invalid_number: 'nomor tidak valid', suppressed: 'ada di daftar blokir', duplicate_client_ref: 'client_ref ganda', missing_variable: 'variabel template hilang' }[r.reason] ?? r.reason}</li>)}</ul></div>}
+          {result.rejected.length > 0 && <div className="err"><strong>{result.rejected.length} ditolak:</strong><ul>{result.rejected.map((r) => <li key={r.index}>baris {r.index + 1}: <span className="mono">{r.to}</span> — {{ invalid_number: 'nomor tidak valid', suppressed: 'ada di daftar blokir', duplicate_client_ref: 'client_ref ganda', missing_variable: 'variabel template hilang', destination_not_allowed: 'tujuan tidak diizinkan' }[r.reason] ?? r.reason}</li>)}</ul></div>}
         </div>
       )}
     </div>

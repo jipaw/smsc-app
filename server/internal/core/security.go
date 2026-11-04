@@ -195,6 +195,7 @@ func (s *Service) AdminSetPassword(ctx context.Context, actor, id uuid.UUID, pas
 	if err != nil {
 		return err
 	}
+	_, _ = s.Pool.Exec(ctx, `DELETE FROM login_failures WHERE user_id=$1`, id)
 	if ct.RowsAffected() == 0 {
 		return NotFound("pengguna")
 	}

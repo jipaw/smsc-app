@@ -152,10 +152,12 @@ func (s *Service) RetentionOnce(ctx context.Context) (RetentionRun, error) {
 	if run.EventsDeleted, err = s.batchExec(ctx, `DELETE FROM message_events WHERE id IN (SELECT id FROM message_events WHERE at < now() - ($1::int * interval '1 day') LIMIT $2)`, cfg.EventRetentionDays, retentionBatch); err != nil {
 		return run, err
 	}
-	// 4. housekeeping tetap: sesi, enrollment, riwayat webhook (audit_logs TIDAK dihapus)
+	// 4. housekeeping tetap: sesi, enrollment, riwayat webhook (audit_logs hanya lewat AUDIT_RETENTION_DAYS, langkah 6)
 	if run.SessionsDeleted, err = s.batchExec(ctx, `DELETE FROM sessions WHERE id IN (SELECT id FROM sessions WHERE expires_at < now() OR last_seen_at < now() - interval '12 hours' LIMIT $1)`, retentionBatch); err != nil {
 		return run, err
 	}
+	// penghitung kegagalan login per sumber yang sudah tidak relevan
+	_, _ = s.batchExec(ctx, `DELETE FROM login_failures WHERE (user_id, source) IN (SELECT user_id, source FROM login_failures WHERE updated_at < now() - interval '1 day' LIMIT $1)`, retentionBatch)
 	// notifikasi: yang sudah dibaca > 30 hari dan semua > 90 hari (tidak dilaporkan di RetentionRun)
 	_, _ = s.batchExec(ctx, `DELETE FROM notifications WHERE id IN (SELECT id FROM notifications WHERE (read_at < now() - interval '30 days' OR created_at < now() - interval '90 days') LIMIT $1)`, retentionBatch)
 	if run.EnrollmentsDeleted, err = s.batchExec(ctx, `DELETE FROM device_enrollments WHERE id IN (SELECT id FROM device_enrollments
@@ -172,7 +174,16 @@ func (s *Service) RetentionOnce(ctx context.Context) (RetentionRun, error) {
 		  AND (accepted_at IS NOT NULL OR revoked_at IS NOT NULL OR expires_at < now()) LIMIT $2)`, cfg.InvitationRetentionDays, retentionBatch); err != nil {
 		return run, err
 	}
+	// 6. outbox email yang sudah selesai (isi sudah dikosongkan) > 30 hari; audit_logs hanya bila AUDIT_RETENTION_DAYS > 0
+	outboxDeleted, _ := s.batchExec(ctx, `DELETE FROM email_outbox WHERE id IN (SELECT id FROM email_outbox
+		WHERE status <> 'pending' AND COALESCE(sent_at, created_at) < now() - interval '30 days' LIMIT $1)`, retentionBatch)
+	auditDeleted := 0
+	if s.Cfg.AuditRetentionDays > 0 {
+		auditDeleted, _ = s.batchExec(ctx, `DELETE FROM audit_logs WHERE id IN (SELECT id FROM audit_logs WHERE at < now() - ($1::int * interval '1 day') LIMIT $2)`, s.Cfg.AuditRetentionDays, retentionBatch)
+	}
 	s.M.RetentionRuns.Inc()
+	s.M.RetentionRows.WithLabelValues("email_outbox").Add(float64(outboxDeleted))
+	s.M.RetentionRows.WithLabelValues("audit_logs").Add(float64(auditDeleted))
 	for kind, n := range map[string]int{"message_bodies": run.BodiesPurged, "recipients": run.RecipientsScrubbed, "message_events": run.EventsDeleted,
 		"sessions": run.SessionsDeleted, "enrollments": run.EnrollmentsDeleted, "webhook_deliveries": run.DeliveriesDeleted, "invitations": run.InvitationsDeleted} {
 		s.M.RetentionRows.WithLabelValues(kind).Add(float64(n))

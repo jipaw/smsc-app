@@ -59,6 +59,11 @@ type Config struct {
 	SessionSecretPrev    []string // SESSION_SECRET_PREVIOUS (koma): sesi lama tetap sah selama rotasi
 	DefaultRegion        string
 	TrustTailscale       bool
+	AllowedDestPrefixes  []string // ALLOWED_DESTINATION_PREFIXES: awalan E.164 tujuan yang diizinkan (kosong = semua)
+	AuditRetentionDays   int      // AUDIT_RETENTION_DAYS: hapus audit_logs lebih tua dari N hari (0 = simpan selamanya)
+	TrustedProxies       []*net.IPNet
+	SecretFromFile       map[string]bool // rahasia yang dibaca dari <NAMA>_FILE (untuk smscd doctor)
+	WebhookKeyDerived    bool            // WEBHOOK_ENC_KEY kosong → kunci enkripsi diturunkan dari SESSION_SECRET // TRUSTED_PROXIES: hanya dari alamat ini X-Forwarded-For/Tailscale-User-Login dipercaya
 	AutoMigrate          bool
 	LogLevel             slog.Level
 	DispatchTick         time.Duration // tick pengaman dispatcher
@@ -120,8 +125,43 @@ func envDur(k string, def time.Duration) time.Duration {
 	return def
 }
 
+// SecretEnvs: variabel rahasia yang juga dapat dibaca dari berkas lewat <NAMA>_FILE (Docker/Kubernetes secrets, systemd credentials).
+var SecretEnvs = []string{"DATABASE_URL", "SESSION_SECRET", "SESSION_SECRET_PREVIOUS", "WEBHOOK_ENC_KEY", "WEBHOOK_ENC_KEY_PREVIOUS", "SMTP_PASSWORD", "OIDC_CLIENT_SECRET"}
+
+// loadSecretFiles: untuk setiap NAMA dengan NAMA_FILE terisi, isi berkas (tanpa spasi/baris baru di ujung) menjadi nilai NAMA.
+// Mengisi keduanya sekaligus ditolak agar sumber nilai tidak ambigu.
+func loadSecretFiles() (map[string]bool, error) {
+	fromFile := map[string]bool{}
+	for _, k := range SecretEnvs {
+		f := os.Getenv(k + "_FILE")
+		if f == "" {
+			continue
+		}
+		if os.Getenv(k) != "" {
+			return nil, fmt.Errorf("%s dan %s_FILE tidak boleh diisi bersamaan", k, k)
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return nil, fmt.Errorf("%s_FILE: %w", k, err)
+		}
+		v := strings.TrimSpace(string(b))
+		if v == "" {
+			return nil, fmt.Errorf("%s_FILE: berkas %s kosong", k, f)
+		}
+		_ = os.Setenv(k, v)
+		fromFile[k] = true
+	}
+	return fromFile, nil
+}
+
 func Load() (Config, error) {
+	fromFile, ferr := loadSecretFiles()
+	if ferr != nil {
+		return Config{}, ferr
+	}
 	c := Config{
+		SecretFromFile:        fromFile,
+		WebhookKeyDerived:     os.Getenv("WEBHOOK_ENC_KEY") == "",
 		DatabaseURL:           os.Getenv("DATABASE_URL"),
 		HTTPAddr:              env("HTTP_ADDR", "127.0.0.1:8080"),
 		PublicBaseURL:         strings.TrimRight(os.Getenv("PUBLIC_BASE_URL"), "/"),
@@ -256,6 +296,37 @@ func Load() (Config, error) {
 	}
 	c.SessionSecretPrev = splitList(os.Getenv("SESSION_SECRET_PREVIOUS"))
 	c.WebhookKeyPrev = splitList(os.Getenv("WEBHOOK_ENC_KEY_PREVIOUS"))
+	for _, p := range splitList(os.Getenv("ALLOWED_DESTINATION_PREFIXES")) {
+		if !strings.HasPrefix(p, "+") {
+			p = "+" + p
+		}
+		if len(p) < 2 || strings.Trim(p[1:], "0123456789") != "" {
+			return c, fmt.Errorf("ALLOWED_DESTINATION_PREFIXES tidak valid: %q (contoh: +62,+65)", p)
+		}
+		c.AllowedDestPrefixes = append(c.AllowedDestPrefixes, p)
+	}
+	if v := os.Getenv("AUDIT_RETENTION_DAYS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return c, fmt.Errorf("AUDIT_RETENTION_DAYS tidak valid: %q", v)
+		}
+		c.AuditRetentionDays = n
+	}
+	tp := env("TRUSTED_PROXIES", "127.0.0.1/32,::1/128")
+	for _, p := range splitList(tp) {
+		if !strings.Contains(p, "/") {
+			if strings.Contains(p, ":") {
+				p += "/128"
+			} else {
+				p += "/32"
+			}
+		}
+		_, n, err := net.ParseCIDR(p)
+		if err != nil {
+			return c, fmt.Errorf("TRUSTED_PROXIES tidak valid: %q", p)
+		}
+		c.TrustedProxies = append(c.TrustedProxies, n)
+	}
 	if c.WebhookKey == "" {
 		// kunci enkripsi mengikuti SESSION_SECRET; rahasia sesi lama otomatis menjadi kunci dekripsi lama
 		c.WebhookKey = c.SessionSecret

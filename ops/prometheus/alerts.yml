@@ -74,6 +74,15 @@ groups:
         for: 5m
         labels: {severity: warning}
         annotations: {summary: "Server mengembalikan 5xx"}
+      - alert: SmscRateLimitedSurge
+        expr: sum(rate(smsc_http_requests_total{status="429"}[5m])) > 0.5
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "Banyak permintaan ditolak 429 (> 0,5/dtk selama 10 menit) — integrasi API terlalu cepat, serangan tebak password, atau TRUSTED_PROXIES salah (semua klien dianggap satu)"}
+      - alert: SmscLoginLockouts
+        expr: sum(increase(smsc_http_requests_total{route="/api/v1/auth/login",status="423"}[15m])) > 5
+        labels: {severity: warning}
+        annotations: {summary: "Banyak login ditolak karena penguncian akun (> 5 dalam 15 menit) — kemungkinan tebak password; periksa audit log dan sumbernya"}
       - alert: SmscDbPoolSaturated
         expr: smsc_db_pool_connections{state="acquired"} / smsc_db_pool_connections{state="max"} > 0.9
         for: 5m

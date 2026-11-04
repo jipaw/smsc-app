@@ -25,8 +25,9 @@ dependencyResolutionManagement {
 
 rootProject.name = "smsc-poc"
 
-// :core dan :typecheck selalu ada (JVM murni, tidak butuh Android SDK).
-include(":core", ":typecheck")
+// :core, :typecheck, dan :agent selalu ada (JVM murni, tidak butuh Android SDK).
+// :agent = agen perangkat headless (JVM) yang memakai :core terhadap smscd nyata dengan SmsGateway simulasi.
+include(":core", ":typecheck", ":agent")
 
 // :app hanya dimuat bila Android SDK terdeteksi (local.properties / ANDROID_HOME).
 val hasAndroidSdk = file("local.properties").exists() ||

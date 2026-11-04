@@ -128,6 +128,56 @@ func clientIP(r *http.Request) string {
 	return h
 }
 
+func (a *API) trustedProxy(ip string) bool {
+	p := net.ParseIP(ip)
+	if p == nil {
+		return false
+	}
+	for _, n := range a.Svc.Cfg.TrustedProxies {
+		if n.Contains(p) {
+			return true
+		}
+	}
+	return false
+}
+
+// clientKey: identitas klien untuk rate limit dan penguncian login. Di belakang proxy tepercaya (tailscale serve, nginx)
+// RemoteAddr selalu alamat proxy, sehingga dipakai: login Tailscale (bila TRUST_TAILSCALE_HEADERS=true), lalu alamat
+// X-Forwarded-For paling kanan yang bukan proxy tepercaya. Header dari klien yang tidak tepercaya diabaikan (tidak bisa dipalsukan).
+func (a *API) clientKey(r *http.Request) string {
+	ip := clientIP(r)
+	if !a.trustedProxy(ip) {
+		return "ip:" + ip
+	}
+	if a.Svc.Cfg.TrustTailscale {
+		if u := strings.TrimSpace(r.Header.Get("Tailscale-User-Login")); u != "" {
+			return "ts:" + strings.ToLower(u)
+		}
+	}
+	var hops []string
+	for _, v := range r.Header.Values("X-Forwarded-For") {
+		for _, h := range strings.Split(v, ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				hops = append(hops, h)
+			}
+		}
+	}
+	for i := len(hops) - 1; i >= 0; i-- {
+		h := hops[i]
+		if hh, _, err := net.SplitHostPort(h); err == nil {
+			h = hh
+		}
+		if net.ParseIP(h) == nil {
+			break // nilai rusak: berhenti, pakai hop tepercaya terakhir
+		}
+		if !a.trustedProxy(h) {
+			return "ip:" + h
+		}
+		ip = h
+	}
+	return "ip:" + ip
+}
+
 // maskNumber: +628123457890 -> +6281****7890 (peran viewer, spec 09 §6)
 func maskNumber(n string) string {
 	if len(n) < 10 {
@@ -222,9 +272,9 @@ func principalOf(ctx context.Context) *principal {
 }
 
 // userKey: kunci pembatas per pengguna (sesi) untuk endpoint akun; API key tidak boleh mencapainya.
-func userKey(r *http.Request) string {
+func (a *API) userKey(r *http.Request) string {
 	if p := principalOf(r.Context()); p != nil && p.user != nil {
 		return "u:" + p.user.ID.String()
 	}
-	return "ip:" + clientIP(r)
+	return a.clientKey(r)
 }

@@ -1,0 +1,69 @@
+# SMSC Gateway: PostgreSQL + smscd + sidecar Tailscale (HTTPS otomatis di https://<TS_HOSTNAME>.<tailnet>.ts.net).
+# Pakai: cp .env.example .env && isi; buat berkas rahasia (lihat INSTALL.md); docker compose up -d
+name: smsc
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: ${TS_HOSTNAME:-smsc}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?isi TS_AUTHKEY (auth key bertag tag:smsc-server)}
+      TS_EXTRA_ARGS: --advertise-tags=tag:smsc-server
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    cap_add: [NET_ADMIN]
+    volumes:
+      - ts-state:/var/lib/tailscale
+      - ./serve.json:/config/serve.json:ro
+    restart: unless-stopped
+
+  server:
+    image: ${SMSC_IMAGE:-smsc/server:latest}
+    build: {context: ../.., dockerfile: Dockerfile}
+    # berbagi network namespace dengan Tailscale: smscd listen di 127.0.0.1:8080 dan hanya terjangkau lewat tailscale serve
+    network_mode: service:tailscale
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      SESSION_SECRET_FILE: /run/secrets/session_secret
+      WEBHOOK_ENC_KEY_FILE: /run/secrets/webhook_enc_key
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?isi PUBLIC_BASE_URL, mis. https://smsc.tailnet-anda.ts.net}
+      AUTO_MIGRATE: "true"
+      TRUST_TAILSCALE_HEADERS: "true"
+      ALLOWED_DESTINATION_PREFIXES: ${ALLOWED_DESTINATION_PREFIXES:-+62}
+      DEFAULT_REGION: ${DEFAULT_REGION:-ID}
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-0}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    secrets: [database_url, session_secret, webhook_enc_key]
+    depends_on:
+      db: {condition: service_healthy}
+      tailscale: {condition: service_started}
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: smsc
+      POSTGRES_DB: smsc
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [pg:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "smsc", "-d", "smsc"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+secrets:
+  db_password: {file: ./secrets/db_password}
+  database_url: {file: ./secrets/database_url}
+  session_secret: {file: ./secrets/session_secret}
+  webhook_enc_key: {file: ./secrets/webhook_enc_key}
+
+volumes:
+  ts-state: {}
+  pg: {}

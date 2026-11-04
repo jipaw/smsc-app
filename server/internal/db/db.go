@@ -77,3 +77,36 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) error {
 	}
 	return nil
 }
+
+// Pending: migrasi tertanam yang belum tercatat di schema_migrations (tanpa menerapkannya).
+func Pending(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('schema_migrations') IS NOT NULL`).Scan(&exists); err != nil {
+		return nil, err
+	}
+	done := map[string]bool{}
+	if exists {
+		rows, err := pool.Query(ctx, `SELECT version FROM schema_migrations`)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var v string
+			_ = rows.Scan(&v)
+			done[v] = true
+		}
+		rows.Close()
+	}
+	entries, err := migrationFS.ReadDir("migrations")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		if !done[e.Name()] {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}

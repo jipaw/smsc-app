@@ -39,7 +39,8 @@ Opsi A (Compose + sidecar) dan catatan jaringan ada di `docs/04` §4. Verifikasi
 | `HTTP_ADDR` | `127.0.0.1:8080` | Jangan bind ke `0.0.0.0` pada Profil A |
 | `PUBLIC_BASE_URL` | – (wajib) | Dipakai di `enroll_url` dan `ws_url` |
 | `SESSION_SECRET` | – (wajib) | ≥ 32 byte acak; rotasi tanpa `SESSION_SECRET_PREVIOUS` = logout semua |
-| `TRUST_TAILSCALE_HEADERS` | `false` | `true` hanya bila di belakang Serve lokal |
+| `TRUST_TAILSCALE_HEADERS` | `false` | `true`: identitas klien untuk rate limit/penguncian login = header `Tailscale-User-Login` (hanya dari `TRUSTED_PROXIES`) |
+| `TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Alamat/CIDR proxy (tailscale serve, nginx, sidecar) yang `X-Forwarded-For`/header Tailscale-nya dipercaya. Dipakai hop `X-Forwarded-For` paling kanan yang bukan proxy tepercaya; header dari alamat lain diabaikan |
 | `TRUSTED_PROXY_ADDRS` | `127.0.0.1` | Sumber header identitas/`X-Forwarded-*` |
 | `DEFAULT_REGION` | `ID` | Normalisasi nomor |
 | `AUTO_MIGRATE` | `false` | Jangan aktif di produksi |
@@ -48,12 +49,15 @@ Opsi A (Compose + sidecar) dan catatan jaringan ada di `docs/04` §4. Verifikasi
 | `SSE_REPLAY_SECONDS` | `300` | |
 | `METRICS_ADDR` | `127.0.0.1:9090` | Endpoint `/metrics` terpisah |
 | `WEBHOOK_ENC_KEY` | turunan `SESSION_SECRET` | Kunci enkripsi secret webhook dan rahasia TOTP. Atur terpisah di produksi |
+| `<NAMA>_FILE` | – | Baca rahasia dari berkas (Docker secrets, systemd `LoadCredential`): `DATABASE_URL`, `SESSION_SECRET`, `SESSION_SECRET_PREVIOUS`, `WEBHOOK_ENC_KEY`, `WEBHOOK_ENC_KEY_PREVIOUS`, `SMTP_PASSWORD`, `OIDC_CLIENT_SECRET`. Mengisi `NAMA` dan `NAMA_FILE` sekaligus ditolak |
+| `ALLOWED_DESTINATION_PREFIXES` | kosong (semua) | Awalan E.164 tujuan yang diizinkan, mis. `+62` atau `+62,+65`. Di luar daftar: kirim cepat → `rejected` `destination_not_allowed`; impor campaign → `invalid`; penerima campaign yang sudah diimpor → `failed` `destination_not_allowed` saat materialisasi. Batasi kerugian bila API key bocor |
+| `AUDIT_RETENTION_DAYS` | `0` (selamanya) | Hapus `audit_logs` lebih tua dari N hari pada siklus retensi. Outbox email yang selesai selalu dihapus setelah 30 hari |
 | `SESSION_SECRET_PREVIOUS`, `WEBHOOK_ENC_KEY_PREVIOUS` | – | Kunci lama (koma) selama rotasi; lihat R-06 |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_MODE`, `SMTP_FROM`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_CA_FILE`, `SMTP_TIMEOUT`, `EMAIL_BACKOFF`, `EMAIL_TICK` | email nonaktif | Pengiriman email undangan; lihat `server/README.md`. Simpan kredensial di secret manager, bukan di repo |
 | `SCIM_ENABLED`, `SCIM_DEFAULT_ROLE`, `SCIM_ALLOW_ADMIN_ROLE`, `SCIM_ADOPT_EXISTING` | SCIM mati | Provisioning SCIM; lihat `contracts/scim.md` |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL`, `OIDC_NAME`, `OIDC_SCOPES`, `OIDC_AUTO_PROVISION`, `OIDC_ALLOWED_DOMAINS`, `OIDC_DEFAULT_ROLE`, `OIDC_GROUPS_CLAIM`, `OIDC_ADMIN_GROUPS`, `OIDC_OPERATOR_GROUPS`, `OIDC_SYNC_ROLES`, `OIDC_LINK_BY_EMAIL`, `OIDC_TRUST_IDP_MFA`, `OIDC_CA_FILE` | SSO mati | SSO OIDC; tabel di `server/README.md`. Secret klien di secret manager |
 | `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS`, `WEBAUTHN_RP_NAME` | host `PUBLIC_BASE_URL` | WebAuthn; lihat `server/README.md` |
-| `LOGIN_RATE_PER_MIN`, `LOGIN_BURST` | `5`, `5` | Batas login & verifikasi 2FA per IP (endpoint akun: 2× per pengguna). Naikkan bila banyak admin berbagi satu IP/NAT |
+| `LOGIN_RATE_PER_MIN`, `LOGIN_BURST` | `5`, `5` | Batas login & verifikasi 2FA per klien (lihat `TRUSTED_PROXIES`; endpoint akun: 2× per pengguna). Naikkan bila banyak admin berbagi satu IP/NAT. Penguncian akun: 5 kegagalan per (akun, sumber) → 15 menit; 50 kegagalan total per akun → 15 menit (jaring pengaman serangan terdistribusi) |
 | `DEVICE_ROTATE_GRACE` | `60s` | Masa secret device lama setelah rotasi |
 | `WEBHOOK_TIMEOUT`, `WEBHOOK_BACKOFF`, `WEBHOOK_TICK`, `RETENTION_INTERVAL` | lihat `server/README.md` | |
 
@@ -86,7 +90,7 @@ Upgrade aplikasi Android: distribusikan APK baru; device lama tetap berfungsi se
 
 ## 6. Monitoring dan alert
 
-Aturan alert siap pakai: [`ops/prometheus/alerts.yml`](../../ops/prometheus/alerts.yml) (31 alert; ambang awal, setel dengan data nyata; belum dijalankan di Prometheus sungguhan). Nama metrik sesuai implementasi (`smsc_devices`, `smsc_queue_depth{priority}`, `smsc_message_transitions_total{from,to}`, `smsc_webhook_deliveries_total{result}`, `smsc_device_battery_percent`, dst.; daftar lengkap: `curl 127.0.0.1:9090/metrics`). Pemeriksaan statis: `make alerts` (`ops/prometheus/check_alerts.py`: nama unik, severity, kurung seimbang, durasi `for`, setiap metrik terdaftar di `metrics.go`). Tabel di bawah menjelaskan maksud tiap sinyal; bila nama berbeda, implementasi yang benar.
+Aturan alert siap pakai: [`ops/prometheus/alerts.yml`](../../ops/prometheus/alerts.yml) (33 alert; ambang awal, setel dengan data nyata; belum dijalankan di Prometheus sungguhan). Nama metrik sesuai implementasi (`smsc_devices`, `smsc_queue_depth{priority}`, `smsc_message_transitions_total{from,to}`, `smsc_webhook_deliveries_total{result}`, `smsc_device_battery_percent`, dst.; daftar lengkap: `curl 127.0.0.1:9090/metrics`). Pemeriksaan statis: `make alerts` (`ops/prometheus/check_alerts.py`: nama unik, severity, kurung seimbang, durasi `for`, setiap metrik terdaftar di `metrics.go`). Tabel di bawah menjelaskan maksud tiap sinyal; bila nama berbeda, implementasi yang benar.
 
 Metrik utama dan ambang awal (Prometheus/Alertmanager atau setara):
 
@@ -97,6 +101,8 @@ Metrik utama dan ambang awal (Prometheus/Alertmanager atau setara):
 | `SmscStatusQueryDeviceLost` | `sms.status` dijawab "tidak punya job" (`result="lost"`) | Info |
 | `SmscStatusQueryInvalid` | `sms.state` berhitungan mustahil (`result="invalid"`) — bug aplikasi | Peringatan |
 | `SmscStatusQueryUnanswered` | `queried` − (alive+settled+lost+stale+invalid) > 3/jam selama 10 mnt | Peringatan |
+| `SmscRateLimitedSurge` | `sum(rate(smsc_http_requests_total{status="429"}[5m])) > 0.5` selama 10 mnt — integrasi terlalu cepat, tebak password, atau `TRUSTED_PROXIES` salah | Peringatan |
+| `SmscLoginLockouts` | > 5 login 423 (akun terkunci) dalam 15 mnt — kemungkinan tebak password | Peringatan |
 | `SmscHubRelayDropped` | `increase(smsc_hub_relay_total{result="dropped"}[10m]) > 0` | Peringatan |
 | `SmscNoLeader` | `sum(smsc_leader) == 0` selama 2 mnt (worker tidak berjalan) | Kritis |
 | `SmscLeaderMetricAbsent` | `absent(smsc_leader)` 5 mnt (smscd tidak ter-scrape) | Kritis |

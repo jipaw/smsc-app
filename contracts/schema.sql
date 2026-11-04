@@ -522,6 +522,15 @@ CREATE TABLE user_prefs (
   email_shared_views  boolean NOT NULL DEFAULT false
 );
 
+CREATE TABLE login_failures (
+  user_id      uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  source       text NOT NULL,
+  failures     integer NOT NULL DEFAULT 0,
+  locked_until timestamptz,
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, source)
+);
+
 -- Seed: policy default sesuai docs/03 §4
 INSERT INTO dispatch_policies (id, name, is_default, min_delay_ms, max_delay_ms, burst_size, burst_pause_ms,
   max_inflight_per_sim, rate_per_minute, rate_per_hour, rate_per_day, send_window, max_attempts,

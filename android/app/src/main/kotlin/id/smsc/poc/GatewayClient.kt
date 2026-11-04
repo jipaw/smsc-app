@@ -140,7 +140,8 @@ class GatewayClient(private val ctx: Context, private val url: String, private v
         if (wasOnline) { disconnectCount++; if (up > longestUptimeMs) longestUptimeMs = up }
         lastReason = reason
         ledger("disconnected", "code=${code ?: "-"} reason=$reason uptime=${up}ms")
-        if (code == 4401) { stopped = true; ledger("revoked", "kredensial ditolak (4401), berhenti"); return }
+        // 4401 = close code (di-revoke saat tersambung); 401 = HTTP saat upgrade (secret tidak valid) — keduanya fatal (protokol §1, §6)
+        if (code == 4401 || code == 401) { stopped = true; ledger("revoked", "kredensial ditolak ($code), berhenti"); return }
         if (code == 4426) { stopped = true; ledger("version", "protokol tidak didukung (4426), berhenti"); return }
         if (stopped) return
         val delay = if (code == 4409) 30_000L else backoff.next()

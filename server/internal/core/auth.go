@@ -84,9 +84,24 @@ func (s *Service) CreateUser(ctx context.Context, email, password, role string) 
 
 var errBadLogin = NewProblem(http.StatusUnauthorized, "auth.invalid_credentials", "Kredensial salah", "email atau password salah")
 
-// Login: pesan seragam dan waktu konstan (T14). Kunci akun 15 menit setelah 5 kegagalan.
-// Bila 2FA aktif, hasilnya hanya token tantangan (MFARequired); sesi baru dibuat setelah LoginVerify.
+// Ambang penguncian: per (akun, sumber) 5 kegagalan → 15 menit; jaring pengaman global per akun (serangan terdistribusi) 50 kegagalan.
+const (
+	lockPerSource = 5
+	lockGlobal    = 50
+)
+
+// Login tanpa informasi sumber (CLI/tes): diperlakukan sebagai satu sumber "local".
 func (s *Service) Login(ctx context.Context, email, password string) (LoginResult, error) {
+	return s.LoginFrom(ctx, email, password, "local")
+}
+
+// LoginFrom: pesan seragam dan waktu konstan (T14). Kegagalan dihitung per (akun, sumber) — sumber = identitas klien dari proxy
+// tepercaya (IP asli atau login Tailscale) — sehingga pihak lain tidak dapat mengunci akun dari sumbernya sendiri. Penguncian
+// global akun hanya pada ambang yang jauh lebih tinggi. Bila 2FA aktif, hasilnya hanya token tantangan (MFARequired).
+func (s *Service) LoginFrom(ctx context.Context, email, password, source string) (LoginResult, error) {
+	if source == "" {
+		source = "local"
+	}
 	email = strings.ToLower(strings.TrimSpace(email))
 	var u User
 	var hash *string
@@ -99,15 +114,20 @@ func (s *Service) Login(ctx context.Context, email, password string) (LoginResul
 		VerifyPassword(password, dummyHash)
 		return LoginResult{}, errBadLogin
 	}
-	if locked != nil && locked.After(time.Now()) {
+	var srcLocked *time.Time
+	_ = s.Pool.QueryRow(ctx, `SELECT locked_until FROM login_failures WHERE user_id=$1 AND source=$2`, u.ID, source).Scan(&srcLocked)
+	if (locked != nil && locked.After(time.Now())) || (srcLocked != nil && srcLocked.After(time.Now())) {
 		VerifyPassword(password, dummyHash)
 		return LoginResult{}, NewProblem(http.StatusLocked, "auth.locked", "Akun terkunci", "terlalu banyak percobaan, coba lagi nanti")
 	}
 	if !VerifyPassword(password, *hash) || disabled {
-		upd := `UPDATE users SET failed_logins = failed_logins+1, locked_until = CASE WHEN failed_logins+1 >= 5 THEN now() + interval '15 minutes' ELSE locked_until END WHERE id=$1`
-		_, _ = s.Pool.Exec(ctx, upd, u.ID)
+		_, _ = s.Pool.Exec(ctx, `INSERT INTO login_failures(user_id, source, failures, locked_until) VALUES ($1, $2, 1, NULL)
+			ON CONFLICT (user_id, source) DO UPDATE SET failures = login_failures.failures + 1, updated_at = now(),
+			  locked_until = CASE WHEN login_failures.failures + 1 >= $3 THEN now() + interval '15 minutes' ELSE login_failures.locked_until END`, u.ID, source, lockPerSource)
+		_, _ = s.Pool.Exec(ctx, `UPDATE users SET failed_logins = failed_logins+1, locked_until = CASE WHEN failed_logins+1 >= $2 THEN now() + interval '15 minutes' ELSE locked_until END WHERE id=$1`, u.ID, lockGlobal)
 		return LoginResult{}, errBadLogin
 	}
+	_, _ = s.Pool.Exec(ctx, `DELETE FROM login_failures WHERE user_id=$1 AND source=$2`, u.ID, source)
 	if u.MFAEnabled {
 		// penghitung gagal TIDAK direset di sini: percobaan menebak kode tetap terbatas 5x
 		return LoginResult{User: u, MFARequired: true, MFAToken: s.mfaChallenge(u.ID, *hash), Methods: s.mfaMethods(ctx, u.ID)}, nil

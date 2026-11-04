@@ -690,6 +690,10 @@ func (s *Service) ImportRecipients(ctx context.Context, id uuid.UUID, recs []Rec
 			res.Invalid = append(res.Invalid, ImportInvalid{Row: row, Value: r.To, Reason: "invalid_number"})
 			continue
 		}
+		if !s.DestinationAllowed(e164) {
+			res.Invalid = append(res.Invalid, ImportInvalid{Row: row, Value: r.To, Reason: "destination_not_allowed"})
+			continue
+		}
 		missing := ""
 		for _, n := range need {
 			if v, ok := r.Vars[n]; !ok || strings.TrimSpace(v) == "" {

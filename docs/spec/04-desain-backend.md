@@ -186,7 +186,7 @@ Berjalan tiap 2 dtk (kueri berindeks):
 - Middleware urut: request-id → logging → ratelimit → auth → CSRF (mutasi dengan sesi) → RBAC (matriks spec 08 §3) → handler.
 - Sesi: token acak 256-bit, cookie `HttpOnly; Secure; SameSite=Lax; Path=/`, hash disimpan di `sessions`, expiry geser 12 jam / absolut 7 hari.
 - API key: format `smsc_live_<prefix8>_<secret>`; cari berdasar prefix, bandingkan hash constant-time; perbarui `last_used_at` dengan throttle 1×/menit.
-- Header identitas Tailscale hanya dipercaya bila `TRUST_TAILSCALE_HEADERS=true` **dan** `RemoteAddr` adalah loopback (Serve di host yang sama) atau alamat sidecar yang dikonfigurasi.
+- Header identitas Tailscale hanya dipercaya bila `TRUST_TAILSCALE_HEADERS=true` **dan** `RemoteAddr` termasuk `TRUSTED_PROXIES` (default loopback: Serve di host yang sama; tambahkan alamat sidecar). Identitas klien (`clientKey`) dipakai untuk rate limit login/enroll dan penguncian login per (akun, sumber, tabel `login_failures`).
 
 ## 11. Event bus dan SSE
 

@@ -186,7 +186,11 @@ export SECURE_COOKIES=false                                   # hanya untuk dev 
 go run ./cmd/smscd migrate
 go run ./cmd/smscd admin create --email admin@example.com     # password acak dicetak sekali
 go run ./cmd/smscd serve                                       # 127.0.0.1:8080
+go run ./cmd/smscd doctor                                      # periksa konfigurasi, DB, migrasi (kode keluar 1 bila ada FAIL)
 ```
+
+Instalasi produksi (Docker Compose dengan sidecar Tailscale, atau systemd): `INSTALL.md` di root repo.
+Rahasia dapat dibaca dari berkas: `DATABASE_URL_FILE`, `SESSION_SECRET_FILE`, `WEBHOOK_ENC_KEY_FILE`, `SMTP_PASSWORD_FILE`, `OIDC_CLIENT_SECRET_FILE`, dst.
 
 Variabel lain: lihat `internal/config/config.go` dan `docs/spec/10` §2. Di produksi biarkan `HTTP_ADDR` di loopback
 dan publikasikan lewat Tailscale Serve (docs/04).
@@ -202,6 +206,8 @@ make integration          # Postgres asli + simulator HP lewat WebSocket (butuh 
 make contract             # biner nyata; tiap respons divalidasi terhadap contracts/openapi.yaml
 make schema               # contracts/schema.sql == hasil semua migrasi (pg_dump)
 make load                 # beban campaign 50.000 penerima (ukur impor, materialisasi, latensi API)
+make agent                # agen perangkat JVM (Kotlin :core) ↔ biner smscd nyata
+make image                # image Docker
 ```
 
 Tes integrasi membuat dan menghapus database sementara sendiri; set `SMSC_TEST_DATABASE_URL` ke database admin

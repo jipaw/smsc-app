@@ -2,7 +2,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 DB ?= postgres://nobody@localhost:55432/postgres?sslmode=disable
 
-.PHONY: build test unit integration contract schema alerts load web e2e verify
+.PHONY: build test unit integration contract schema alerts load web e2e agent image verify
 build:
 	go build -ldflags "-X github.com/jipaw/smsc-app/server/internal/buildinfo.Version=$(VERSION)" -o bin/smscd ./cmd/smscd
 
@@ -39,4 +39,12 @@ web:
 e2e: web build
 	SMSC_TEST_DATABASE_URL='$(DB)' node ../web/e2e/run.cjs bin/smscd
 
-verify: test e2e
+# agen perangkat JVM (Kotlin :core + OkHttp, SMS simulasi) terhadap biner smscd nyata
+agent: build
+	cd ../android && ./gradlew -q :agent:installDist && SMSC_TEST_DATABASE_URL='$(DB)' python3 agent/e2e.py ../server/bin/smscd agent/build/install/smsc-agent/bin/smsc-agent
+
+# image Docker (dashboard ter-embed); di balik proxy TLS: make image DOCKER_BUILD_ARGS='--secret id=ca_bundle,src=/path/ca.crt'
+image:
+	cd .. && docker build $(DOCKER_BUILD_ARGS) -t smsc/server:$(VERSION) -t smsc/server:latest --build-arg VERSION=$(VERSION) .
+
+verify: test e2e agent

@@ -209,6 +209,10 @@ func (s *Service) CreateMessages(ctx context.Context, owner uuid.UUID, source, i
 			res.Rejected = append(res.Rejected, Rejected{i, r.To, "invalid_number"})
 			continue
 		}
+		if !s.DestinationAllowed(n) {
+			res.Rejected = append(res.Rejected, Rejected{i, n, "destination_not_allowed"})
+			continue
+		}
 		text, missing := sms.Render(body, r.Vars)
 		if len(missing) > 0 {
 			res.Rejected = append(res.Rejected, Rejected{i, r.To, "missing_variable"})

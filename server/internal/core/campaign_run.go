@@ -282,6 +282,8 @@ func (s *Service) materialize(ctx context.Context, c Campaign) (int, error) {
 			var finished *time.Time
 			if supp[r.to] {
 				status, code, finished = "failed", ptr("suppressed"), ptr(time.Now())
+			} else if !s.DestinationAllowed(r.to) { // allow-list diperketat setelah impor
+				status, code, finished = "failed", ptr("destination_not_allowed"), ptr(time.Now())
 			} else if len(missing) > 0 {
 				status, code, finished = "failed", ptr("missing_variable"), ptr(time.Now())
 			}

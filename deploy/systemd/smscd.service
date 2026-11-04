@@ -1,0 +1,41 @@
+# /etc/systemd/system/smscd.service — smscd di host dengan Tailscale terpasang di host (tailscale serve → 127.0.0.1:8080).
+# Pasang: lihat INSTALL.md §B. Rahasia lewat systemd credentials (berkas root:root 0600 di /etc/smscd/), bukan variabel env.
+[Unit]
+Description=SMSC Gateway server (smscd)
+Wants=network-online.target postgresql.service tailscaled.service
+After=network-online.target postgresql.service tailscaled.service
+
+[Service]
+Type=simple
+User=smscd
+Group=smscd
+EnvironmentFile=/etc/smscd/smscd.env
+LoadCredential=database_url:/etc/smscd/database_url
+LoadCredential=session_secret:/etc/smscd/session_secret
+LoadCredential=webhook_enc_key:/etc/smscd/webhook_enc_key
+Environment=DATABASE_URL_FILE=%d/database_url
+Environment=SESSION_SECRET_FILE=%d/session_secret
+Environment=WEBHOOK_ENC_KEY_FILE=%d/webhook_enc_key
+ExecStartPre=/usr/local/bin/smscd migrate
+ExecStart=/usr/local/bin/smscd serve
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+# pengerasan
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
