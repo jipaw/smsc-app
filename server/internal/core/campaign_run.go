@@ -181,6 +181,7 @@ func (s *Service) campaignTick(ctx context.Context) {
 			s.publishCampaign(ctx, id)
 		}
 	}
+	s.resumeQuotaPaused(ctx)
 	for _, id := range s.idsQuery(ctx, `SELECT id FROM campaigns WHERE status='running'`) {
 		s.runCampaign(ctx, id)
 	}
@@ -191,7 +192,10 @@ func (s *Service) runCampaign(ctx context.Context, id uuid.UUID) {
 	if err != nil {
 		return
 	}
-	if n, err := s.materialize(ctx, c); err != nil {
+	if n, err := s.materialize(ctx, c); errors.Is(err, errCampaignQuota) {
+		s.autoPause(ctx, id, "quota", nil)
+		return
+	} else if err != nil {
 		s.Log.Error("campaign: materialisasi", "err", err, "campaign", id)
 	} else if n > 0 {
 		s.publishCampaign(ctx, id)
@@ -236,6 +240,7 @@ func (s *Service) materialize(ctx context.Context, c Campaign) (int, error) {
 		return 0, err
 	}
 	n := 0
+	quotaBlocked := false
 	err = s.withTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT id, to_e164, vars FROM campaign_recipients WHERE campaign_id=$1 AND materialized_at IS NULL ORDER BY row_no LIMIT $2 FOR UPDATE SKIP LOCKED`, c.ID, room)
 		if err != nil {
@@ -273,6 +278,14 @@ func (s *Service) materialize(ctx context.Context, c Campaign) (int, error) {
 		}
 		srows.Close()
 		expires := time.Now().Add(time.Duration(eff.MessageTTLSeconds) * time.Second)
+		// kuota harian pemilik campaign (bagian SMS): materialisasi berhenti di batas; sisanya menunggu kuota pulih
+		var remaining *int
+		if c.CreatedBy != nil {
+			if remaining, err = s.quotaRemaining(ctx, tx, QuotaSubject{"user", *c.CreatedBy}); err != nil {
+				return err
+			}
+		}
+		charged := 0
 		b := &pgx.Batch{}
 		ids := make([]uuid.UUID, 0, len(recs))
 		for _, r := range recs {
@@ -288,6 +301,13 @@ func (s *Service) materialize(ctx context.Context, c Campaign) (int, error) {
 				status, code, finished = "failed", ptr("missing_variable"), ptr(time.Now())
 			}
 			info := sms.Analyze(body)
+			if status == "queued" && remaining != nil {
+				if charged+info.Parts > *remaining {
+					quotaBlocked = true
+					break
+				}
+				charged += info.Parts
+			}
 			if status == "failed" { // pesan gagal sejak dibuat tetap memicu webhook message.failed
 				if err := s.emitWebhook(ctx, tx, "message.failed", map[string]any{"message_id": mid, "to": r.to, "status": "failed", "campaign_id": c.ID, "error_code": code, "created_at": time.Now().UTC()}); err != nil {
 					return err
@@ -318,13 +338,57 @@ func (s *Service) materialize(ctx context.Context, c Campaign) (int, error) {
 			return err
 		}
 		n = len(ids)
+		if c.CreatedBy != nil {
+			return s.chargeQuota(ctx, tx, QuotaSubject{"user", *c.CreatedBy}, charged)
+		}
 		return nil
 	})
 	if err == nil && n > 0 {
 		s.M.MessagesCreated.WithLabelValues("campaign").Add(float64(n))
 		s.M.CampaignMaterialized.Add(float64(n))
 	}
+	if err == nil && quotaBlocked && n == 0 {
+		s.M.QuotaRejections.WithLabelValues("user").Inc()
+		return 0, errCampaignQuota
+	}
 	return n, err
+}
+
+// errCampaignQuota: kuota harian pemilik habis sebelum satu pesan pun dapat dibuat → campaign dijeda (quota).
+var errCampaignQuota = errors.New("kuota harian pemilik campaign habis")
+
+// resumeQuotaPaused: campaign yang dijeda karena kuota dilanjutkan otomatis begitu kuota pemilik pulih (hari baru / batas dinaikkan).
+func (s *Service) resumeQuotaPaused(ctx context.Context) {
+	rows, err := s.Pool.Query(ctx, `SELECT id, created_by FROM campaigns WHERE status='paused' AND pause_reason='quota'`)
+	if err != nil {
+		return
+	}
+	type pc struct {
+		id    uuid.UUID
+		owner *uuid.UUID
+	}
+	var list []pc
+	for rows.Next() {
+		var x pc
+		if rows.Scan(&x.id, &x.owner) == nil {
+			list = append(list, x)
+		}
+	}
+	rows.Close()
+	for _, x := range list {
+		if x.owner != nil {
+			q, err := s.QuotaOf(ctx, QuotaSubject{"user", *x.owner})
+			if err != nil || (q.Remaining != nil && *q.Remaining == 0) {
+				continue
+			}
+		}
+		tag, err := s.Pool.Exec(ctx, `UPDATE campaigns SET status='running', pause_reason=NULL, eval_since=now() WHERE id=$1 AND status='paused' AND pause_reason='quota'`, x.id)
+		if err == nil && tag.RowsAffected() == 1 {
+			s.Log.Info("campaign dilanjutkan: kuota pulih", "campaign", x.id)
+			s.Audit(ctx, "system", "campaign.auto_resume", "campaign", x.id.String(), map[string]any{"reason": "quota"})
+			s.publishCampaign(ctx, x.id)
+		}
+	}
 }
 
 // kegagalan "infrastruktur" (SIM/jaringan/HP); invalid_destination dll. tidak mencerminkan kesehatan SIM.

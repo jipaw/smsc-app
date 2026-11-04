@@ -107,6 +107,8 @@ type Problem struct {
 	Status int          `json:"status"`
 	Detail string       `json:"detail,omitempty"`
 	Errors []FieldError `json:"errors,omitempty"`
+	// RetryAfter (detik) menjadi header Retry-After bila > 0
+	RetryAfter int `json:"-"`
 }
 type FieldError struct {
 	Field   string `json:"field"`

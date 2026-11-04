@@ -756,6 +756,8 @@ paths:
       description: |
         Dipakai oleh halaman "Kirim SMS" dan oleh sistem eksternal (API key).
         Pesan masuk antrean (`queued`) dan dikirim sesuai policy; respons tidak menunggu pengiriman.
+        Kuota harian (bagian SMS) per API key / pengguna: permintaan yang melampaui sisa kuota ditolak UTUH dengan 429
+        `quota.exceeded` dan `Retry-After` sampai kuota pulih (lihat `GET /quota`). Duplikat idempoten tidak dibebankan.
       parameters:
         - {name: Idempotency-Key, in: header, schema: {type: string, maxLength: 128}}
       requestBody:
@@ -1478,6 +1480,7 @@ paths:
                   type: array
                   items: {type: string, enum: ['messages:send', 'messages:read', 'campaigns:read']}
                 expires_at: {type: [string, 'null'], format: date-time}
+                daily_quota: {type: [integer, 'null'], minimum: 0, maximum: 10000000, description: 'Kuota harian bagian SMS. null/absen = default DAILY_QUOTA_PER_KEY, 0 = tanpa batas.'}
       responses:
         '201':
           description: Dibuat
@@ -1518,6 +1521,34 @@ paths:
                       secret: {type: string}
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {description: Validasi, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  /api-keys/{apiKeyId}/quota:
+    put:
+      tags: [Admin]
+      summary: Tetapkan kuota harian API key
+      parameters:
+        - {name: apiKeyId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {$ref: '#/components/requestBodies/QuotaSet'}
+      responses:
+        '200': {description: Kuota setelah diubah, content: {application/json: {schema: {$ref: '#/components/schemas/Quota'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /users/{userId}/quota:
+    put:
+      tags: [Admin]
+      summary: Tetapkan kuota harian pengguna (kirim cepat + campaign miliknya)
+      parameters:
+        - {name: userId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {$ref: '#/components/requestBodies/QuotaSet'}
+      responses:
+        '200': {description: Kuota setelah diubah, content: {application/json: {schema: {$ref: '#/components/schemas/Quota'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /quota:
+    get:
+      tags: [Messages]
+      summary: Kuota harian pemanggil (API key → kuota key; sesi → kuota pengguna)
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/Quota'}}}}
   /api-keys/{apiKeyId}:
     delete:
       tags: [Admin]
@@ -2232,6 +2263,16 @@ components:
     CampaignId: {name: campaignId, in: path, required: true, schema: {type: string, format: uuid}}
     WebhookId: {name: webhookId, in: path, required: true, schema: {type: string, format: uuid}}
 
+  requestBodies:
+    QuotaSet:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [daily_quota]
+            properties:
+              daily_quota: {type: [integer, 'null'], minimum: 0, maximum: 10000000, description: 'null = ikuti default env, 0 = tanpa batas.'}
   responses:
     Unauthorized:
       description: Tidak terautentikasi
@@ -2310,6 +2351,7 @@ components:
             disabled: {type: boolean}
             created_at: {type: string, format: date-time}
             scim_managed: {type: boolean, description: 'Diprovisi/dikelola IdP lewat SCIM.'}
+            quota: {$ref: '#/components/schemas/Quota'}
     Invitation:
       type: object
       required: [id, email, role, status, created_at, expires_at]
@@ -2796,7 +2838,7 @@ components:
                 start_at: {type: [string, 'null'], format: date-time}
             auto_pause: {$ref: '#/components/schemas/AutoPauseState'}
             status: {$ref: '#/components/schemas/CampaignStatus'}
-            pause_reason: {type: [string, 'null'], enum: [user, auto_failure_ratio, no_capacity, null]}
+            pause_reason: {type: [string, 'null'], enum: [user, auto_failure_ratio, no_capacity, quota, null]}
             counters: {$ref: '#/components/schemas/CampaignCounters'}
             recipients:
               type: object
@@ -2932,6 +2974,19 @@ components:
         created_at: {type: string, format: date-time}
         rotated_at: {type: [string, 'null'], format: date-time}
         previous_valid_until: {type: [string, 'null'], format: date-time, description: 'Sampai kapan secret lama masih sah (null = sudah tidak).'}
+        quota: {$ref: '#/components/schemas/Quota'}
+    Quota:
+      type: object
+      description: Kuota harian dalam bagian SMS. Hari dihitung di QUOTA_TIMEZONE.
+      required: [daily_quota, effective, used, remaining, resets_at, timezone, unit]
+      properties:
+        daily_quota: {type: [integer, 'null'], description: 'Nilai tersimpan pada subjek (null = ikuti default env, 0 = tanpa batas).'}
+        effective: {type: [integer, 'null'], description: 'Batas yang berlaku (null = tanpa batas).'}
+        used: {type: integer, description: 'Bagian SMS terpakai hari ini (dicatat juga bila tanpa batas).'}
+        remaining: {type: [integer, 'null']}
+        resets_at: {type: string, format: date-time}
+        timezone: {type: string, example: Asia/Jakarta}
+        unit: {type: string, const: sms_parts}
 
     WebhookEvent:
       type: string

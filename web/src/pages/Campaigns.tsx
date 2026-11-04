@@ -21,6 +21,7 @@ const PAUSE_HELP: Record<string, string> = {
   user: 'Anda menjeda campaign ini. Klik Lanjutkan untuk meneruskan pengiriman.',
   auto_failure_ratio: 'Dijeda otomatis karena terlalu banyak percobaan gagal akibat SIM/jaringan. Periksa sinyal, pulsa, dan status SIM, lalu Lanjutkan.',
   no_capacity: 'Dijeda otomatis karena tidak ada SIM online yang dapat mengirim. Hubungkan kembali HP, lalu Lanjutkan.',
+  quota: 'Dijeda otomatis karena kuota harian pemilik campaign habis. Campaign lanjut sendiri saat kuota pulih (hari berikutnya) atau setelah admin menaikkan kuota.',
 }
 
 export function CampaignBadge({ status }: { status: string }) {
@@ -60,7 +61,7 @@ export function Campaigns() {
         <div key={c.id} className="card stack">
           <div className="row spread">
             <div><Link to={c.status === 'draft' ? `/campaigns/${c.id}/edit` : `/campaigns/${c.id}`}><strong>{c.name}</strong></Link> <CampaignBadge status={c.status} />
-              {c.pause_reason && <span className="hint"> · {c.pause_reason === 'user' ? 'dijeda pengguna' : c.pause_reason === 'no_capacity' ? 'tanpa SIM online' : 'auto-pause'}</span>}</div>
+              {c.pause_reason && <span className="hint"> · {c.pause_reason === 'user' ? 'dijeda pengguna' : c.pause_reason === 'no_capacity' ? 'tanpa SIM online' : c.pause_reason === 'quota' ? 'kuota habis' : 'auto-pause'}</span>}</div>
             <span className="muted">{c.status === 'scheduled' && c.schedule?.start_at ? `mulai ${fmtTime(c.schedule.start_at)}` : `dibuat ${rel(c.created_at)}`}</span>
           </div>
           {c.recipients.count > 0 ? <Progress c={c} /> : <span className="muted">Belum ada penerima</span>}

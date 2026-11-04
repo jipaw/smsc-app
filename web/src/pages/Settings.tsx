@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { del, get, patch, post, put } from '../lib/api'
 import { fmtTime } from '../lib/format'
 import { isAdmin, useMe } from '../lib/session'
-import type { ApiKey, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, Invitation, EmailConfig, SSOView, ScimSettings, ScimToken, ScimGroupSummary, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
+import type { ApiKey, Quota, AuditLog, DispatchPolicy, DispatchPolicyInput, Page, RetentionSettings, Role, SecuritySettings, Suppression, Invitation, EmailConfig, SSOView, ScimSettings, ScimToken, ScimGroupSummary, UserItem, Webhook, WebhookCreated, WebhookDelivery, WebhookEvent } from '../lib/types'
 import { Empty, ErrorBox, errMsg, Field, Loading, Modal, useToast } from '../components/ui'
 
 const TABS = ['Policy', 'Daftar blokir', 'API key', 'Webhook', 'Retensi', 'Keamanan', 'SSO', 'SCIM', 'Email', 'Pengguna', 'Audit'] as const
@@ -95,6 +95,47 @@ function Suppressions() {
   )
 }
 
+/** Pemakaian kuota harian (bagian SMS) + tombol ubah. */
+export function quotaText(q?: Quota | null) {
+  if (!q) return '—'
+  return q.effective == null ? `${q.used} / tanpa batas` : `${q.used} / ${q.effective}`
+}
+
+function QuotaCell({ label, q, path, invalidate }: { label: string; q?: Quota | null; path: string; invalidate: string }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<'default' | 'none' | 'limit'>('default')
+  const [val, setVal] = useState('')
+  const save = useMutation({
+    mutationFn: () => put<Quota>(path, { daily_quota: mode === 'default' ? null : mode === 'none' ? 0 : Number(val) }),
+    onSuccess: () => { setOpen(false); toast('Kuota disimpan'); qc.invalidateQueries({ queryKey: [invalidate] }) },
+  })
+  const begin = () => {
+    const d = q?.daily_quota
+    setMode(d == null ? 'default' : d === 0 ? 'none' : 'limit'); setVal(d ? String(d) : ''); setOpen(true)
+  }
+  const pct = q && q.effective ? Math.min(100, Math.round((q.used / q.effective) * 100)) : 0
+  return (
+    <>
+      <span className={q && q.remaining === 0 ? 'err' : undefined} title={q?.daily_quota == null ? 'mengikuti default server' : undefined}>{quotaText(q)}{q?.daily_quota == null && q ? <span className="muted"> (default)</span> : null}</span>
+      {q?.effective != null && <span className="muted"> · {pct}%</span>}
+      {' '}<button className="small" aria-label={`Ubah kuota ${label}`} onClick={begin}>Ubah</button>
+      <Modal open={open} onClose={() => setOpen(false)} title={`Kuota harian — ${label}`}>
+        <div className="stack">
+          <p className="muted">Dihitung dalam bagian SMS (pesan 3 bagian = 3) dan pulih setiap hari pukul 00:00 {q?.timezone}. Permintaan yang melampaui sisa kuota ditolak utuh; campaign dijeda lalu lanjut otomatis saat kuota pulih.</p>
+          <label className="row"><input type="radio" name="qmode" checked={mode === 'default'} onChange={() => setMode('default')} /> Ikuti default server</label>
+          <label className="row"><input type="radio" name="qmode" checked={mode === 'none'} onChange={() => setMode('none')} /> Tanpa batas</label>
+          <label className="row"><input type="radio" name="qmode" checked={mode === 'limit'} onChange={() => setMode('limit')} /> Batas per hari</label>
+          {mode === 'limit' && <Field label="Bagian SMS per hari"><input type="number" min={1} value={val} onChange={(e) => setVal(e.target.value)} /></Field>}
+          <ErrorBox error={save.error} />
+          <div><button className="primary" disabled={save.isPending || (mode === 'limit' && !(Number(val) >= 1))} onClick={() => save.mutate()}>Simpan kuota</button></div>
+        </div>
+      </Modal>
+    </>
+  )
+}
+
 function ApiKeys() {
   const qc = useQueryClient()
   const [name, setName] = useState('')
@@ -113,7 +154,7 @@ function ApiKeys() {
         <div className="row"><label className="row">Masa tumpang tindih saat memutar <select aria-label="Masa tumpang tindih secret lama" value={grace} onChange={(e) => setGrace(Number(e.target.value))}><option value={0}>langsung matikan</option><option value={3600}>1 jam</option><option value={86400}>24 jam</option><option value={604800}>7 hari</option></select></label></div>
         <ErrorBox error={rotate.error} />
         {secret && <div className="okbox" role="status">Salin sekarang, tidak akan ditampilkan lagi:<br /><span className="mono">{secret}</span> <button className="small" onClick={() => navigator.clipboard?.writeText(secret)}>Salin</button></div>}</div>
-      {q.data && <div className="card"><table><thead><tr><th>Nama</th><th>Prefix</th><th>Scope</th><th>Terakhir dipakai</th><th>Rotasi</th><th /></tr></thead><tbody>{q.data.items.map((k) => <tr key={k.id}><td>{k.name}</td><td className="mono">{k.prefix}</td><td>{k.scopes.join(', ')}</td><td className="muted">{fmtTime(k.last_used_at)}</td><td className="muted">{k.rotated_at ? fmtTime(k.rotated_at) : '—'}{k.previous_valid_until && <div>secret lama sah s.d. {fmtTime(k.previous_valid_until)}</div>}</td><td className="right"><button className="small" disabled={rotate.isPending} onClick={() => window.confirm(`Putar secret key "${k.name}"? Secret baru tampil sekali; secret lama tetap sah selama masa tumpang tindih yang dipilih.`) && rotate.mutate(k.id)}>Putar</button> <button className="small danger" onClick={() => window.confirm(`Cabut key "${k.name}"?`) && rm.mutate(k.id)}>Cabut</button></td></tr>)}</tbody></table></div>}
+      {q.data && <div className="card"><table><thead><tr><th>Nama</th><th>Prefix</th><th>Scope</th><th>Terakhir dipakai</th><th>Kuota hari ini</th><th>Rotasi</th><th /></tr></thead><tbody>{q.data.items.map((k) => <tr key={k.id}><td>{k.name}</td><td className="mono">{k.prefix}</td><td>{k.scopes.join(', ')}</td><td className="muted">{fmtTime(k.last_used_at)}</td><td><QuotaCell label={k.name} q={k.quota} path={`/api-keys/${k.id}/quota`} invalidate="apikeys" /></td><td className="muted">{k.rotated_at ? fmtTime(k.rotated_at) : '—'}{k.previous_valid_until && <div>secret lama sah s.d. {fmtTime(k.previous_valid_until)}</div>}</td><td className="right"><button className="small" disabled={rotate.isPending} onClick={() => window.confirm(`Putar secret key "${k.name}"? Secret baru tampil sekali; secret lama tetap sah selama masa tumpang tindih yang dipilih.`) && rotate.mutate(k.id)}>Putar</button> <button className="small danger" onClick={() => window.confirm(`Cabut key "${k.name}"?`) && rm.mutate(k.id)}>Cabut</button></td></tr>)}</tbody></table></div>}
     </div>
   )
 }
@@ -139,12 +180,12 @@ function Users() {
         <Field label="Peran"><select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as Role })}><option>admin</option><option>operator</option><option>viewer</option></select></Field>
         <Field label="Password" hint="min. 12 karakter"><input type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field></div>
         <ErrorBox error={create.error} /><div><button className="primary" disabled={create.isPending} onClick={() => create.mutate()}>Tambah pengguna</button></div></div>
-      <div className="card scroll-x"><table><thead><tr><th>Email</th><th>Peran</th><th>Status</th><th>2FA</th><th /></tr></thead><tbody>{q.data?.items.map((u) => {
+      <div className="card scroll-x"><table><thead><tr><th>Email</th><th>Peran</th><th>Status</th><th>2FA</th><th>Kuota hari ini</th><th /></tr></thead><tbody>{q.data?.items.map((u) => {
         const self = u.id === me.id
         return (
           <tr key={u.id}><td>{u.email}{self && <span className="muted"> (Anda)</span>}</td>
             <td>{self ? u.role : <select aria-label={`Peran ${u.email}`} value={u.role} onChange={(e) => edit.mutate({ id: u.id, body: { role: e.target.value as Role } })}><option>admin</option><option>operator</option><option>viewer</option></select>}</td>
-            <td>{u.disabled ? 'nonaktif' : 'aktif'}{u.sso_linked && <span className="badge muted" title="Tertaut ke SSO"> SSO</span>}{u.scim_managed && <span className="badge muted" title="Diprovisi IdP lewat SCIM"> SCIM</span>}{u.has_password === false && <span className="muted" title="Hanya bisa masuk lewat SSO"> · tanpa password</span>}</td><td>{u.mfa_enabled ? 'aktif' : '—'}</td>
+            <td>{u.disabled ? 'nonaktif' : 'aktif'}{u.sso_linked && <span className="badge muted" title="Tertaut ke SSO"> SSO</span>}{u.scim_managed && <span className="badge muted" title="Diprovisi IdP lewat SCIM"> SCIM</span>}{u.has_password === false && <span className="muted" title="Hanya bisa masuk lewat SSO"> · tanpa password</span>}</td><td>{u.mfa_enabled ? 'aktif' : '—'}</td><td><QuotaCell label={u.email} q={u.quota} path={`/users/${u.id}/quota`} invalidate="users" /></td>
             <td className="right"><span className="row">
               {!self && <button className="small" onClick={() => { setPwFor(u); setNewPw('') }}>Set password</button>}
               {!self && <button className={`small${u.disabled ? '' : ' danger'}`} onClick={() => (u.disabled || window.confirm(`Nonaktifkan ${u.email}? Semua sesinya dikeluarkan.`)) && edit.mutate({ id: u.id, body: { disabled: !u.disabled } })}>{u.disabled ? 'Aktifkan' : 'Nonaktifkan'}</button>}

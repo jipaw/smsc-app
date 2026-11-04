@@ -184,6 +184,7 @@ type APIKey struct {
 	// rotasi: kapan terakhir diputar dan sampai kapan secret lama masih sah (null = sudah tidak berlaku)
 	RotatedAt          *time.Time `json:"rotated_at"`
 	PreviousValidUntil *time.Time `json:"previous_valid_until"`
+	Quota              *Quota     `json:"quota,omitempty"` // hanya pada daftar
 }
 
 func (s *Service) CreateAPIKey(ctx context.Context, by uuid.UUID, name string, scopes []string, exp *time.Time) (APIKey, error) {
@@ -219,11 +220,19 @@ func (s *Service) ListAPIKeys(ctx context.Context) ([]APIKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (APIKey, error) {
+	keys, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (APIKey, error) {
 		var k APIKey
 		err := r.Scan(&k.ID, &k.Name, &k.Prefix, &k.Scopes, &k.LastUsedAt, &k.ExpiresAt, &k.CreatedAt, &k.RotatedAt, &k.PreviousValidUntil)
 		return k, err
 	})
+	for i := range keys {
+		if err == nil {
+			var q Quota
+			q, err = s.QuotaOf(ctx, QuotaSubject{"key", keys[i].ID})
+			keys[i].Quota = &q
+		}
+	}
+	return keys, err
 }
 
 // MaxRotateGrace: batas masa tumpang tindih secret lama (API key dan secret webhook).
@@ -273,7 +282,8 @@ type UserItem struct {
 	User
 	Disabled    bool      `json:"disabled"`
 	CreatedAt   time.Time `json:"created_at"`
-	SCIMManaged bool      `json:"scim_managed"` // diprovisi/dikelola IdP lewat SCIM
+	SCIMManaged bool      `json:"scim_managed"`    // diprovisi/dikelola IdP lewat SCIM
+	Quota       *Quota    `json:"quota,omitempty"` // hanya pada daftar
 }
 
 func (s *Service) ListUsers(ctx context.Context) ([]UserItem, error) {
@@ -281,8 +291,16 @@ func (s *Service) ListUsers(ctx context.Context) ([]UserItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (UserItem, error) {
+	users, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (UserItem, error) {
 		var u UserItem
 		return u, r.Scan(&u.ID, &u.Email, &u.Role, &u.TailscaleLogin, &u.MFAEnabled, &u.HasPassword, &u.SSOLinked, &u.Disabled, &u.CreatedAt, &u.SCIMManaged)
 	})
+	for i := range users {
+		if err == nil {
+			var q Quota
+			q, err = s.QuotaOf(ctx, QuotaSubject{"user", users[i].ID})
+			users[i].Quota = &q
+		}
+	}
+	return users, err
 }

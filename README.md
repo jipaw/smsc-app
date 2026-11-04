@@ -48,7 +48,7 @@ Paket desain (analisis, stack, kontrak, flow), server + dashboard (fase 1–13) 
 
 | Path | Isi |
 |---|---|
-| [`openapi.yaml`](contracts/openapi.yaml) | REST, OpenAPI 3.1 (121 operasi) + [`scim.md`](contracts/scim.md) (profil SCIM 2.0) |
+| [`openapi.yaml`](contracts/openapi.yaml) | REST, OpenAPI 3.1 (124 operasi) + [`scim.md`](contracts/scim.md) (profil SCIM 2.0) |
 | [`ws-schema.json`](contracts/ws-schema.json) + [`test-vectors/`](contracts/test-vectors/) | Protokol WebSocket: JSON Schema, 17 contoh valid, 15 invalid |
 | [`device-ws-protocol.md`](contracts/device-ws-protocol.md) | Penjelasan protokol WebSocket |
 | [`schema.sql`](contracts/schema.sql) | DDL PostgreSQL 16 (diuji: dimuat bersih, constraint diverifikasi) |

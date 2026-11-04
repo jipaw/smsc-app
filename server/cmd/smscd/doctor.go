@@ -92,6 +92,17 @@ func doctor(ctx context.Context, out io.Writer) int {
 	} else {
 		say("OK", "tujuan dibatasi ke awalan %s", strings.Join(cfg.AllowedDestPrefixes, ","))
 	}
+	qd := func(n int) string {
+		if n == 0 {
+			return "tanpa batas"
+		}
+		return fmt.Sprintf("%d bagian SMS/hari", n)
+	}
+	if cfg.DailyQuotaKey == 0 && cfg.DailyQuotaUser == 0 {
+		say("INFO", "kuota harian default nonaktif (DAILY_QUOTA_PER_KEY/DAILY_QUOTA_PER_USER=0); kuota tetap dapat diatur per key/pengguna di dashboard")
+	} else {
+		say("OK", "kuota harian default: API key %s, pengguna %s (zona %s)", qd(cfg.DailyQuotaKey), qd(cfg.DailyQuotaUser), cfg.QuotaLocation)
+	}
 	if cfg.AuditRetentionDays == 0 {
 		say("INFO", "AUDIT_RETENTION_DAYS=0: audit log disimpan selamanya")
 	}

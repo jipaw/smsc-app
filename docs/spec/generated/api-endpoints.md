@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (121 operasi)
+# Daftar endpoint (124 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -80,6 +80,7 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `POST` | `/saved-views` | Simpan tampilan baru (maksimal 20 per pengguna; nama unik tanpa membedakan huruf besar/kecil) | apiKey/sessionCookie | 201,409,422 |
 | `PUT` | `/saved-views/{viewId}` | Ganti nama, filter, dan/atau status berbagi tampilan milik sendiri (milik pengguna lain = 404, juga bila dibagikan) | apiKey/sessionCookie | 200,404,409,422 |
 | `DELETE` | `/saved-views/{viewId}` | Hapus tampilan milik sendiri; admin juga boleh menghapus tampilan BERBAGI milik orang lain (moderasi, diaudit `saved_view.moderate_delete`) | apiKey/sessionCookie | 204,404 |
+| `GET` | `/quota` | Kuota harian pemanggil (API key → kuota key; sesi → kuota pengguna) | apiKey/sessionCookie | 200 |
 
 ## Campaigns
 
@@ -137,6 +138,8 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `GET` | `/api-keys` | Daftar API key (tanpa secret) | apiKey/sessionCookie | 200 |
 | `POST` | `/api-keys` | Buat API key. Secret hanya tampil sekali. | apiKey/sessionCookie | 201 |
 | `POST` | `/api-keys/{apiKeyId}/rotate` | Putar secret API key | apiKey/sessionCookie | 200,404,422 |
+| `PUT` | `/api-keys/{apiKeyId}/quota` | Tetapkan kuota harian API key | apiKey/sessionCookie | 200,404,422 |
+| `PUT` | `/users/{userId}/quota` | Tetapkan kuota harian pengguna (kirim cepat + campaign miliknya) | apiKey/sessionCookie | 200,404,422 |
 | `DELETE` | `/api-keys/{apiKeyId}` | Cabut | apiKey/sessionCookie | 204 |
 | `GET` | `/users` | Daftar pengguna dashboard (admin) | apiKey/sessionCookie | 200 |
 | `POST` | `/users` | Buat pengguna | apiKey/sessionCookie | 201,409,422 |

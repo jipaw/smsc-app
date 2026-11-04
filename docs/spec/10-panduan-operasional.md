@@ -51,6 +51,8 @@ Opsi A (Compose + sidecar) dan catatan jaringan ada di `docs/04` §4. Verifikasi
 | `WEBHOOK_ENC_KEY` | turunan `SESSION_SECRET` | Kunci enkripsi secret webhook dan rahasia TOTP. Atur terpisah di produksi |
 | `<NAMA>_FILE` | – | Baca rahasia dari berkas (Docker secrets, systemd `LoadCredential`): `DATABASE_URL`, `SESSION_SECRET`, `SESSION_SECRET_PREVIOUS`, `WEBHOOK_ENC_KEY`, `WEBHOOK_ENC_KEY_PREVIOUS`, `SMTP_PASSWORD`, `OIDC_CLIENT_SECRET`. Mengisi `NAMA` dan `NAMA_FILE` sekaligus ditolak |
 | `ALLOWED_DESTINATION_PREFIXES` | kosong (semua) | Awalan E.164 tujuan yang diizinkan, mis. `+62` atau `+62,+65`. Di luar daftar: kirim cepat → `rejected` `destination_not_allowed`; impor campaign → `invalid`; penerima campaign yang sudah diimpor → `failed` `destination_not_allowed` saat materialisasi. Batasi kerugian bila API key bocor |
+| `DAILY_QUOTA_PER_KEY`, `DAILY_QUOTA_PER_USER` | `0`, `0` (tanpa batas) | Kuota harian default dalam **bagian SMS** untuk API key / pengguna dashboard yang tidak punya nilai sendiri. Nilai per key/pengguna diatur admin (Pengaturan → API key / Pengguna, `PUT /api-keys/{id}/quota`, `PUT /users/{id}/quota`): kosong = default, 0 = tanpa batas. Permintaan `POST /messages` yang melampaui ditolak utuh (429 `quota.exceeded` + `Retry-After`); campaign dibebankan ke pemiliknya, dijeda `quota` saat habis dan lanjut otomatis saat kuota pulih. Sisa kuota: `GET /quota` |
+| `QUOTA_TIMEZONE` | `Asia/Jakarta` | Batas hari kuota (pulih pukul 00:00 di zona ini) |
 | `AUDIT_RETENTION_DAYS` | `0` (selamanya) | Hapus `audit_logs` lebih tua dari N hari pada siklus retensi. Outbox email yang selesai selalu dihapus setelah 30 hari |
 | `SESSION_SECRET_PREVIOUS`, `WEBHOOK_ENC_KEY_PREVIOUS` | – | Kunci lama (koma) selama rotasi; lihat R-06 |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_MODE`, `SMTP_FROM`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_CA_FILE`, `SMTP_TIMEOUT`, `EMAIL_BACKOFF`, `EMAIL_TICK` | email nonaktif | Pengiriman email undangan; lihat `server/README.md`. Simpan kredensial di secret manager, bukan di repo |
@@ -90,7 +92,7 @@ Upgrade aplikasi Android: distribusikan APK baru; device lama tetap berfungsi se
 
 ## 6. Monitoring dan alert
 
-Aturan alert siap pakai: [`ops/prometheus/alerts.yml`](../../ops/prometheus/alerts.yml) (33 alert; ambang awal, setel dengan data nyata; belum dijalankan di Prometheus sungguhan). Nama metrik sesuai implementasi (`smsc_devices`, `smsc_queue_depth{priority}`, `smsc_message_transitions_total{from,to}`, `smsc_webhook_deliveries_total{result}`, `smsc_device_battery_percent`, dst.; daftar lengkap: `curl 127.0.0.1:9090/metrics`). Pemeriksaan statis: `make alerts` (`ops/prometheus/check_alerts.py`: nama unik, severity, kurung seimbang, durasi `for`, setiap metrik terdaftar di `metrics.go`). Tabel di bawah menjelaskan maksud tiap sinyal; bila nama berbeda, implementasi yang benar.
+Aturan alert siap pakai: [`ops/prometheus/alerts.yml`](../../ops/prometheus/alerts.yml) (34 alert; ambang awal, setel dengan data nyata; belum dijalankan di Prometheus sungguhan). Nama metrik sesuai implementasi (`smsc_devices`, `smsc_queue_depth{priority}`, `smsc_message_transitions_total{from,to}`, `smsc_webhook_deliveries_total{result}`, `smsc_device_battery_percent`, dst.; daftar lengkap: `curl 127.0.0.1:9090/metrics`). Pemeriksaan statis: `make alerts` (`ops/prometheus/check_alerts.py`: nama unik, severity, kurung seimbang, durasi `for`, setiap metrik terdaftar di `metrics.go`). Tabel di bawah menjelaskan maksud tiap sinyal; bila nama berbeda, implementasi yang benar.
 
 Metrik utama dan ambang awal (Prometheus/Alertmanager atau setara):
 
@@ -102,6 +104,7 @@ Metrik utama dan ambang awal (Prometheus/Alertmanager atau setara):
 | `SmscStatusQueryInvalid` | `sms.state` berhitungan mustahil (`result="invalid"`) — bug aplikasi | Peringatan |
 | `SmscStatusQueryUnanswered` | `queried` − (alive+settled+lost+stale+invalid) > 3/jam selama 10 mnt | Peringatan |
 | `SmscRateLimitedSurge` | `sum(rate(smsc_http_requests_total{status="429"}[5m])) > 0.5` selama 10 mnt — integrasi terlalu cepat, tebak password, atau `TRUSTED_PROXIES` salah | Peringatan |
+| `SmscQuotaExhausted` | `increase(smsc_quota_rejections_total[1h]) > 0` per subjek (key/user) | Info |
 | `SmscLoginLockouts` | > 5 login 423 (akun terkunci) dalam 15 mnt — kemungkinan tebak password | Peringatan |
 | `SmscHubRelayDropped` | `increase(smsc_hub_relay_total{result="dropped"}[10m]) > 0` | Peringatan |
 | `SmscNoLeader` | `sum(smsc_leader) == 0` selama 2 mnt (worker tidak berjalan) | Kritis |

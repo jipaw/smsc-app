@@ -59,8 +59,11 @@ type Config struct {
 	SessionSecretPrev    []string // SESSION_SECRET_PREVIOUS (koma): sesi lama tetap sah selama rotasi
 	DefaultRegion        string
 	TrustTailscale       bool
-	AllowedDestPrefixes  []string // ALLOWED_DESTINATION_PREFIXES: awalan E.164 tujuan yang diizinkan (kosong = semua)
-	AuditRetentionDays   int      // AUDIT_RETENTION_DAYS: hapus audit_logs lebih tua dari N hari (0 = simpan selamanya)
+	AllowedDestPrefixes  []string       // ALLOWED_DESTINATION_PREFIXES: awalan E.164 tujuan yang diizinkan (kosong = semua)
+	DailyQuotaKey        int            // DAILY_QUOTA_PER_KEY: default kuota harian (bagian SMS) API key tanpa nilai sendiri; 0 = tanpa batas
+	DailyQuotaUser       int            // DAILY_QUOTA_PER_USER: idem untuk pengguna dashboard (kirim cepat + campaign miliknya)
+	QuotaLocation        *time.Location // QUOTA_TIMEZONE: batas hari kuota (default Asia/Jakarta)
+	AuditRetentionDays   int            // AUDIT_RETENTION_DAYS: hapus audit_logs lebih tua dari N hari (0 = simpan selamanya)
 	TrustedProxies       []*net.IPNet
 	SecretFromFile       map[string]bool // rahasia yang dibaca dari <NAMA>_FILE (untuk smscd doctor)
 	WebhookKeyDerived    bool            // WEBHOOK_ENC_KEY kosong → kunci enkripsi diturunkan dari SESSION_SECRET // TRUSTED_PROXIES: hanya dari alamat ini X-Forwarded-For/Tailscale-User-Login dipercaya
@@ -305,6 +308,20 @@ func Load() (Config, error) {
 		}
 		c.AllowedDestPrefixes = append(c.AllowedDestPrefixes, p)
 	}
+	for k, dst := range map[string]*int{"DAILY_QUOTA_PER_KEY": &c.DailyQuotaKey, "DAILY_QUOTA_PER_USER": &c.DailyQuotaUser} {
+		if v := os.Getenv(k); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				return c, fmt.Errorf("%s tidak valid: %q", k, v)
+			}
+			*dst = n
+		}
+	}
+	loc, err := time.LoadLocation(env("QUOTA_TIMEZONE", "Asia/Jakarta"))
+	if err != nil {
+		return c, fmt.Errorf("QUOTA_TIMEZONE tidak valid: %w", err)
+	}
+	c.QuotaLocation = loc
 	if v := os.Getenv("AUDIT_RETENTION_DAYS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {

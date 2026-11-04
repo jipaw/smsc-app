@@ -45,6 +45,9 @@ func (a *API) writeJSON(w http.ResponseWriter, status int, v any) {
 func (a *API) writeProblem(w http.ResponseWriter, r *http.Request, p *core.Problem) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.Header().Set("Cache-Control", "no-store")
+	if p.RetryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(p.RetryAfter))
+	}
 	w.WriteHeader(p.Status)
 	out := map[string]any{"type": p.Type, "title": p.Title, "status": p.Status, "instance": r.URL.Path}
 	if p.Detail != "" {

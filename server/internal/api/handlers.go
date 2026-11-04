@@ -892,17 +892,30 @@ func (a *API) listAPIKeys(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) createAPIKey(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Name      string     `json:"name"`
-		Scopes    []string   `json:"scopes"`
-		ExpiresAt *time.Time `json:"expires_at"`
+		Name       string     `json:"name"`
+		Scopes     []string   `json:"scopes"`
+		ExpiresAt  *time.Time `json:"expires_at"`
+		DailyQuota *int       `json:"daily_quota"`
 	}
 	if !a.decode(w, r, &in) {
+		return
+	}
+	if in.DailyQuota != nil && (*in.DailyQuota < 0 || *in.DailyQuota > 10_000_000) {
+		a.writeProblem(w, r, core.Validation(core.FieldError{Field: "daily_quota", Message: "0 (tanpa batas) sampai 10000000, atau null (ikuti default)"}))
 		return
 	}
 	k, err := a.Svc.CreateAPIKey(r.Context(), principalOf(r.Context()).user.ID, in.Name, in.Scopes, in.ExpiresAt)
 	if err != nil {
 		a.fail(w, r, err)
 		return
+	}
+	if in.DailyQuota != nil {
+		q, err := a.Svc.SetDailyQuota(r.Context(), core.QuotaSubject{Kind: "key", ID: k.ID}, in.DailyQuota, actorOf(principalOf(r.Context())))
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		k.Quota = &q
 	}
 	a.Svc.Audit(r.Context(), actorOf(principalOf(r.Context())), "apikey.create", "apikey", k.ID.String(), map[string]any{"name": k.Name})
 	a.writeJSON(w, http.StatusCreated, k)
@@ -2016,4 +2029,44 @@ func (a *API) putPrefs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.writeJSON(w, http.StatusOK, pr)
+}
+
+// GET /quota: kuota harian pemanggil (API key → kuota key; sesi → kuota pengguna).
+func (a *API) getQuota(w http.ResponseWriter, r *http.Request) {
+	p := principalOf(r.Context())
+	subj := core.QuotaSubject{Kind: "user"}
+	if p.isKey() {
+		subj = core.QuotaSubject{Kind: "key", ID: p.apiKeyID}
+	} else {
+		subj.ID = p.user.ID
+	}
+	q, err := a.Svc.QuotaOf(r.Context(), subj)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, q)
+}
+
+// PUT /api-keys/{apiKeyId}/quota dan /users/{userId}/quota (admin).
+func (a *API) putQuota(kind, param string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, perr := pathUUID(r, param)
+		if perr != nil {
+			a.writeProblem(w, r, perr)
+			return
+		}
+		var in struct {
+			DailyQuota *int `json:"daily_quota"`
+		}
+		if !a.decode(w, r, &in) {
+			return
+		}
+		q, err := a.Svc.SetDailyQuota(r.Context(), core.QuotaSubject{Kind: kind, ID: id}, in.DailyQuota, actorOf(principalOf(r.Context())))
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		a.writeJSON(w, http.StatusOK, q)
+	}
 }

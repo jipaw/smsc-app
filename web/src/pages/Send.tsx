@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { get, post } from '../lib/api'
 import { analyze, parseRecipients } from '../lib/sms'
-import type { DispatchPolicy, Sim, Template, SendResult, Device } from '../lib/types'
+import type { DispatchPolicy, Sim, Template, SendResult, Device, Quota } from '../lib/types'
 import { ErrorBox, Field, useToast } from '../components/ui'
 import { canOperate, useMe } from '../lib/session'
 
@@ -22,6 +22,8 @@ export function Send() {
   const policies = useQuery({ queryKey: ['policies'], queryFn: () => get<{ items: DispatchPolicy[] }>('/dispatch-policies') })
   const sims = useQuery({ queryKey: ['sims'], queryFn: () => get<{ items: Sim[] }>('/sims') })
   const devices = useQuery({ queryKey: ['devices'], queryFn: () => get<{ items: Device[] }>('/devices') })
+  const quota = useQuery({ queryKey: ['quota'], queryFn: () => get<Quota>('/quota'), enabled: canOperate(me) })
+  const qc = useQueryClient()
 
   const list = useMemo(() => parseRecipients(to), [to])
   const tpl = templates.data?.items.find((t) => t.id === tplId)
@@ -37,6 +39,7 @@ export function Send() {
       ...(when ? { not_before: new Date(when).toISOString() } : {}), priority,
     }),
     onSuccess: (r) => { setResult(r); toast(`${r.messages.length} pesan diantrekan`) },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['quota'] }),
   })
   if (!canOperate(me)) return <p className="err">Peran Anda tidak dapat mengirim SMS.</p>
   const devName = (id: string) => devices.data?.items.find((d) => d.id === id)?.name ?? ''
@@ -70,6 +73,12 @@ export function Send() {
           <Field label="Jadwal (opsional)"><input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} /></Field>
           <Field label={`Prioritas: ${priority}`} hint="Kirim cepat default 5; campaign 3."><input type="range" min={0} max={9} value={priority} onChange={(e) => setPriority(+e.target.value)} /></Field>
           <div className="okbox">{list.length} penerima × {info.parts} segmen = {list.length * info.parts} segmen</div>
+          {quota.data && quota.data.remaining != null && (
+            <div className={list.length * info.parts > quota.data.remaining ? 'err' : 'muted'} role="status">
+              Kuota harian Anda: sisa {quota.data.remaining} dari {quota.data.effective} segmen
+              {list.length * info.parts > quota.data.remaining && ' — pengiriman ini melebihi sisa kuota dan akan ditolak.'}
+            </div>
+          )}
           <ErrorBox error={send.error} />
           <button className="primary" disabled={!valid || send.isPending} onClick={() => send.mutate()}>{send.isPending ? 'Mengirim…' : `Kirim ke ${list.length} nomor`}</button>
         </div>

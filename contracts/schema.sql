@@ -35,7 +35,8 @@ CREATE TABLE users (
   scim_external_id    text,
   scim_attrs          jsonb NOT NULL DEFAULT '{}',
   scim_updated_at     timestamptz,
-  scim_direct_role    user_role
+  scim_direct_role    user_role,
+  daily_quota         integer CHECK (daily_quota >= 0)
 );
 CREATE UNIQUE INDEX users_email_uq ON users (lower(email));
 CREATE UNIQUE INDEX users_oidc_uq ON users (oidc_issuer, oidc_subject) WHERE oidc_subject IS NOT NULL;
@@ -170,7 +171,8 @@ CREATE TABLE api_keys (
   created_at   timestamptz NOT NULL DEFAULT now(),
   prev_key_hash    bytea,
   prev_valid_until timestamptz,
-  rotated_at       timestamptz
+  rotated_at       timestamptz,
+  daily_quota      integer CHECK (daily_quota >= 0)
 );
 
 -- ---------- policy ----------
@@ -300,7 +302,7 @@ CREATE TABLE campaigns (
   name         text NOT NULL,
   description  text,
   status       campaign_status NOT NULL DEFAULT 'draft',
-  pause_reason text CHECK (pause_reason IN ('user','auto_failure_ratio','no_capacity')),
+  pause_reason text CHECK (pause_reason IN ('user','auto_failure_ratio','no_capacity','quota')),
   body         text,
   template_id  uuid REFERENCES templates(id) ON DELETE RESTRICT,
   sim_ids      uuid[] NOT NULL DEFAULT '{}',
@@ -529,6 +531,14 @@ CREATE TABLE login_failures (
   locked_until timestamptz,
   updated_at   timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, source)
+);
+
+-- Kuota harian (bagian SMS) per API key / pengguna
+CREATE TABLE quota_usage (
+  subject text NOT NULL CHECK (subject ~ '^(key|user):'),
+  day     date NOT NULL,
+  used    integer NOT NULL DEFAULT 0,
+  PRIMARY KEY (subject, day)
 );
 
 -- Seed: policy default sesuai docs/03 §4

@@ -235,6 +235,7 @@ func (s *Service) CreateMessages(ctx context.Context, owner uuid.UUID, source, i
 		rows.Close()
 	}
 	idem := nullStr(idemKey)
+	created, charged := 0, 0 // pesan baru dan bagian SMS-nya (duplikat idempoten tidak dibebankan)
 	err = s.withTx(ctx, func(tx pgx.Tx) error {
 		for _, p := range prep {
 			if supp[p.e164] {
@@ -278,7 +279,8 @@ func (s *Service) CreateMessages(ctx context.Context, owner uuid.UUID, source, i
 			if err := sub.Commit(ctx); err != nil {
 				return err
 			}
-			s.M.MessagesCreated.WithLabelValues(source).Inc()
+			created++
+			charged += p.info.Parts
 			if err := insertEvent(ctx, tx, id, 0, "created", source, nil, nil, nil, nil); err != nil {
 				return err
 			}
@@ -291,8 +293,16 @@ func (s *Service) CreateMessages(ctx context.Context, owner uuid.UUID, source, i
 			}
 			res.Messages = append(res.Messages, m)
 		}
-		return nil
+		// kuota harian: seluruh permintaan dibatalkan bila melampaui (tidak ada pengiriman sebagian yang membingungkan)
+		subj := QuotaSubject{"user", owner}
+		if source == "api" {
+			subj.Kind = "key"
+		}
+		return s.chargeQuota(ctx, tx, subj, charged)
 	})
+	if err == nil {
+		s.M.MessagesCreated.WithLabelValues(source).Add(float64(created))
+	}
 	if err != nil {
 		return CreateResult{Messages: []Message{}, Rejected: res.Rejected}, err
 	}
