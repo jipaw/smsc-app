@@ -133,3 +133,24 @@ groups:
         expr: increase(smsc_hub_relay_total{result="dropped"}[10m]) > 0
         labels: {severity: warning}
         annotations: {summary: "Relay antar-instance WS Hub menjatuhkan pesan (DB bermasalah atau event > 7 KB) — perintah ke device di instance lain bisa tertunda/hilang"}
+      - alert: SmscPartialFailures
+        expr: increase(smsc_messages_partial_total[1h]) > 0
+        labels: {severity: info}
+        annotations: {summary: "Ada pesan gagal parsial (sebagian bagian SMS sudah sampai ke penerima) — lihat Transaksi › Hanya gagal parsial; retry berisiko bagian ganda dan wajib konfirmasi"}
+      - alert: SmscPartialSpike
+        expr: increase(smsc_messages_partial_total[15m]) >= 5
+        labels: {severity: warning}
+        annotations: {summary: "Lonjakan gagal parsial (≥ 5 dalam 15 menit) — kemungkinan SIM/operator bermasalah di tengah pesan multi-bagian; periksa SIM dan jeda antar-bagian"}
+      - alert: SmscStatusQueryDeviceLost
+        expr: increase(smsc_status_queries_total{result="lost"}[1h]) > 0
+        labels: {severity: info}
+        annotations: {summary: "Device menjawab sms.status: tidak punya job pesan yang seharusnya sending (data lokal HP hilang/aplikasi dipasang ulang?) — pesan ditandai unknown"}
+      - alert: SmscStatusQueryInvalid
+        expr: increase(smsc_status_queries_total{result="invalid"}[1h]) > 0
+        labels: {severity: warning}
+        annotations: {summary: "Device mengirim sms.state dengan hitungan bagian mustahil (terkirim > total, dst.) — kemungkinan bug aplikasi Android; periksa versi aplikasi"}
+      - alert: SmscStatusQueryUnanswered
+        expr: sum(increase(smsc_status_queries_total{result="queried"}[1h])) - sum(increase(smsc_status_queries_total{result=~"alive|settled|lost|stale|invalid"}[1h])) > 3
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "Banyak sms.status tidak dijawab device (aplikasi versi lama tanpa dukungan, atau koneksi bermasalah) — pesan sending jatuh ke unknown/retry tanpa konfirmasi"}

@@ -86,12 +86,17 @@ Upgrade aplikasi Android: distribusikan APK baru; device lama tetap berfungsi se
 
 ## 6. Monitoring dan alert
 
-Aturan alert siap pakai: [`ops/prometheus/alerts.yml`](../../ops/prometheus/alerts.yml) (26 alert; ambang awal, setel dengan data nyata; belum dijalankan di Prometheus sungguhan). Nama metrik sesuai implementasi (`smsc_devices`, `smsc_queue_depth{priority}`, `smsc_message_transitions_total{from,to}`, `smsc_webhook_deliveries_total{result}`, `smsc_device_battery_percent`, dst.; daftar lengkap: `curl 127.0.0.1:9090/metrics`). Tabel di bawah menjelaskan maksud tiap sinyal; bila nama berbeda, implementasi yang benar.
+Aturan alert siap pakai: [`ops/prometheus/alerts.yml`](../../ops/prometheus/alerts.yml) (31 alert; ambang awal, setel dengan data nyata; belum dijalankan di Prometheus sungguhan). Nama metrik sesuai implementasi (`smsc_devices`, `smsc_queue_depth{priority}`, `smsc_message_transitions_total{from,to}`, `smsc_webhook_deliveries_total{result}`, `smsc_device_battery_percent`, dst.; daftar lengkap: `curl 127.0.0.1:9090/metrics`). Pemeriksaan statis: `make alerts` (`ops/prometheus/check_alerts.py`: nama unik, severity, kurung seimbang, durasi `for`, setiap metrik terdaftar di `metrics.go`). Tabel di bawah menjelaskan maksud tiap sinyal; bila nama berbeda, implementasi yang benar.
 
 Metrik utama dan ambang awal (Prometheus/Alertmanager atau setara):
 
 | Alert | Kondisi | Tingkat |
 |---|---|---|
+| `SmscPartialFailures` | `increase(smsc_messages_partial_total[1h]) > 0` | Info |
+| `SmscPartialSpike` | `increase(smsc_messages_partial_total[15m]) >= 5` | Peringatan |
+| `SmscStatusQueryDeviceLost` | `sms.status` dijawab "tidak punya job" (`result="lost"`) | Info |
+| `SmscStatusQueryInvalid` | `sms.state` berhitungan mustahil (`result="invalid"`) — bug aplikasi | Peringatan |
+| `SmscStatusQueryUnanswered` | `queried` − (alive+settled+lost+stale+invalid) > 3/jam selama 10 mnt | Peringatan |
 | `SmscHubRelayDropped` | `increase(smsc_hub_relay_total{result="dropped"}[10m]) > 0` | Peringatan |
 | `SmscNoLeader` | `sum(smsc_leader) == 0` selama 2 mnt (worker tidak berjalan) | Kritis |
 | `SmscLeaderMetricAbsent` | `absent(smsc_leader)` 5 mnt (smscd tidak ter-scrape) | Kritis |

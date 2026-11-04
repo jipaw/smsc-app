@@ -2,7 +2,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 DB ?= postgres://nobody@localhost:55432/postgres?sslmode=disable
 
-.PHONY: build test unit integration contract schema load web e2e verify
+.PHONY: build test unit integration contract schema alerts load web e2e verify
 build:
 	go build -ldflags "-X github.com/jipaw/smsc-app/server/internal/buildinfo.Version=$(VERSION)" -o bin/smscd ./cmd/smscd
 
@@ -16,6 +16,9 @@ integration:
 contract: build
 	SMSC_TEST_DATABASE_URL='$(DB)' python3 tests/contract_check.py bin/smscd
 
+alerts:
+	python3 ../ops/prometheus/check_alerts.py
+
 schema:
 	SMSC_TEST_DATABASE_URL='$(DB)' bash tests/schema_sync.sh
 
@@ -23,7 +26,7 @@ schema:
 load: build
 	SMSC_TEST_DATABASE_URL='$(DB)' python3 tests/load_campaign.py bin/smscd 50000
 
-test: unit integration contract schema
+test: unit integration contract schema alerts
 
 # bangun dashboard lalu salin ke folder embed
 web:
