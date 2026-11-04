@@ -370,6 +370,7 @@ func messageWebhookData(m Message) map[string]any {
 		"message_id": m.ID, "client_ref": m.ClientRef, "to": m.To, "status": m.Status, "campaign_id": m.CampaignID,
 		"sim_id": m.SimID, "device_id": m.DeviceID, "attempt": m.Attempt, "error_code": m.ErrorCode,
 		"created_at": m.CreatedAt, "sent_at": m.SentAt, "delivered_at": m.DeliveredAt,
+		"partial": m.Partial, "parts_sent": m.PartsSent, "parts_total": m.Parts,
 	}
 }
 

@@ -41,8 +41,9 @@ func (s *Service) OnSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.S
 // eventOpts: NoRetry = jangan antre ulang walau kodenya bisa dicoba ulang (kegagalan parsial multi-bagian: sebagian bagian
 // sudah sampai ke penerima, mengirim ulang seluruh pesan membuat bagian itu ganda); Extra = data tambahan pada catatan event.
 type eventOpts struct {
-	NoRetry bool
-	Extra   map[string]any
+	NoRetry     bool
+	Extra       map[string]any
+	PartialSent *int // bila diisi dan pesan menjadi failed: tandai kegagalan parsial dengan jumlah bagian terkirim ini
 }
 
 func (s *Service) onSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.SmsEvent, o eventOpts) error {
@@ -152,6 +153,13 @@ func (s *Service) onSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.S
 				if retryable[code] && !o.NoRetry && cur.Attempt < cur.MaxAttempts && cur.ExpiresAt.After(time.Now()) {
 					next, nb := cur.Attempt+1, time.Now().Add(backoff(eff, cur.Attempt, code))
 					return do(StatusQueued, "requeued", TransitionOpts{NewAttempt: &next, NotBefore: &nb, ErrorCode: &code})
+				}
+				if o.PartialSent != nil {
+					// ditulis sebelum transisi agar webhook message.failed (dibaca ulang dalam transisi) sudah memuat penanda parsial
+					if _, err := tx.Exec(ctx, `UPDATE messages SET partial_sent=$2 WHERE id=$1`, mid, *o.PartialSent); err != nil {
+						return err
+					}
+					s.M.MessagesPartial.Inc()
 				}
 				return do(StatusFailed, "failed", TransitionOpts{ErrorCode: &code})
 			case StatusSent:

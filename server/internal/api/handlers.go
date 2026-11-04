@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -488,6 +489,13 @@ func parseFilter(r *http.Request) (core.MessageFilter, *core.Problem) {
 	if f.DeviceID, perr = qUUID(r, "device_id"); perr != nil {
 		return f, perr
 	}
+	if v := q.Get("partial"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return f, core.Validation(core.FieldError{Field: "partial", Message: "harus true atau false"})
+		}
+		f.Partial = &b
+	}
 	f.SimID, perr = qUUID(r, "sim_id")
 	return f, perr
 }
@@ -592,7 +600,7 @@ func (a *API) exportMessages(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="transaksi.csv"`)
 	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"id", "created_at", "source", "to", "body", "status", "attempt", "error_code", "device_id", "sim_id", "sent_at", "delivered_at"})
+	_ = cw.Write([]string{"id", "created_at", "source", "to", "body", "status", "attempt", "error_code", "device_id", "sim_id", "sent_at", "delivered_at", "partial", "parts_sent"})
 	cursor := ""
 	p := principalOf(r.Context())
 	for pages := 0; pages < 1000; pages++ {
@@ -610,7 +618,7 @@ func (a *API) exportMessages(w http.ResponseWriter, r *http.Request) {
 				to = maskNumber(to)
 			}
 			_ = cw.Write([]string{m.ID.String(), m.CreatedAt.UTC().Format(time.RFC3339), m.Source, csvSafe(to), csvSafe(body), string(m.Status), fmt.Sprint(m.Attempt),
-				csvSafe(derefS(m.ErrorCode)), derefU(m.DeviceID), derefU(m.SimID), tstr(m.SentAt), tstr(m.DeliveredAt)})
+				csvSafe(derefS(m.ErrorCode)), derefU(m.DeviceID), derefU(m.SimID), tstr(m.SentAt), tstr(m.DeliveredAt), fmt.Sprint(m.Partial), derefI(m.PartsSent)})
 		}
 		if next == "" {
 			break
@@ -618,6 +626,13 @@ func (a *API) exportMessages(w http.ResponseWriter, r *http.Request) {
 		cursor = next
 	}
 	cw.Flush()
+}
+
+func derefI(v *int) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.Itoa(*v)
 }
 
 func derefS(s *string) string {

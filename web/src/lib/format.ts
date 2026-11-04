@@ -23,6 +23,7 @@ export const STATUS_LABEL: Record<string, { label: string; icon: string; tone: s
   cancelled: { label: 'Dibatalkan', icon: '⊘', tone: 'muted' },
   expired: { label: 'Kedaluwarsa', icon: '⌛', tone: 'warn' },
   unknown: { label: 'Tidak pasti', icon: '?', tone: 'unknown' },
+  partial: { label: 'Parsial', icon: '◐', tone: 'warn' },
   online: { label: 'Online', icon: '●', tone: 'ok' },
   degraded: { label: 'Terganggu', icon: '▲', tone: 'warn' },
   offline: { label: 'Offline', icon: '○', tone: 'muted' },

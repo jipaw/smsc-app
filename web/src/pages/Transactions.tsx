@@ -17,12 +17,13 @@ export function Transactions({ campaignId }: { campaignId?: string } = {}) {
   const [source, setSource] = useState('')
   const [to, setTo] = useState('')
   const [from, setFrom] = useState('')
+  const [partialOnly, setPartialOnly] = useState(false)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [open, setOpen] = useState<string | null>(null)
   const seen = useRef<Set<string>>(new Set())
   const [fresh, setFresh] = useState<Set<string>>(new Set())
 
-  const filters = { status, source, to: to.trim(), created_from: from ? new Date(from).toISOString() : '', campaign_id: campaignId }
+  const filters = { status, source, to: to.trim(), created_from: from ? new Date(from).toISOString() : '', campaign_id: campaignId, partial: partialOnly ? 'true' : '' }
   const q = useInfiniteQuery({
     queryKey: ['messages', filters],
     queryFn: ({ pageParam }) => get<Page<Message>>('/messages' + qs({ ...filters, limit: 50, cursor: pageParam })),
@@ -41,7 +42,7 @@ export function Transactions({ campaignId }: { campaignId?: string } = {}) {
 
   const bulk = useMutation({
     mutationFn: async (kind: 'retry' | 'cancel') => {
-      const ids = rows.filter((r) => sel.has(r.id) && (kind === 'retry' ? ['failed', 'expired'].includes(r.status) : ['queued', 'assigned'].includes(r.status))).map((r) => r.id)
+      const ids = rows.filter((r) => sel.has(r.id) && (kind === 'retry' ? ['failed', 'expired'].includes(r.status) && !r.partial : ['queued', 'assigned'].includes(r.status))).map((r) => r.id)
       const res = await Promise.allSettled(ids.map((id) => post(`/messages/${id}/${kind}`)))
       return { ok: res.filter((x) => x.status === 'fulfilled').length, total: ids.length }
     },
@@ -50,7 +51,7 @@ export function Transactions({ campaignId }: { campaignId?: string } = {}) {
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const exportUrl = '/api/v1/messages/export' + qs({ ...filters })
   const op = canOperate(me)
-  const retryable = rows.filter((r) => sel.has(r.id) && ['failed', 'expired'].includes(r.status)).length
+  const retryable = rows.filter((r) => sel.has(r.id) && ['failed', 'expired'].includes(r.status) && !r.partial).length
   const cancellable = rows.filter((r) => sel.has(r.id) && ['queued', 'assigned'].includes(r.status)).length
 
   return (
@@ -62,13 +63,14 @@ export function Transactions({ campaignId }: { campaignId?: string } = {}) {
         <div className="row">
           <input placeholder="Cari nomor (+62…)" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Cari nomor" />
           <select value={source} onChange={(e) => setSource(e.target.value)} aria-label="Sumber"><option value="">Semua sumber</option>{SOURCES.map((s) => <option key={s}>{s}</option>)}</select>
+          <label className="row" style={{ gap: 4 }}><input type="checkbox" checked={partialOnly} onChange={(e) => setPartialOnly(e.target.checked)} />Hanya gagal parsial</label>
           <label className="row">Sejak <input type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-          <button className="small" onClick={() => { setStatus([]); setSource(''); setTo(''); setFrom('') }}>Reset</button>
+          <button className="small" onClick={() => { setStatus([]); setSource(''); setTo(''); setFrom(''); setPartialOnly(false) }}>Reset</button>
         </div>
         {op && sel.size > 0 && <div className="row"><strong>{sel.size} dipilih</strong>
           <button className="small" disabled={!retryable || bulk.isPending} onClick={() => bulk.mutate('retry')}>Retry ({retryable})</button>
           <button className="small" disabled={!cancellable || bulk.isPending} onClick={() => bulk.mutate('cancel')}>Batalkan ({cancellable})</button>
-          <span className="hint">Pesan “tidak pasti” hanya dapat di-retry satu per satu (risiko SMS ganda).</span></div>}
+          <span className="hint">Pesan “tidak pasti” dan “gagal parsial” hanya dapat di-retry satu per satu (risiko SMS/bagian ganda).</span></div>}
       </div>
       {q.isLoading && <Loading />}
       <ErrorBox error={q.error} />
@@ -82,7 +84,7 @@ export function Transactions({ campaignId }: { campaignId?: string } = {}) {
               <td data-l="Waktu" title={fmtTime(m.created_at)}>{rel(m.created_at)}</td>
               <td data-l="Nomor" className="mono">{m.to}</td>
               <td data-l="Isi" style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.body ?? ''}>{m.body}</td>
-              <td data-l="Sumber">{m.source}</td><td data-l="Status"><Badge status={m.status} /></td><td data-l="Try">{m.attempt}/{m.max_attempts}</td>
+              <td data-l="Sumber">{m.source}</td><td data-l="Status"><Badge status={m.status} />{m.partial && <> <Badge status="partial" label={`Parsial ${m.parts_sent ?? 0}/${m.parts}`} /></>}</td><td data-l="Try">{m.attempt}/{m.max_attempts}</td>
               <td data-l="Keterangan" className="muted">{m.error_code ? ERROR_LABEL[m.error_code] ?? m.error_code : ''}</td>
             </tr>))}</tbody>
         </table>
@@ -112,9 +114,11 @@ function Detail({ id, onClose }: { id: string | null; onClose: () => void }) {
         <div className="row spread"><span className="mono">{m.to}</span><Badge status={m.status} /></div>
         <div className="card" style={{ whiteSpace: 'pre-wrap' }}>{m.body}</div>
         <div className="muted">{m.encoding?.toUpperCase()} · {m.parts} segmen · prioritas {m.priority} · percobaan {m.attempt}/{m.max_attempts}</div>
+        {m.partial && <div className="err" role="status">Gagal parsial: {m.parts_sent ?? 0} dari {m.parts} bagian sudah terkirim ke penerima, sisanya tidak. Pesan tidak diantre ulang otomatis agar bagian yang sudah sampai tidak ganda.</div>}
         {m.error_code && <div className="err">{ERROR_LABEL[m.error_code] ?? m.error_code} <span className="mono">({m.error_code})</span>{m.status === 'unknown' && <div>HP terputus saat mengirim; hasil tidak pasti. Tunggu HP kembali online (status dikoreksi otomatis) sebelum retry.</div>}</div>}
         {op && <div className="row">
-          {['failed', 'expired'].includes(m.status) && <button onClick={() => act.mutate({ kind: 'retry', body: {} })}>Retry</button>}
+          {['failed', 'expired'].includes(m.status) && !m.partial && <button onClick={() => act.mutate({ kind: 'retry', body: {} })}>Retry</button>}
+          {m.partial && <button className="danger" onClick={() => window.confirm(`${m.parts_sent ?? 0} dari ${m.parts} bagian pesan ini sudah terkirim. Retry mengirim ulang SEMUA bagian sehingga bagian itu ganda di penerima. Yakin?`) && act.mutate({ kind: 'retry', body: { confirm_duplicate_risk: true } })}>Retry (bagian ganda)</button>}
           {m.status === 'unknown' && <button className="danger" onClick={() => window.confirm('Retry pesan tidak pasti dapat mengirim SMS ganda. Yakin?') && act.mutate({ kind: 'retry', body: { confirm_duplicate_risk: true } })}>Retry (risiko ganda)</button>}
           {['queued', 'assigned'].includes(m.status) && <button onClick={() => act.mutate({ kind: 'cancel' })}>Batalkan</button>}
         </div>}

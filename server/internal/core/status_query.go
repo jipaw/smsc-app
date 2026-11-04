@@ -113,6 +113,7 @@ func (s *Service) OnSmsState(ctx context.Context, deviceID uuid.UUID, st proto.S
 			}
 			if sent > 0 {
 				o.NoRetry = true
+				o.PartialSent = &sent
 				extra["partial"] = true
 				s.M.StatusQueries.WithLabelValues("partial").Inc()
 			}

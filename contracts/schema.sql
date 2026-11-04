@@ -375,6 +375,7 @@ CREATE TABLE messages (
   sent_grace_ms    integer NOT NULL DEFAULT 0 CHECK (sent_grace_ms >= 0),
   status_queries   smallint NOT NULL DEFAULT 0 CHECK (status_queries >= 0),
   status_progress  integer NOT NULL DEFAULT 0 CHECK (status_progress >= 0),
+  partial_sent     smallint CHECK (partial_sent >= 0),
   CHECK (status <> 'assigned' OR (sim_id IS NOT NULL AND lease_expires_at IS NOT NULL))
 );
 CREATE INDEX messages_dispatch_idx   ON messages (priority DESC, not_before, id) WHERE status = 'queued';
@@ -382,6 +383,7 @@ CREATE INDEX messages_lease_idx      ON messages (lease_expires_at) WHERE status
 CREATE INDEX messages_inflight_idx   ON messages (device_id, status) WHERE status IN ('assigned','sending');
 CREATE INDEX messages_campaign_idx   ON messages (campaign_id, status);
 CREATE INDEX messages_created_idx    ON messages (created_at DESC, id DESC);
+CREATE INDEX messages_partial_idx ON messages (created_at DESC) WHERE partial_sent IS NOT NULL;
 CREATE INDEX messages_to_idx         ON messages (to_e164, created_at DESC);
 CREATE INDEX messages_sim_sent_idx   ON messages (sim_id, sent_at) WHERE sent_at IS NOT NULL;
 CREATE INDEX messages_expiry_idx     ON messages (expires_at) WHERE status IN ('queued','assigned');

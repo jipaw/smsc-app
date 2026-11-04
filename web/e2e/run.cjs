@@ -203,6 +203,27 @@ async function main() {
   const csv = await ctx.request.get(URL_ + '/api/v1/messages/export')
   check(csv.status() === 200 && (await csv.text()).split('\n')[0].startsWith('id,created_at'), 'ekspor CSV mengikuti sesi')
 
+  // ---- kegagalan parsial (fase 25): baris di-seed lewat SQL; jalur server diuji di tes integrasi ----
+  const psqlDb = (sql) => execFileSync('psql', [BASE.replace('/postgres?', `/${DB}?`), '-qc', sql])
+  psqlDb(`INSERT INTO messages(id, source, to_e164, body, encoding, parts, status, attempt, max_attempts, error_code, expires_at, finished_at, partial_sent)
+          VALUES (gen_random_uuid(), 'api', '+628155500001', 'pesan panjang parsial', 'gsm7', 3, 'failed', 1, 3, 'generic_failure', now() + interval '1 day', now(), 1)`)
+  await page.reload() // baris di-seed lewat SQL (tanpa event SSE) dan staleTime query 5 dtk: muat ulang agar daftar segar
+  await page.getByRole('heading', { name: 'Transaksi' }).waitFor()
+  const prow = page.getByRole('row').filter({ hasText: '+628155500001' })
+  await prow.waitFor()
+  check((await prow.getByText('Parsial 1/3').count()) === 1, 'baris gagal parsial menampilkan lencana "Parsial 1/3"')
+  await page.getByLabel('Hanya gagal parsial').check()
+  await until(async () => (await page.getByRole('row').filter({ hasText: '+628123456789' }).count()) === 0 && (await prow.count()) === 1, 8000, 'filter hanya gagal parsial')
+  check(true, 'filter "Hanya gagal parsial" hanya menyisakan pesan parsial')
+  await prow.click()
+  await page.getByRole('heading', { name: 'Timeline' }).waitFor()
+  check((await page.getByText(/1 dari 3 bagian sudah terkirim/).count()) >= 1, 'detail menjelaskan kegagalan parsial')
+  check((await page.getByRole('button', { name: 'Retry', exact: true }).count()) === 0 && (await page.getByRole('button', { name: /Retry \(bagian ganda\)/ }).count()) === 1, 'retry polos disembunyikan; hanya retry dengan konfirmasi bagian ganda')
+  await axeCheck(page, 'transaksi parsial')
+  await page.keyboard.press('Escape')
+  await page.getByLabel('Hanya gagal parsial').uncheck()
+  psqlDb(`DELETE FROM messages WHERE to_e164='+628155500001'`)
+
   // ---- overview + settings ----
   await page.getByRole('link', { name: 'Overview', exact: true }).click()
   await page.getByText('Terkirim hari ini').waitFor()

@@ -735,6 +735,7 @@ paths:
         - {name: client_ref, in: query, schema: {type: string}}
         - {name: created_from, in: query, schema: {type: string, format: date-time}}
         - {name: created_to, in: query, schema: {type: string, format: date-time}}
+        - {name: partial, in: query, description: 'true = hanya kegagalan parsial; false = selain itu.', schema: {type: boolean}}
         - {$ref: '#/components/parameters/Limit'}
         - {$ref: '#/components/parameters/Cursor'}
       responses:
@@ -831,7 +832,7 @@ paths:
     post:
       tags: [Messages]
       summary: Antrekan ulang pesan `failed`/`expired`/`unknown`
-      description: Membuat attempt baru pada pesan yang sama. Untuk `unknown` operator harus mengonfirmasi risiko kirim ganda (`confirm_duplicate_risk=true`).
+      description: Membuat attempt baru pada pesan yang sama. Untuk `unknown` dan kegagalan parsial (`partial=true`) operator harus mengonfirmasi risiko kirim ganda (`confirm_duplicate_risk=true`).
       requestBody:
         content:
           application/json:
@@ -2489,7 +2490,7 @@ components:
         - missing_variable
     Message:
       type: object
-      required: [id, source, to, encoding, parts, status, attempt, max_attempts, priority, created_at, not_before, expires_at]
+      required: [id, source, to, encoding, parts, status, attempt, max_attempts, priority, created_at, not_before, expires_at, partial]
       properties:
         id: {type: string, format: uuid}
         source: {$ref: '#/components/schemas/MessageSource'}
@@ -2514,13 +2515,15 @@ components:
         sent_at: {type: [string, 'null'], format: date-time}
         delivered_at: {type: [string, 'null'], format: date-time}
         finished_at: {type: [string, 'null'], format: date-time}
+        partial: {type: boolean, description: 'true bila pesan gagal setelah sebagian bagian SMS (multi-bagian) sudah terkirim. Retry membuat bagian itu ganda di penerima, sehingga wajib `confirm_duplicate_risk`.'}
+        parts_sent: {type: [integer, 'null'], description: 'Jumlah bagian yang sudah terkirim saat gagal parsial; null bila bukan kegagalan parsial.'}
     MessageEvent:
       type: object
       required: [id, attempt, type, at, actor]
       properties:
         id: {type: string, format: uuid}
         attempt: {type: integer}
-        type: {type: string, enum: [created, queued, assigned, acked, sending, part_sent, sent, part_delivered, delivered, failed, requeued, cancelled, expired, marked_unknown, manual_retry]}
+        type: {type: string, enum: [created, queued, assigned, acked, sending, part_sent, sent, part_delivered, delivered, failed, requeued, cancelled, expired, marked_unknown, manual_retry, status_progress, stale_event]}
         at: {type: string, format: date-time}
         actor: {type: string, enum: [system, device, user, api]}
         sim_id: {type: [string, 'null'], format: uuid}

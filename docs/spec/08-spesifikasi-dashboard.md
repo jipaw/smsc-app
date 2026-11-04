@@ -78,8 +78,8 @@ Formulir satu halaman:
 
 - **Filter bar**: status (multi), sumber, campaign, device, SIM, rentang tanggal, pencarian nomor/ID/`client_ref`. Filter tersimpan di URL (dapat dibagikan).
 - **Tabel** (virtualisasi, cursor infinite): waktu, nomor, isi (dipotong 60 char, tooltip), sumber/campaign, device·SIM, status, attempt, error. Baris baru/berubah disorot 2 dtk. Toggle "Live" (default aktif; berhenti bila pengguna menggulir ke bawah, tombol "Muat N baru").
-- **Aksi massal**: Retry (hanya `failed/expired`), Cancel (hanya `queued/assigned`) — pratinjau jumlah yang eligible; `unknown` hanya individual dengan dialog risiko.
-- **Drawer detail**: ringkasan (nomor, isi lengkap, segmen/encoding, device/SIM, waktu penting), **timeline** vertikal (jenis event, aktor, waktu absolut + selisih dari event sebelumnya, `error_code`/`android_result_code`), tombol Retry/Cancel, salin ID.
+- **Aksi massal**: Retry (hanya `failed/expired`), Cancel (hanya `queued/assigned`) — pratinjau jumlah yang eligible; `unknown` dan **gagal parsial** hanya individual dengan dialog risiko. Filter "Hanya gagal parsial"; baris gagal parsial menampilkan lencana `Parsial n/total` di samping status.
+- **Drawer detail**: ringkasan (nomor, isi lengkap, segmen/encoding, device/SIM, waktu penting), **timeline** vertikal (jenis event, aktor, waktu absolut + selisih dari event sebelumnya, `error_code`/`android_result_code`), tombol Retry/Cancel, salin ID. Pesan gagal parsial: banner penjelasan (n dari total bagian sudah terkirim, tidak diantre ulang otomatis) dan hanya tombol "Retry (bagian ganda)" dengan konfirmasi.
 - **Ekspor**: tombol → `GET /messages/export` dengan filter aktif; peringatan bila > 100.000 baris (diproses stream).
 
 ### 4.6 Campaigns

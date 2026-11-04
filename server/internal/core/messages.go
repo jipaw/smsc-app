@@ -89,18 +89,22 @@ type Message struct {
 	SentAt      *time.Time `json:"sent_at"`
 	DeliveredAt *time.Time `json:"delivered_at"`
 	FinishedAt  *time.Time `json:"finished_at"`
+	// kegagalan parsial (fase 25): gagal setelah sebagian bagian SMS terkirim; PartsSent = jumlah bagian yang sudah sampai
+	Partial   bool `json:"partial"`
+	PartsSent *int `json:"parts_sent"`
 
 	policyID *uuid.UUID
 }
 
 const msgCols = `id,source,campaign_id,client_ref,to_e164,body,encoding,parts,status,attempt,max_attempts,error_code,error_detail,priority,
-	device_id,sim_id,created_at,not_before,expires_at,assigned_at,sent_at,delivered_at,finished_at,policy_id`
+	device_id,sim_id,created_at,not_before,expires_at,assigned_at,sent_at,delivered_at,finished_at,partial_sent,policy_id`
 
 func scanMsg(r pgx.Row) (Message, error) {
 	var m Message
 	err := r.Scan(&m.ID, &m.Source, &m.CampaignID, &m.ClientRef, &m.To, &m.Body, &m.Encoding, &m.Parts, &m.Status, &m.Attempt, &m.MaxAttempts,
 		&m.ErrorCode, &m.ErrorDetail, &m.Priority, &m.DeviceID, &m.SimID, &m.CreatedAt, &m.NotBefore, &m.ExpiresAt, &m.AssignedAt, &m.SentAt,
-		&m.DeliveredAt, &m.FinishedAt, &m.policyID)
+		&m.DeliveredAt, &m.FinishedAt, &m.PartsSent, &m.policyID)
+	m.Partial = m.PartsSent != nil
 	return m, err
 }
 
@@ -364,7 +368,7 @@ func (s *Service) transition(ctx context.Context, tx pgx.Tx, id uuid.UUID, o Tra
 	switch o.To {
 	case StatusQueued:
 		q = `UPDATE messages SET status='queued', attempt=$2, not_before=COALESCE($3,not_before), lease_expires_at=NULL, error_code=$4, error_detail=$5,
-			finished_at=NULL WHERE id=$1`
+			finished_at=NULL, partial_sent=NULL WHERE id=$1`
 		_, err = tx.Exec(ctx, q, id, attempt, o.NotBefore, o.ErrorCode, o.ErrorDetail)
 	case StatusSending:
 		_, err = tx.Exec(ctx, `UPDATE messages SET status='sending', lease_expires_at=NULL WHERE id=$1`, id)
@@ -428,6 +432,7 @@ type MessageFilter struct {
 	ClientRef   string
 	CreatedFrom *time.Time
 	CreatedTo   *time.Time
+	Partial     *bool // true = hanya kegagalan parsial; false = selain itu
 }
 
 func encodeCursor(t time.Time, id uuid.UUID) string {
@@ -484,6 +489,13 @@ func (f MessageFilter) where(start int) (string, []any) {
 	}
 	if f.CreatedTo != nil {
 		add("created_at < ?", *f.CreatedTo)
+	}
+	if f.Partial != nil {
+		if *f.Partial {
+			conds = append(conds, "partial_sent IS NOT NULL")
+		} else {
+			conds = append(conds, "partial_sent IS NULL")
+		}
 	}
 	if len(conds) == 0 {
 		return "TRUE", nil
@@ -614,6 +626,9 @@ func (s *Service) RetryMessage(ctx context.Context, id uuid.UUID, actor string, 
 		}
 		if cur.Body == nil {
 			return Validation(FieldError{Field: "message", Message: "isi pesan sudah dibersihkan oleh kebijakan retensi sehingga tidak dapat dikirim ulang"})
+		}
+		if cur.Partial && !r.ConfirmDuplicateRisk {
+			return Validation(FieldError{"confirm_duplicate_risk", fmt.Sprintf("wajib true: %d bagian pesan ini sudah terkirim; mengirim ulang membuat bagian itu ganda di penerima", *cur.PartsSent)})
 		}
 		if cur.Status == StatusUnknown && !r.ConfirmDuplicateRisk {
 			return Validation(FieldError{"confirm_duplicate_risk", "wajib true untuk pesan berstatus unknown (risiko SMS ganda)"})
