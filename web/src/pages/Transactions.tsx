@@ -1,30 +1,31 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { get, post, qs } from '../lib/api'
 import { ERROR_LABEL, fmtTime, rel } from '../lib/format'
 import { canOperate, useMe } from '../lib/session'
+import { STATUSES, SOURCES, parseFilter, toSearch, EMPTY_FILTER, type TxFilter } from '../lib/txfilter'
 import { partialParams, partialBadge, partialExplain, partialRetryLabel, partialRetryWarning } from '../lib/partial'
 import type { Message, MessageDetail, Page } from '../lib/types'
 import { Badge, Empty, ErrorBox, errMsg, Loading, Modal, useToast } from '../components/ui'
 
-const STATUSES = ['queued', 'assigned', 'sending', 'sent', 'delivered', 'failed', 'cancelled', 'expired', 'unknown']
-const SOURCES = ['dashboard', 'api', 'campaign']
 
 export function Transactions({ campaignId }: { campaignId?: string } = {}) {
   const me = useMe()
   const qc = useQueryClient()
   const toast = useToast()
-  const [status, setStatus] = useState<string[]>([])
-  const [source, setSource] = useState('')
-  const [to, setTo] = useState('')
-  const [from, setFrom] = useState('')
-  const [partialKind, setPartialKind] = useState<'' | 'partial' | 'allsent'>('')
+  // filter disimpan di URL (bisa dibagikan, bertahan saat muat ulang); setiap perubahan mengganti entri riwayat agar tombol Back tidak tertimbun
+  const [sp, setSp] = useSearchParams()
+  const f = parseFilter(sp)
+  const setF = (patch: Partial<TxFilter>) => setSp(toSearch({ ...f, ...patch }, sp), { replace: true })
+  const { status, source, to, since: from, partial: partialKind } = f
+  const effCampaign = campaignId ?? (f.campaign || undefined)
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [open, setOpen] = useState<string | null>(null)
   const seen = useRef<Set<string>>(new Set())
   const [fresh, setFresh] = useState<Set<string>>(new Set())
 
-  const filters = { status, source, to: to.trim(), created_from: from ? new Date(from).toISOString() : '', campaign_id: campaignId, ...partialParams(partialKind) }
+  const filters = { status, source, to: to.trim(), created_from: from ? new Date(from).toISOString() : '', campaign_id: effCampaign, ...partialParams(partialKind) }
   const q = useInfiniteQuery({
     queryKey: ['messages', filters],
     queryFn: ({ pageParam }) => get<Page<Message>>('/messages' + qs({ ...filters, limit: 50, cursor: pageParam })),
@@ -59,15 +60,16 @@ export function Transactions({ campaignId }: { campaignId?: string } = {}) {
     <div className="stack gap-lg">
       <div className="row spread">{campaignId ? <h2>Pesan campaign</h2> : <h1>Transaksi</h1>}{op && <a className="btn" href={exportUrl} download>Ekspor CSV</a>}</div>
       <div className="card stack">
+        {!campaignId && f.campaign && <div className="row" role="status"><span className="badge info">Campaign {f.campaign.slice(0, 8)}…</span><Link to={`/campaigns/${f.campaign}`}>Buka campaign</Link><button className="small" onClick={() => setF({ campaign: '' })}>Hapus filter campaign</button></div>}
         <div className="row" role="group" aria-label="Filter status">{STATUSES.map((s) => (
-          <label key={s} className="row" style={{ gap: 4 }}><input type="checkbox" checked={status.includes(s)} onChange={(e) => setStatus((p) => e.target.checked ? [...p, s] : p.filter((x) => x !== s))} /><Badge status={s} /></label>))}</div>
+          <label key={s} className="row" style={{ gap: 4 }}><input type="checkbox" checked={status.includes(s)} onChange={(e) => setF({ status: e.target.checked ? [...status, s] : status.filter((x) => x !== s) })} /><Badge status={s} /></label>))}</div>
         <div className="row">
-          <input placeholder="Cari nomor (+62…)" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Cari nomor" />
-          <select value={source} onChange={(e) => setSource(e.target.value)} aria-label="Sumber"><option value="">Semua sumber</option>{SOURCES.map((s) => <option key={s}>{s}</option>)}</select>
-          <select value={partialKind} onChange={(e) => setPartialKind(e.target.value as '' | 'partial' | 'allsent')} aria-label="Kegagalan parsial">
+          <input placeholder="Cari nomor (+62…)" value={to} onChange={(e) => setF({ to: e.target.value })} aria-label="Cari nomor" />
+          <select value={source} onChange={(e) => setF({ source: e.target.value })} aria-label="Sumber"><option value="">Semua sumber</option>{SOURCES.map((s) => <option key={s}>{s}</option>)}</select>
+          <select value={partialKind} onChange={(e) => setF({ partial: e.target.value as TxFilter['partial'] })} aria-label="Kegagalan parsial">
             <option value="">Semua pesan</option><option value="partial">Hanya gagal parsial</option><option value="allsent">Hanya gagal tetapi semua bagian terkirim</option></select>
-          <label className="row">Sejak <input type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-          <button className="small" onClick={() => { setStatus([]); setSource(''); setTo(''); setFrom(''); setPartialKind('') }}>Reset</button>
+          <label className="row">Sejak <input type="datetime-local" value={from} onChange={(e) => setF({ since: e.target.value })} /></label>
+          <button className="small" onClick={() => setF({ ...EMPTY_FILTER })}>Reset</button>
         </div>
         {op && sel.size > 0 && <div className="row"><strong>{sel.size} dipilih</strong>
           <button className="small" disabled={!retryable || bulk.isPending} onClick={() => bulk.mutate('retry')}>Retry ({retryable})</button>

@@ -58,3 +58,13 @@ describe('partialParams', () => {
     expect(partialParams('allsent')).toEqual({ partial: '', all_sent: 'true' })
   })
 })
+
+import { campaignParts, overviewParts } from './partial'
+
+describe('bagian terstruktur untuk tautan', () => {
+  it('overviewParts/campaignParts memberi kind agar dapat ditautkan ke filter', () => {
+    expect(overviewParts(3, 1).map((x) => [x.kind, x.count])).toEqual([['partial', 2], ['allsent', 1]])
+    expect(campaignParts(0, 0)).toEqual([])
+    expect(campaignParts(2, 2).map((x) => x.kind)).toEqual(['allsent'])
+  })
+})

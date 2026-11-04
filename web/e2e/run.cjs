@@ -215,6 +215,10 @@ async function main() {
   await page.getByLabel('Kegagalan parsial').selectOption('partial')
   await until(async () => (await page.getByRole('row').filter({ hasText: '+628123456789' }).count()) === 0 && (await prow.count()) === 1, 8000, 'filter hanya gagal parsial')
   check(true, 'filter "Hanya gagal parsial" hanya menyisakan pesan parsial')
+  check(page.url().includes('parsial=partial'), 'filter transaksi tersimpan di URL (?parsial=partial)')
+  await page.reload()
+  await prow.waitFor()
+  check((await page.getByLabel('Kegagalan parsial').inputValue()) === 'partial' && (await page.getByRole('row').filter({ hasText: '+628123456789' }).count()) === 0, 'filter dari URL dipulihkan setelah muat ulang')
   await prow.click()
   await page.getByRole('heading', { name: 'Timeline' }).waitFor()
   check((await page.getByText(/1 dari 3 bagian sudah terkirim/).count()) >= 1, 'detail menjelaskan kegagalan parsial')
@@ -254,6 +258,9 @@ async function main() {
   await page.reload()
   await page.getByText(/termasuk 1 gagal parsial \(sebagian bagian sudah sampai\) dan 1 gagal tetapi semua bagian terkirim/).waitFor()
   check(true, 'Overview membedakan gagal parsial dan gagal-tetapi-semua-bagian-terkirim')
+  await page.getByRole('link', { name: /1 gagal tetapi semua bagian terkirim/ }).click()
+  await page.getByRole('row').filter({ hasText: '+628155500002' }).waitFor()
+  check(page.url().includes('parsial=allsent') && (await page.getByLabel('Kegagalan parsial').inputValue()) === 'allsent' && (await page.getByRole('row').filter({ hasText: '+628155500001' }).count()) === 0, 'tautan dari kartu Overview membuka daftar yang sudah terfilter')
   psqlDb(`DELETE FROM messages WHERE to_e164='+628155500001' OR to_e164='+628155500002'`)
 
   // ---- overview + settings ----

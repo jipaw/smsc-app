@@ -43,22 +43,36 @@ export function aggregateParts(partial: number | undefined, allSent: number | un
   return { strict: p - a, allSent: a }
 }
 
-/** Catatan di kartu "Gagal hari ini". */
-export function overviewNote(partial: number | undefined, allSent: number | undefined): string | undefined {
+export interface AggPart { kind: 'partial' | 'allsent'; count: number; text: string }
+
+/** Bagian ringkasan agregat: parsial sejati dan/atau gagal-tetapi-semua-bagian-terkirim (kosong bila tidak ada). */
+export function overviewParts(partial: number | undefined, allSent: number | undefined): AggPart[] {
   const { strict, allSent: a } = aggregateParts(partial, allSent)
-  const parts: string[] = []
-  if (strict > 0) parts.push(`${strict} gagal parsial (sebagian bagian sudah sampai)`)
-  if (a > 0) parts.push(`${a} gagal tetapi semua bagian terkirim`)
-  return parts.length ? `termasuk ${parts.join(' dan ')}` : undefined
+  const out: AggPart[] = []
+  if (strict > 0) out.push({ kind: 'partial', count: strict, text: `${strict} gagal parsial (sebagian bagian sudah sampai)` })
+  if (a > 0) out.push({ kind: 'allsent', count: a, text: `${a} gagal tetapi semua bagian terkirim` })
+  return out
 }
 
-/** Potongan legenda progres campaign setelah "gagal X". */
-export function campaignFailedSuffix(partial: number | undefined, allSent: number | undefined): string {
+/** Catatan di kartu "Gagal hari ini" (teks polos; Overview memakai overviewParts agar tiap bagian bisa menjadi tautan). */
+export function overviewNote(partial: number | undefined, allSent: number | undefined): string | undefined {
+  const parts = overviewParts(partial, allSent)
+  return parts.length ? `termasuk ${parts.map((x) => x.text).join(' dan ')}` : undefined
+}
+
+/** Bagian legenda progres campaign setelah "gagal X". */
+export function campaignParts(partial: number | undefined, allSent: number | undefined): AggPart[] {
   const { strict, allSent: a } = aggregateParts(partial, allSent)
-  const parts: string[] = []
-  if (strict > 0) parts.push(`parsial ${strict}`)
-  if (a > 0) parts.push(`semua bagian terkirim ${a}`)
-  return parts.length ? ` (${parts.join(', ')})` : ''
+  const out: AggPart[] = []
+  if (strict > 0) out.push({ kind: 'partial', count: strict, text: `parsial ${strict}` })
+  if (a > 0) out.push({ kind: 'allsent', count: a, text: `semua bagian terkirim ${a}` })
+  return out
+}
+
+/** Potongan legenda progres campaign setelah "gagal X" (teks polos). */
+export function campaignFailedSuffix(partial: number | undefined, allSent: number | undefined): string {
+  const parts = campaignParts(partial, allSent)
+  return parts.length ? ` (${parts.map((x) => x.text).join(', ')})` : ''
 }
 
 /** Parameter query daftar transaksi untuk filter kegagalan parsial: parsial sejati = partial=true&all_sent=false. */
