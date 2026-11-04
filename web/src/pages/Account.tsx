@@ -25,13 +25,15 @@ export function Account() {
   )
 }
 
-/** Preferensi pengguna: saat ini hanya notifikasi email (tampilan berbagi dimoderasi admin). */
+interface Prefs { email_notifications: boolean; email_shared_views: boolean; email_available: boolean }
+
+/** Preferensi notifikasi email: moderasi tampilan berbagi milik sendiri (default aktif) dan tampilan baru yang dibagikan orang lain (opt-in). */
 function Preferences() {
   const qc = useQueryClient()
   const toast = useToast()
-  const q = useQuery({ queryKey: ['prefs'], queryFn: () => get<{ email_notifications: boolean; email_available: boolean }>('/auth/preferences') })
+  const q = useQuery({ queryKey: ['prefs'], queryFn: () => get<Prefs>('/auth/preferences') })
   const m = useMutation({
-    mutationFn: (v: boolean) => put<{ email_notifications: boolean; email_available: boolean }>('/auth/preferences', { email_notifications: v }),
+    mutationFn: (patch: Partial<Pick<Prefs, 'email_notifications' | 'email_shared_views'>>) => put<Prefs>('/auth/preferences', patch),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['prefs'] }); toast('Preferensi disimpan') }, onError: (e) => toast(e instanceof Error ? e.message : 'Gagal menyimpan', true),
   })
   if (q.isLoading) return <Loading />
@@ -41,8 +43,12 @@ function Preferences() {
     <div className="card stack" role="group" aria-label="Preferensi notifikasi">
       <h2>Preferensi notifikasi</h2>
       <label className="row" style={{ gap: 6 }}>
-        <input type="checkbox" checked={p.email_notifications} disabled={m.isPending} onChange={(e) => m.mutate(e.target.checked)} />
+        <input type="checkbox" checked={p.email_notifications} disabled={m.isPending} onChange={(e) => m.mutate({ email_notifications: e.target.checked })} />
         Kirim email bila tampilan transaksi yang saya bagikan dihapus admin
+      </label>
+      <label className="row" style={{ gap: 6 }}>
+        <input type="checkbox" checked={p.email_shared_views} disabled={m.isPending} onChange={(e) => m.mutate({ email_shared_views: e.target.checked })} />
+        Kirim email bila pengguna lain membagikan tampilan transaksi baru (paling banyak satu per 10 menit)
       </label>
       {!p.email_available && <div className="hint">Server belum memiliki SMTP, jadi email tidak akan dikirim; notifikasi di lonceng tetap muncul.</div>}
     </div>

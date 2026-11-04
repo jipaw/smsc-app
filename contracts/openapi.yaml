@@ -1121,9 +1121,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email_notifications]
+              description: Isi minimal salah satu bidang; yang tidak dikirim tidak berubah.
               properties:
                 email_notifications: {type: boolean}
+                email_shared_views: {type: boolean}
       responses:
         '200':
           description: OK
@@ -2648,9 +2649,10 @@ components:
         parts_sent: {type: [integer, 'null'], description: 'Jumlah bagian yang sudah terkirim saat gagal parsial; null bila bukan kegagalan parsial.'}
     UserPrefs:
       type: object
-      required: [email_notifications, email_available]
+      required: [email_notifications, email_shared_views, email_available]
       properties:
-        email_notifications: {type: boolean, description: 'Kirim email untuk peristiwa penting (saat ini: tampilan berbagi Anda dimoderasi admin). Default true.'}
+        email_notifications: {type: boolean, description: 'Email saat tampilan berbagi Anda dimoderasi admin. Default true.'}
+        email_shared_views: {type: boolean, description: 'Email saat pengguna lain membagikan tampilan baru (opt-in). Default false; paling banyak satu email per 10 menit.'}
         email_available: {type: boolean}
     Notification:
       type: object

@@ -79,6 +79,11 @@ export function CampaignDetail() {
   const [tab, setTab] = useState<'pesan' | 'pengaturan'>('pesan')
   const [confirmCancel, setConfirmCancel] = useState(false)
   const q = useQuery({ queryKey: ['campaign', id], queryFn: () => get<Campaign>(`/campaigns/${id}`), refetchInterval: 5000 })
+  // daftar pesan tertanam dapat basi bila event SSE terlewat (mis. koneksi baru menyambung ulang saat campaign berjalan cepat): counters campaign
+  // di-poll tiap 5 dtk, jadi perubahan counters dijadikan pemicu penyegaran daftar pesan (cadangan yang tidak bergantung pada SSE)
+  const k = q.data?.counters
+  const sig = k ? `${q.data?.status}/${k.in_flight}/${k.sent}/${k.delivered}/${k.failed}/${k.queued}` : ''
+  useEffect(() => { if (sig) qc.invalidateQueries({ queryKey: ['messages'] }) }, [sig, qc])
   const act = useMutation({
     mutationFn: (a: string) => post<Campaign>(`/campaigns/${id}/${a}`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['campaign'] }); qc.invalidateQueries({ queryKey: ['campaigns'] }) }, onError: (e) => toast(errMsg(e), true),

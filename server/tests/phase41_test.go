@@ -134,7 +134,7 @@ func TestPreferencesWithoutSMTPAndValidation(t *testing.T) {
 		t.Fatalf("tanpa SMTP: %d %+v", st, pr)
 	}
 	if st := owner.c.do("PUT", "/api/v1/auth/preferences", map[string]any{}, nil); st != 422 {
-		t.Fatalf("field wajib: %d", st)
+		t.Fatalf("minimal satu bidang: %d", st)
 	}
 	v := shareView(t, owner.c, "x")
 	adm.c.do("DELETE", "/api/v1/saved-views/"+v.ID, nil, nil)

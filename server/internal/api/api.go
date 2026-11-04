@@ -38,6 +38,7 @@ type API struct {
 	loginLimit  *limiter
 	enrollLimit *limiter
 	keyLimit    *limiter
+	streamLimit *limiter // sambungan SSE per pengguna (terpisah dari userLimit: koneksi panjang, tidak boleh ikut tergilas ledakan permintaan SPA)
 	userLimit   *limiter
 	scimLimit   *limiter // per token SCIM
 	acctLimit   *limiter // operasi sensitif akun (ganti password, 2FA), per pengguna
@@ -52,7 +53,7 @@ func New(svc *core.Service, h *hub.Hub, b *bus.Bus, log *slog.Logger) *API {
 		lb = 5
 	}
 	return &API{Svc: svc, Hub: h, Bus: b, Log: log, acctLimit: newLimiter(2*lr/60, 2*lb), scimLimit: newLimiter(20, 40),
-		loginLimit: newLimiter(lr/60, lb), enrollLimit: newLimiter(10.0/60, 10), keyLimit: newLimiter(20, 40), userLimit: newLimiter(10, 20)}
+		loginLimit: newLimiter(lr/60, lb), enrollLimit: newLimiter(10.0/60, 10), keyLimit: newLimiter(20, 40), userLimit: newLimiter(30, 90), streamLimit: newLimiter(1, 10)}
 }
 
 func (a *API) Router() http.Handler {
@@ -305,7 +306,11 @@ func (a *API) authenticate(next http.Handler) http.Handler {
 				a.fail(w, r, err)
 				return
 			}
-			if !a.userLimit.allow(u.ID.String()) {
+			lim := a.userLimit
+			if r.URL.Path == "/api/v1/events/stream" {
+				lim = a.streamLimit // EventSource tidak mencoba ulang setelah 429: jangan biarkan ledakan permintaan biasa memutus realtime
+			}
+			if !lim.allow(u.ID.String()) {
 				w.Header().Set("Retry-After", "1")
 				a.writeProblem(w, r, core.NewProblem(http.StatusTooManyRequests, "rate_limited", "Terlalu banyak permintaan", ""))
 				return

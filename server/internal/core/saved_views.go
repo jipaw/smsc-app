@@ -177,6 +177,9 @@ func (s *Service) CreateSavedView(ctx context.Context, user uuid.UUID, name stri
 		v, e = scanView(tx.QueryRow(ctx, `SELECT `+viewSel+` FROM saved_views v JOIN users u ON u.id=v.user_id WHERE v.id=$2`, user, id))
 		if e == nil && shared {
 			e = s.notifyAllExcept(ctx, tx, user, "saved_view.shared", map[string]any{"view_id": id.String(), "name": name, "owner": v.Owner}, id.String())
+			if e == nil {
+				e = s.emailShared(ctx, tx, user, v.Owner, name)
+			}
 		}
 		return e
 	})
@@ -226,6 +229,9 @@ func (s *Service) UpdateSavedView(ctx context.Context, user, id uuid.UUID, name 
 		if e == nil && final && !cur { // baru dibagikan (bukan sekadar disunting)
 			newlyShared = true
 			e = s.notifyAllExcept(ctx, tx, user, "saved_view.shared", map[string]any{"view_id": id.String(), "name": name, "owner": v.Owner}, id.String())
+			if e == nil {
+				e = s.emailShared(ctx, tx, user, v.Owner, name)
+			}
 		}
 		return e
 	})

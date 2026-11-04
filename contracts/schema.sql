@@ -518,7 +518,8 @@ CREATE INDEX notifications_unread_idx ON notifications (user_id) WHERE read_at I
 CREATE TABLE user_prefs (
   user_id             uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   email_notifications boolean NOT NULL DEFAULT true,
-  updated_at          timestamptz NOT NULL DEFAULT now()
+  updated_at          timestamptz NOT NULL DEFAULT now(),
+  email_shared_views  boolean NOT NULL DEFAULT false
 );
 
 -- Seed: policy default sesuai docs/03 §4
