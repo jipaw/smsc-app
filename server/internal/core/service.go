@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/jipaw/smsc-app/server/internal/tsapi"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -43,6 +44,7 @@ type Service struct {
 	Pool   *pgxpool.Pool
 	Cfg    config.Config
 	Log    *slog.Logger
+	TS     *tsapi.Client // Tailscale API (auth key enrollment); nil bila tidak dikonfigurasi
 	Bus    *bus.Bus
 	M      *metrics.Metrics
 
@@ -76,7 +78,11 @@ func New(pool *pgxpool.Pool, cfg config.Config, log *slog.Logger, b *bus.Bus) *S
 	for _, src := range []string{"dashboard", "api", "campaign"} {
 		m.MessagesCreated.WithLabelValues(src).Add(0)
 	}
-	return &Service{Pool: pool, Cfg: cfg, Log: log, Bus: b, M: m, wake: make(chan struct{}, 1)}
+	svc := &Service{Pool: pool, Cfg: cfg, Log: log, Bus: b, M: m, wake: make(chan struct{}, 1)}
+	if t := cfg.Tailnet; t.KeyMinting() {
+		svc.TS = &tsapi.Client{BaseURL: t.APIURL, Tailnet: t.Tailnet, ClientID: t.OAuthClientID, ClientSecret: t.OAuthClientSecret, APIKey: t.APIKey}
+	}
+	return svc
 }
 
 func (s *Service) SetLink(l DeviceLink) { s.link = l }

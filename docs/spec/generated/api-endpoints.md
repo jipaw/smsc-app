@@ -39,7 +39,7 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 
 | Method | Path | Fungsi | Auth | Status |
 |---|---|---|---|---|
-| `POST` | `/device-enrollments` | Buat token enrollment sekali pakai (untuk QR) | apiKey/sessionCookie | 201,403 |
+| `POST` | `/device-enrollments` | Buat token enrollment sekali pakai (untuk QR) | apiKey/sessionCookie | 201,403,422,502 |
 | `DELETE` | `/device-enrollments/{enrollmentId}` | Cabut token enrollment yang belum dipakai | apiKey/sessionCookie | 204,404 |
 | `GET` | `/devices` | Daftar device | apiKey/sessionCookie | 200 |
 | `GET` | `/devices/{deviceId}` | Detail device (termasuk SIM) | apiKey/sessionCookie | 200,404 |
@@ -51,7 +51,7 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 
 | Method | Path | Fungsi | Auth | Status |
 |---|---|---|---|---|
-| `POST` | `/device/enroll` | Aplikasi menukar token QR menjadi kredensial device | publik | 201,401 |
+| `POST` | `/device/enroll` | Aplikasi menukar token QR menjadi kredensial device | publik | 201,401,403 |
 | `GET` | `/device/config` | Ambil konfigurasi terbaru (fallback jika WebSocket belum tersambung) | deviceToken | 200,401 |
 | `POST` | `/device/events` | Kirim batch event status SMS via REST (fallback outbox flush) | deviceToken | 200 |
 

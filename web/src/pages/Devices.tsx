@@ -56,9 +56,18 @@ function AddDevice({ open, onClose }: { open: boolean; onClose: () => void }) {
           <div className="stack" style={{ textAlign: 'center' }}>
             <div>Kode manual: <strong className="mono" style={{ fontSize: 18 }}>{enr.short_code}</strong></div>
             <div className={left === 0 ? 'err' : 'muted'}>{left === 0 ? 'Kedaluwarsa. Buat ulang.' : `Berlaku ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`} · sekali pakai</div>
-            <ol className="muted" style={{ textAlign: 'left', margin: 0 }}>
-              <li>Login Tailscale di HP</li><li>Pasang aplikasi SMSC dan beri izin</li><li>Scan QR ini (atau ketik kode manual)</li>
-            </ol>
+            {enr.tailnet_auth_key ? (
+              <>
+                <div className="okbox">QR ini memuat <strong>auth key Tailscale sekali pakai</strong>: aplikasi bergabung ke tailnet sendiri (tanpa aplikasi Tailscale). Jangan bagikan QR ini.</div>
+                <ol className="muted" style={{ textAlign: 'left', margin: 0 }}>
+                  <li>Pasang aplikasi SMSC (build tailnet ter-embed) dan beri izin</li><li>Scan QR ini</li>
+                </ol>
+              </>
+            ) : (
+              <ol className="muted" style={{ textAlign: 'left', margin: 0 }}>
+                <li>Login Tailscale di HP</li><li>Pasang aplikasi SMSC dan beri izin</li><li>Scan QR ini (atau ketik kode manual)</li>
+              </ol>
+            )}
             <div className="muted" role="status">○ Menunggu perangkat…</div>
           </div>
           <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -89,7 +98,7 @@ export function Devices() {
               <td data-l="Nama"><Link to={`/devices/${d.id}`}>{d.name}</Link><div className="muted">{d.manufacturer} {d.model}</div></td>
               <td data-l="Status"><Badge status={d.status} />{d.status_reason && <div className="hint">{ERROR_LABEL[d.status_reason] ?? d.status_reason}</div>}</td>
               <td data-l="Baterai">{d.battery_level != null ? `${d.battery_level}%${d.charging ? ' ⚡' : ''}` : '-'}</td>
-              <td data-l="Jaringan">{d.network_type ?? '-'}</td>
+              <td data-l="Jaringan">{d.network_type ?? '-'}{d.tailnet && <div><span className="badge ok" title={`Node tailnet terverifikasi server (WhoIs): ${d.tailnet.node_name} · ${d.tailnet.tags.join(', ')} · ${fmtTime(d.tailnet.verified_at)}`}>tailnet ✓</span></div>}</td>
               <td data-l="SIM">{d.sims.map((s) => <div key={s.id}>{s.slot_index + 1}: {s.label || s.carrier_name || '-'} <Badge status={s.status} /></div>)}</td>
               <td data-l="Versi" className="mono">{d.app_version ?? '-'}</td>
               <td data-l="Terakhir" className="muted">{rel(d.last_seen_at)}</td>
@@ -133,6 +142,9 @@ export function DeviceDetail() {
           <h2>Kesehatan</h2>
           <div>Terakhir terlihat: {fmtTime(d.last_seen_at)} ({rel(d.last_seen_at)})</div>
           <div>Baterai: {d.battery_level ?? '-'}% {d.charging ? '(mengisi)' : ''} · Jaringan: {d.network_type ?? '-'}</div>
+          <div>Identitas tailnet: {d.tailnet
+            ? <><span className="badge ok">terverifikasi server</span> <span className="mono">{d.tailnet.node_name}</span> · {d.tailnet.tags.join(', ') || 'tanpa tag'} · {rel(d.tailnet.verified_at)}</>
+            : <span className="muted">belum terverifikasi (bukan lewat tailnet ter-embed smscd)</span>}</div>
           {d.status_reason && <div className="badge warn">{ERROR_LABEL[d.status_reason] ?? d.status_reason}</div>}
           <h3>Capability</h3>
           <ul style={{ margin: 0, paddingLeft: 18 }}>{capRows.map(([k, l, h]) => <li key={k}>{caps[k] ? '✓' : '✗'} {l}{!caps[k] && <div className="hint">{h}</div>}</li>)}</ul>

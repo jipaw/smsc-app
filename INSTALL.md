@@ -77,6 +77,16 @@ sudo env $(sudo cat /etc/smscd/smscd.env | grep -v '^#' | xargs) DATABASE_URL_FI
 
 Rahasia di-*mount* oleh systemd (`LoadCredential`), sehingga hanya proses smscd yang dapat membacanya.
 
+## C. Tanpa sidecar: smscd sebagai node tailnet (tsnet)
+
+Varian ini juga memverifikasi identitas node HP di server. Compose: `docker compose -f deploy/compose/docker-compose.tsnet.yml up -d`.
+
+1. Buat auth key `tag:smsc-server` di admin console, lalu simpan di `secrets/tailnet_auth_key`. Key ini hanya untuk login pertama; kunci node disimpan di volume `tailnet`.
+2. (Disarankan) Buat **OAuth client** di *Settings → OAuth clients* dengan scope **Auth Keys (write)** dan tag `tag:smsc-device`. Isi `TAILSCALE_OAUTH_CLIENT_ID` di `.env` dan secret-nya di `secrets/tailscale_oauth_secret`. Setiap QR enrollment kemudian memuat auth key device sekali pakai, sehingga HP dengan build tailnet ter-embed tidak butuh aplikasi Tailscale.
+3. Mulai dengan `TAILNET_DEVICE_POLICY=record`. Setelah semua HP tampil "tailnet ✓" di Devices, ubah ke `enforce`.
+
+Biner/systemd: set variabel yang sama (`TAILNET_ENABLED=true`, `TAILNET_STATE_DIR=/var/lib/smscd/tailnet`, …) dan lewati langkah `tailscale serve`. Daftar lengkap: `docs/spec/10` §2.
+
 ## 1. Periksa dengan `smscd doctor`
 
 `doctor` memeriksa konfigurasi wajib, sumber rahasia, `PUBLIC_BASE_URL` vs `WEBAUTHN_RP_ID`, alamat bind, allow-list tujuan, SMTP/SSO, koneksi dan migrasi database, admin pertama, dan kebijakan 2FA. Kode keluar 1 bila ada `FAIL`. Perbaiki semua `FAIL`; baca setiap `WARN`.

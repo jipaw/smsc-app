@@ -1,0 +1,58 @@
+# Varian tanpa sidecar: smscd sendiri menjadi node tailnet (tsnet) dan memverifikasi identitas node device (WhoIs).
+# Pakai: ./init-secrets.sh; isi secrets/tailnet_auth_key (auth key tag:smsc-server, sekali pakai; boleh dikosongkan lagi
+# setelah login pertama) dan bila ingin auth key device otomatis: secrets/tailscale_oauth_secret + TAILSCALE_OAUTH_CLIENT_ID di .env; lalu
+#   docker compose -f docker-compose.tsnet.yml up -d
+name: smsc
+services:
+  server:
+    image: ${SMSC_IMAGE:-smsc/server:latest}
+    build: {context: ../.., dockerfile: Dockerfile}
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      SESSION_SECRET_FILE: /run/secrets/session_secret
+      WEBHOOK_ENC_KEY_FILE: /run/secrets/webhook_enc_key
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?isi PUBLIC_BASE_URL, mis. https://smsc.tailnet-anda.ts.net}
+      AUTO_MIGRATE: "true"
+      TAILNET_ENABLED: "true"
+      TAILNET_HOSTNAME: ${TS_HOSTNAME:-smsc}
+      TAILNET_STATE_DIR: /var/lib/smscd/tailnet
+      TAILNET_AUTH_KEY_FILE: /run/secrets/tailnet_auth_key
+      TAILNET_DEVICE_POLICY: ${TAILNET_DEVICE_POLICY:-record}
+      TAILSCALE_OAUTH_CLIENT_ID: ${TAILSCALE_OAUTH_CLIENT_ID:-}
+      TAILSCALE_OAUTH_CLIENT_SECRET_FILE: /run/secrets/tailscale_oauth_secret   # berkas kosong = tanpa auth key otomatis
+      ALLOWED_DESTINATION_PREFIXES: ${ALLOWED_DESTINATION_PREFIXES:-+62}
+      DEFAULT_REGION: ${DEFAULT_REGION:-ID}
+      DAILY_QUOTA_PER_KEY: ${DAILY_QUOTA_PER_KEY:-0}
+      DAILY_QUOTA_PER_USER: ${DAILY_QUOTA_PER_USER:-0}
+    secrets: [database_url, session_secret, webhook_enc_key, tailnet_auth_key, tailscale_oauth_secret]
+    volumes: [tailnet:/var/lib/smscd]
+    depends_on:
+      db: {condition: service_healthy}
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: smsc
+      POSTGRES_DB: smsc
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [pg:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "smsc", "-d", "smsc"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+secrets:
+  db_password: {file: ./secrets/db_password}
+  database_url: {file: ./secrets/database_url}
+  session_secret: {file: ./secrets/session_secret}
+  webhook_enc_key: {file: ./secrets/webhook_enc_key}
+  tailnet_auth_key: {file: ./secrets/tailnet_auth_key}
+  tailscale_oauth_secret: {file: ./secrets/tailscale_oauth_secret}
+
+volumes:
+  tailnet: {}
+  pg: {}

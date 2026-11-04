@@ -507,6 +507,9 @@ paths:
                 device_name: {type: string, maxLength: 80}
                 policy_id: {type: string, format: uuid}
                 ttl_seconds: {type: integer, minimum: 60, maximum: 3600, default: 900}
+                tailnet_auth_key:
+                  type: boolean
+                  description: 'Buat auth key Tailscale sekali pakai (ber-tag TAILNET_DEVICE_TAGS, pre-authorized, umur = TTL) lewat Tailscale API dan sisipkan ke enroll_url (k=). Absen = otomatis bila Tailscale API dikonfigurasi; true tanpa konfigurasi = 422.'
       responses:
         '201':
           description: Dibuat. `token` hanya tampil sekali.
@@ -514,6 +517,8 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Enrollment'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {description: 'Validasi, atau `tailnet.api_not_configured`', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '502': {description: 'Tailscale API gagal membuat auth key (`tailnet.auth_key_failed`); enrollment tidak dibuat', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
   /device-enrollments/{enrollmentId}:
     delete:
       tags: [Devices]
@@ -631,6 +636,11 @@ paths:
               schema: {$ref: '#/components/schemas/DeviceEnrollResponse'}
         '401':
           description: Token tidak valid, kedaluwarsa, atau sudah dipakai.
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '403':
+          description: 'TAILNET_DEVICE_POLICY=enforce: bukan lewat tailnet (`device.tailnet_required`) atau node tanpa tag device (`device.tailnet_tag`). Token tidak dikonsumsi.'
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
@@ -2519,6 +2529,7 @@ components:
         web_url: {type: string, description: 'Fallback https yang membuka app lewat App Link / menampilkan kode manual.'}
         short_code: {type: string, description: 'Kode 8 karakter untuk input manual.'}
         expires_at: {type: string, format: date-time}
+        tailnet_auth_key: {type: [string, 'null'], description: 'Auth key Tailscale sekali pakai (tampil sekali; juga ada di enroll_url sebagai k=). null bila tidak dibuat.'}
 
     DeviceEnrollRequest:
       type: object
@@ -2600,6 +2611,15 @@ components:
         connected_since: {type: [string, 'null'], format: date-time}
         created_at: {type: string, format: date-time}
         sims: {type: array, items: {$ref: '#/components/schemas/Sim'}}
+        tailnet:
+          type: [object, 'null']
+          description: 'Node tailnet yang terikat ke device (hasil WhoIs listener tailnet smscd). null bila belum pernah tersambung lewat tailnet ter-embed.'
+          required: [node_id, node_name, tags, verified_at]
+          properties:
+            node_id: {type: string, description: StableNodeID Tailscale}
+            node_name: {type: string}
+            tags: {type: array, items: {type: string}}
+            verified_at: {type: string, format: date-time}
 
     SimStatus: {type: string, enum: [active, no_service, absent, disabled]}
     SimReport:

@@ -62,15 +62,30 @@ type Device struct {
 	ConnectedSince *time.Time      `json:"connected_since"`
 	CreatedAt      time.Time       `json:"created_at"`
 	Sims           []Sim           `json:"sims"`
+	Tailnet        *DeviceTailnet  `json:"tailnet"` // node tailnet terikat (hasil WhoIs), null bila belum
 }
 
 const devCols = `id,name,status,status_reason,enabled,manufacturer,model,android_version,sdk_int,app_version,battery_level,charging,
-	network_type,host(tailscale_ip),capabilities,policy_id,tags,last_seen_at,connected_since,created_at`
+	network_type,host(tailscale_ip),capabilities,policy_id,tags,last_seen_at,connected_since,created_at,
+	tailnet_node_id,tailnet_node_name,tailnet_tags,tailnet_verified_at`
 
 func scanDevice(r pgx.Row) (Device, error) {
 	var d Device
+	var tnID, tnName *string
+	var tnTags []string
+	var tnAt *time.Time
 	err := r.Scan(&d.ID, &d.Name, &d.Status, &d.StatusReason, &d.Enabled, &d.Manufacturer, &d.Model, &d.AndroidVersion, &d.SDKInt, &d.AppVersion,
-		&d.BatteryLevel, &d.Charging, &d.NetworkType, &d.TailscaleIP, &d.Capabilities, &d.PolicyID, &d.Tags, &d.LastSeenAt, &d.ConnectedSince, &d.CreatedAt)
+		&d.BatteryLevel, &d.Charging, &d.NetworkType, &d.TailscaleIP, &d.Capabilities, &d.PolicyID, &d.Tags, &d.LastSeenAt, &d.ConnectedSince, &d.CreatedAt,
+		&tnID, &tnName, &tnTags, &tnAt)
+	if err == nil && tnID != nil && tnAt != nil {
+		d.Tailnet = &DeviceTailnet{NodeID: *tnID, Tags: tnTags, VerifiedAt: *tnAt}
+		if tnName != nil {
+			d.Tailnet.NodeName = *tnName
+		}
+		if d.Tailnet.Tags == nil {
+			d.Tailnet.Tags = []string{}
+		}
+	}
 	if d.Tags == nil {
 		d.Tags = []string{}
 	}
@@ -264,6 +279,8 @@ type Enrollment struct {
 	WebURL    string    `json:"web_url"`
 	ShortCode string    `json:"short_code"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// auth key Tailscale sekali pakai (ber-tag device, pre-authorized) — tampil sekali; juga disisipkan ke enroll_url sebagai k=
+	TailnetAuthKey *string `json:"tailnet_auth_key"`
 }
 
 const codeAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -284,24 +301,74 @@ func normCode(c string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "", " ", "").Replace(c))
 }
 
-func (s *Service) CreateEnrollment(ctx context.Context, by uuid.UUID, name string, policyID *uuid.UUID, ttl time.Duration) (Enrollment, error) {
+// CreateEnrollment membuat token enrollment. tailnetKey: nil = otomatis bila Tailscale API dikonfigurasi, true = wajib, false = tidak.
+func (s *Service) CreateEnrollment(ctx context.Context, by uuid.UUID, name string, policyID *uuid.UUID, ttl time.Duration, tailnetKey *bool) (Enrollment, error) {
 	if ttl <= 0 {
 		ttl = s.Cfg.EnrollTTL
+	}
+	mint := s.TS != nil
+	if tailnetKey != nil {
+		if *tailnetKey && s.TS == nil {
+			return Enrollment{}, NewProblem(http.StatusUnprocessableEntity, "tailnet.api_not_configured", "Tailscale API belum dikonfigurasi",
+				"isi TAILSCALE_OAUTH_CLIENT_ID/SECRET (scope auth_keys) atau TAILSCALE_API_KEY")
+		}
+		mint = *tailnetKey
 	}
 	e := Enrollment{ID: newID(), Token: randToken(32), ExpiresAt: time.Now().Add(ttl)}
 	code := randCode()
 	e.ShortCode = code[:4] + "-" + code[4:]
 	e.EnrollURL = "smsc://enroll?s=" + urlEscape(s.Cfg.PublicBaseURL) + "&t=" + e.Token
 	e.WebURL = s.Cfg.PublicBaseURL + "/enroll/" + e.Token
-	_, err := s.Pool.Exec(ctx, `INSERT INTO device_enrollments(id,token_hash,short_code_hash,device_name,policy_id,created_by,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		e.ID, sha(e.Token), sha(code), nullStr(name), policyID, by, e.ExpiresAt)
+	var keyID *string
+	if mint {
+		desc := "smsc enrollment " + e.ID.String()[:8]
+		if name != "" {
+			desc += " " + name
+		}
+		if len(desc) > 50 { // batas panjang deskripsi Tailscale API
+			desc = desc[:50]
+		}
+		k, err := s.TS.CreateDeviceKey(ctx, s.Cfg.Tailnet.DeviceTags, ttl, desc)
+		if err != nil {
+			s.M.TailnetKeys.WithLabelValues("create_failed").Inc()
+			s.Log.Warn("tailnet: gagal membuat auth key", "err", err)
+			return Enrollment{}, NewProblem(http.StatusBadGateway, "tailnet.auth_key_failed", "Gagal membuat auth key Tailscale", err.Error())
+		}
+		s.M.TailnetKeys.WithLabelValues("created").Inc()
+		keyID, e.TailnetAuthKey = &k.ID, &k.Key
+		e.EnrollURL += "&k=" + urlEscape(k.Key)
+	}
+	_, err := s.Pool.Exec(ctx, `INSERT INTO device_enrollments(id,token_hash,short_code_hash,device_name,policy_id,created_by,expires_at,tailnet_key_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		e.ID, sha(e.Token), sha(code), nullStr(name), policyID, by, e.ExpiresAt, keyID)
+	if err != nil && keyID != nil {
+		s.deleteTailnetKey(context.WithoutCancel(ctx), *keyID)
+	}
 	return e, err
 }
 
+// deleteTailnetKey mencabut auth key enrollment (best effort: key sekali pakai dan kedaluwarsa sendiri).
+func (s *Service) deleteTailnetKey(ctx context.Context, id string) {
+	if s.TS == nil || id == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := s.TS.DeleteKey(ctx, id); err != nil {
+		s.M.TailnetKeys.WithLabelValues("delete_failed").Inc()
+		s.Log.Warn("tailnet: gagal mencabut auth key", "key_id", id, "err", err)
+		return
+	}
+	s.M.TailnetKeys.WithLabelValues("deleted").Inc()
+}
+
 func (s *Service) RevokeEnrollment(ctx context.Context, id uuid.UUID) error {
-	ct, err := s.Pool.Exec(ctx, `UPDATE device_enrollments SET revoked_at=now() WHERE id=$1 AND consumed_at IS NULL AND revoked_at IS NULL`, id)
-	if err == nil && ct.RowsAffected() == 0 {
+	var keyID *string
+	err := s.Pool.QueryRow(ctx, `UPDATE device_enrollments SET revoked_at=now() WHERE id=$1 AND consumed_at IS NULL AND revoked_at IS NULL RETURNING tailnet_key_id`, id).Scan(&keyID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return NotFound("enrollment")
+	}
+	if err == nil && keyID != nil {
+		s.deleteTailnetKey(ctx, *keyID)
 	}
 	return err
 }
@@ -388,7 +455,12 @@ func (s *Service) Enroll(ctx context.Context, req EnrollRequest) (EnrollResponse
 	if req.InstallID == uuid.Nil || req.DeviceInfo.SDKInt < 29 {
 		return resp, Validation(FieldError{"install_id", "wajib"}, FieldError{"device_info.sdk_int", "minimal 29 (Android 10)"})
 	}
-	err := s.withTx(ctx, func(tx pgx.Tx) error {
+	tid, err := s.checkEnrollTailnet(ctx) // sebelum token dikonsumsi: penolakan tidak menghanguskan enrollment
+	if err != nil {
+		return resp, err
+	}
+	var usedKeyID *string
+	err = s.withTx(ctx, func(tx pgx.Tx) error {
 		h := sha(req.Token)
 		hc := sha(normCode(req.Token))
 		var enrID uuid.UUID
@@ -396,7 +468,7 @@ func (s *Service) Enroll(ctx context.Context, req EnrollRequest) (EnrollResponse
 		var pol *uuid.UUID
 		err := tx.QueryRow(ctx, `UPDATE device_enrollments SET consumed_at=now()
 			WHERE (token_hash=$1 OR short_code_hash=$2) AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now()
-			RETURNING id, device_name, policy_id`, h, hc).Scan(&enrID, &name, &pol)
+			RETURNING id, device_name, policy_id, tailnet_key_id`, h, hc).Scan(&enrID, &name, &pol, &usedKeyID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errBadEnroll
 		}
@@ -437,6 +509,11 @@ func (s *Service) Enroll(ctx context.Context, req EnrollRequest) (EnrollResponse
 		if _, err = tx.Exec(ctx, `UPDATE device_enrollments SET consumed_by_device_id=$2 WHERE id=$1`, enrID, devID); err != nil {
 			return err
 		}
+		if s.Cfg.Tailnet.DevicePolicy != "off" && s.Cfg.Tailnet.DevicePolicy != "" {
+			if err := bindTailnet(ctx, tx, devID, tid); err != nil {
+				return err
+			}
+		}
 		resp = EnrollResponse{DeviceID: devID, DeviceSecret: secret, Config: s.deviceConfig(ctx, tx, pol, 1)}
 		resp.WSURL = strings.Replace(strings.Replace(s.Cfg.PublicBaseURL, "https://", "wss://", 1), "http://", "ws://", 1) + "/ws/device"
 		if reenroll {
@@ -446,6 +523,9 @@ func (s *Service) Enroll(ctx context.Context, req EnrollRequest) (EnrollResponse
 	})
 	if err == nil {
 		s.publishDevice(ctx, resp.DeviceID)
+		if usedKeyID != nil { // HP sudah bergabung ke tailnet dengan key ini; cabut agar tidak tersisa di daftar key
+			s.deleteTailnetKey(context.WithoutCancel(ctx), *usedKeyID)
+		}
 	}
 	return resp, err
 }
@@ -489,9 +569,15 @@ func (s *Service) AuthDevice(ctx context.Context, secret string) (uuid.UUID, err
 	if err != nil {
 		// device sudah memakai secret baru dari rotasi sebelum konfirmasi tiba (ack hilang): promosikan sekarang
 		if ok, did := s.promoteDeviceSecretByHash(ctx, secret); ok {
+			if err := s.checkDeviceTailnet(ctx, did); err != nil {
+				return uuid.Nil, err
+			}
 			return did, nil
 		}
 		return uuid.Nil, NewProblem(http.StatusUnauthorized, "auth.unauthenticated", "Tidak terautentikasi", "kredensial device tidak valid")
+	}
+	if err := s.checkDeviceTailnet(ctx, id); err != nil {
+		return uuid.Nil, err
 	}
 	return id, nil
 }

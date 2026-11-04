@@ -47,7 +47,9 @@ fun main(args: Array<String>) {
     val credStore = CredentialStore(File(stateDir, "credentials.json"))
 
     opts["enroll"]?.let { link ->
-        val c = Enroller.enroll(http, EnrollLink.parse(link, opts["server"]), sims, AGENT_VERSION)
+        val parsed = EnrollLink.parse(link, opts["server"])
+        if (parsed.tailnetKey != null) log("tautan memuat auth key tailnet: aplikasi memakainya untuk tailnet ter-embed; agen JVM memakai --proxy dari node yang sudah tersambung")
+        val c = Enroller.enroll(http, parsed, sims, AGENT_VERSION)
         credStore.save(c)
         log("enroll OK device_id=${c.deviceId} ws_url=${c.wsUrl}")
     }

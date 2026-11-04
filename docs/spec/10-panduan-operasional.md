@@ -52,6 +52,16 @@ Opsi A (Compose + sidecar) dan catatan jaringan ada di `docs/04` §4. Verifikasi
 | `<NAMA>_FILE` | – | Baca rahasia dari berkas (Docker secrets, systemd `LoadCredential`): `DATABASE_URL`, `SESSION_SECRET`, `SESSION_SECRET_PREVIOUS`, `WEBHOOK_ENC_KEY`, `WEBHOOK_ENC_KEY_PREVIOUS`, `SMTP_PASSWORD`, `OIDC_CLIENT_SECRET`. Mengisi `NAMA` dan `NAMA_FILE` sekaligus ditolak |
 | `ALLOWED_DESTINATION_PREFIXES` | kosong (semua) | Awalan E.164 tujuan yang diizinkan, mis. `+62` atau `+62,+65`. Di luar daftar: kirim cepat → `rejected` `destination_not_allowed`; impor campaign → `invalid`; penerima campaign yang sudah diimpor → `failed` `destination_not_allowed` saat materialisasi. Batasi kerugian bila API key bocor |
 | `DAILY_QUOTA_PER_KEY`, `DAILY_QUOTA_PER_USER` | `0`, `0` (tanpa batas) | Kuota harian default dalam **bagian SMS** untuk API key / pengguna dashboard yang tidak punya nilai sendiri. Nilai per key/pengguna diatur admin (Pengaturan → API key / Pengguna, `PUT /api-keys/{id}/quota`, `PUT /users/{id}/quota`): kosong = default, 0 = tanpa batas. Permintaan `POST /messages` yang melampaui ditolak utuh (429 `quota.exceeded` + `Retry-After`); campaign dibebankan ke pemiliknya, dijeda `quota` saat habis dan lanjut otomatis saat kuota pulih. Sisa kuota: `GET /quota` |
+| `TAILNET_ENABLED` | `false` | smscd menjadi node tailnet sendiri (tsnet), menggantikan `tailscale serve`. Setiap permintaan lewat tailnet membawa identitas peer (WhoIs). HTTP_ADDR loopback tetap aktif |
+| `TS_NO_LOGS_NO_SUPPORT` | – | `true` = node tsnet (server dan aplikasi) tidak mengirim log diagnostik ke Tailscale. Defaultnya mengirim, sama seperti `tailscaled`; matikan bila kebijakan data mengharuskan (dukungan Tailscale jadi terbatas) |
+| `TAILNET_HOSTNAME`, `TAILNET_STATE_DIR` | `smsc`, – (wajib bila aktif) | Nama node (→ `https://smsc.<tailnet>.ts.net`) dan folder kunci node (mode 0700) |
+| `TAILNET_AUTH_KEY` (`_FILE`) | – | Auth key login pertama node server (ber-tag `tag:smsc-server`); tidak diperlukan setelah state tersimpan |
+| `TAILNET_LISTEN` | `tls` | `tls` = :443 dengan sertifikat Tailscale (HTTPS harus aktif di tailnet); `http` = :80 |
+| `TAILNET_CONTROL_URL` | – | Server koordinasi lain (Headscale) |
+| `TAILNET_DEVICE_POLICY` | `record` bila aktif, selain itu `off` | `record`: device diikat ke node tailnet pertamanya dan ketidakcocokan diaudit (`device.tailnet_mismatch`). `enforce`: enroll/WS/HTTP device ditolak 403 bila tidak lewat tailnet, node tanpa tag device, atau node berbeda dari yang terikat. Secret device yang bocor tidak dapat dipakai dari node lain. Mulai dari `record`, lalu `enforce` setelah semua HP tersambung lewat tailnet |
+| `TAILNET_DEVICE_TAGS` | `tag:smsc-device` | Tag node yang boleh menjadi device; juga tag auth key yang dibuat |
+| `TAILSCALE_OAUTH_CLIENT_ID`, `TAILSCALE_OAUTH_CLIENT_SECRET` (`_FILE`) / `TAILSCALE_API_KEY` (`_FILE`) | – | Kredensial Tailscale API. OAuth client dengan scope `auth_keys` dan tag `tag:smsc-device` (disarankan). Bila diisi, setiap enrollment membuat auth key **sekali pakai, pre-authorized, ber-tag, berumur = TTL QR**, disisipkan ke QR (`k=`), lalu dicabut saat enrollment dipakai atau dicabut. Gagal → enrollment 502 |
+| `TAILSCALE_API_URL`, `TAILSCALE_TAILNET` | `https://api.tailscale.com`, `-` | Endpoint dan tailnet API |
 | `QUOTA_TIMEZONE` | `Asia/Jakarta` | Batas hari kuota (pulih pukul 00:00 di zona ini) |
 | `AUDIT_RETENTION_DAYS` | `0` (selamanya) | Hapus `audit_logs` lebih tua dari N hari pada siklus retensi. Outbox email yang selesai selalu dihapus setelah 30 hari |
 | `SESSION_SECRET_PREVIOUS`, `WEBHOOK_ENC_KEY_PREVIOUS` | – | Kunci lama (koma) selama rotasi; lihat R-06 |
@@ -92,7 +102,7 @@ Upgrade aplikasi Android: distribusikan APK baru; device lama tetap berfungsi se
 
 ## 6. Monitoring dan alert
 
-Aturan alert siap pakai: [`ops/prometheus/alerts.yml`](../../ops/prometheus/alerts.yml) (34 alert; ambang awal, setel dengan data nyata; belum dijalankan di Prometheus sungguhan). Nama metrik sesuai implementasi (`smsc_devices`, `smsc_queue_depth{priority}`, `smsc_message_transitions_total{from,to}`, `smsc_webhook_deliveries_total{result}`, `smsc_device_battery_percent`, dst.; daftar lengkap: `curl 127.0.0.1:9090/metrics`). Pemeriksaan statis: `make alerts` (`ops/prometheus/check_alerts.py`: nama unik, severity, kurung seimbang, durasi `for`, setiap metrik terdaftar di `metrics.go`). Tabel di bawah menjelaskan maksud tiap sinyal; bila nama berbeda, implementasi yang benar.
+Aturan alert siap pakai: [`ops/prometheus/alerts.yml`](../../ops/prometheus/alerts.yml) (36 alert; ambang awal, setel dengan data nyata; belum dijalankan di Prometheus sungguhan). Nama metrik sesuai implementasi (`smsc_devices`, `smsc_queue_depth{priority}`, `smsc_message_transitions_total{from,to}`, `smsc_webhook_deliveries_total{result}`, `smsc_device_battery_percent`, dst.; daftar lengkap: `curl 127.0.0.1:9090/metrics`). Pemeriksaan statis: `make alerts` (`ops/prometheus/check_alerts.py`: nama unik, severity, kurung seimbang, durasi `for`, setiap metrik terdaftar di `metrics.go`). Tabel di bawah menjelaskan maksud tiap sinyal; bila nama berbeda, implementasi yang benar.
 
 Metrik utama dan ambang awal (Prometheus/Alertmanager atau setara):
 
@@ -105,6 +115,8 @@ Metrik utama dan ambang awal (Prometheus/Alertmanager atau setara):
 | `SmscStatusQueryUnanswered` | `queried` − (alive+settled+lost+stale+invalid) > 3/jam selama 10 mnt | Peringatan |
 | `SmscRateLimitedSurge` | `sum(rate(smsc_http_requests_total{status="429"}[5m])) > 0.5` selama 10 mnt — integrasi terlalu cepat, tebak password, atau `TRUSTED_PROXIES` salah | Peringatan |
 | `SmscQuotaExhausted` | `increase(smsc_quota_rejections_total[1h]) > 0` per subjek (key/user) | Info |
+| `SmscTailnetDeviceRejected` | device ditolak/dicatat karena identitas node tailnet (15 mnt) | Peringatan |
+| `SmscTailnetAuthKeyFailing` | gagal membuat auth key Tailscale (1 jam) | Peringatan |
 | `SmscLoginLockouts` | > 5 login 423 (akun terkunci) dalam 15 mnt — kemungkinan tebak password | Peringatan |
 | `SmscHubRelayDropped` | `increase(smsc_hub_relay_total{result="dropped"}[10m]) > 0` | Peringatan |
 | `SmscNoLeader` | `sum(smsc_leader) == 0` selama 2 mnt (worker tidak berjalan) | Kritis |

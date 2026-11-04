@@ -19,6 +19,10 @@ class AgentUnitTest {
         assertEquals("https://smsc.contoh.ts.net", l.server)
         assertEquals("ABCD1234", l.token)
         assertEquals(EnrollLink("http://x", "K0DE1234"), EnrollLink.parse("K0DE1234", "http://x"))
+        val k = EnrollLink.parse("smsc://enroll?s=https%3A%2F%2Fsmsc.contoh.ts.net&t=T0K&k=tskey-auth-abc%2Bdef", null)
+        assertEquals("tskey-auth-abc+def", k.tailnetKey)
+        kotlin.test.assertFalse(k.toString().contains("tskey") || k.toString().contains("T0K"))
+        assertEquals(null, l.tailnetKey)
         assertFailsWith<IllegalStateException> { EnrollLink.parse("K0DE1234", null) }
         assertFailsWith<IllegalStateException> { EnrollLink.parse("smsc://enroll?t=X", null) }
     }

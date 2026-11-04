@@ -27,7 +27,7 @@ Semua status ada di database, sehingga restart dan pergantian leader aman.
 | 2 | Tinggi | Rate limit login memakai `RemoteAddr` → di belakang Tailscale Serve semua klien = `127.0.0.1`; batas 5/menit berlaku global | Beberapa orang login bersamaan kena 429; siapa pun di tailnet dapat memblokir semua login | Identitas klien dari proxy tepercaya (`X-Forwarded-For` dari `TRUSTED_PROXIES`, `Tailscale-User-Login` bila `TRUST_TAILSCALE_HEADERS=true`) | Selesai |
 | 3 | Tinggi | Penguncian akun (5 gagal → 15 menit) berlaku dari sumber mana pun | Akun admin dapat dikunci orang lain yang tahu emailnya | Penguncian per (akun, sumber); penguncian akun global hanya sebagai jaring pengaman dengan ambang lebih tinggi (50) | Selesai |
 | 4 | Sedang | `TRUST_TAILSCALE_HEADERS` didokumentasikan tetapi tidak dipakai kode | Operator mengira identitas Tailscale dipakai | Implementasikan (bagian dari #2) | Selesai |
-| 5 | Sedang | `REQUIRE_VPN` hanya laporan HP sendiri | Bukan kontrol keamanan | Dokumentasikan ACL Tailscale minimal sebagai syarat instalasi | Selesai (`INSTALL.md` §0) |
+| 5 | Sedang | `REQUIRE_VPN` hanya laporan HP sendiri | Bukan kontrol keamanan | Dokumentasikan ACL Tailscale minimal sebagai syarat instalasi | Selesai (`INSTALL.md` §0). Fase 46: identitas node diverifikasi server (`WhoIs` + tag + ikatan node, `TAILNET_DEVICE_POLICY=enforce`) |
 | 6 | Sedang | Tidak ada batas tujuan / kuota per API key atau pengguna | Biaya SMS internasional/premium tak terkendali bila key bocor | Allow-list awalan tujuan (`ALLOWED_DESTINATION_PREFIXES`); kuota harian per key/pengguna | Selesai (kuota: fase 44) |
 | 7 | Sedang | Kunci enkripsi diturunkan dari `SESSION_SECRET` bila `WEBHOOK_ENC_KEY` kosong; rahasia hanya lewat env | Bocornya satu env membuka sesi dan data terenkripsi | Dukungan `*_FILE` untuk rahasia; `smscd doctor` memperingatkan kunci turunan | Selesai |
 | 8 | Rendah | `audit_logs` dan baris `email_outbox` tumbuh tanpa batas | Database membesar perlahan | `AUDIT_RETENTION_DAYS` (default 0 = simpan selamanya), pembersihan outbox email lama | Selesai |
@@ -66,4 +66,5 @@ Yang tetap perlu HP nyata (R1/R2/R3/R5/R6): perilaku `SmsManager` dan batas OS, 
 3. ✔ Allow-list tujuan, retensi audit, alert 429 (#6, #8, #10).
 4. ✔ Agen perangkat JVM (#1, sebagian). PoC di HP nyata lewat winbuilder dikerjakan pemilik.
 5. ✔ Kuota harian per API key dan pengguna (fase 44).
-6. Menyusul: uji sidecar Tailscale sungguhan, validasi promtool/Grafana dari jaringan yang sama.
+6. ✔ Tailscale ter-embed di aplikasi (fase 45) dan di server dengan `WhoIs` + auth key otomatis (fase 46).
+7. Menyusul: uji dengan tailnet Tailscale sungguhan dan HP nyata, validasi promtool/Grafana dari jaringan yang sama.

@@ -7,11 +7,13 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/jipaw/smsc-app/server/internal/config"
 	"github.com/jipaw/smsc-app/server/internal/db"
+	"github.com/jipaw/smsc-app/server/internal/tsapi"
 )
 
 // doctor memeriksa konfigurasi dan lingkungan sebelum/ sesudah instalasi. Kode keluar 1 bila ada FAIL.
@@ -105,6 +107,40 @@ func doctor(ctx context.Context, out io.Writer) int {
 	}
 	if cfg.AuditRetentionDays == 0 {
 		say("INFO", "AUDIT_RETENTION_DAYS=0: audit log disimpan selamanya")
+	}
+	if t := cfg.Tailnet; t.Enabled {
+		say("OK", "tailnet ter-embed aktif: node %q, listener %s, kebijakan device %s (tag %s)", t.Hostname, t.Listen, t.DevicePolicy, strings.Join(t.DeviceTags, ","))
+		if u, err := url.Parse(cfg.PublicBaseURL); err == nil && !strings.HasPrefix(u.Hostname(), t.Hostname) {
+			say("WARN", "PUBLIC_BASE_URL (%s) bukan nama node tailnet %q: QR/ws_url akan menunjuk alamat lain", u.Hostname(), t.Hostname)
+		}
+		if t.Listen == "tls" && !strings.HasPrefix(cfg.PublicBaseURL, "https://") {
+			say("WARN", "TAILNET_LISTEN=tls tetapi PUBLIC_BASE_URL bukan https")
+		}
+		if fi, err := os.Stat(t.StateDir); err == nil && fi.Mode().Perm()&0o077 != 0 {
+			say("WARN", "TAILNET_STATE_DIR %s dapat dibaca pengguna lain (mode %o): berisi kunci node", t.StateDir, fi.Mode().Perm())
+		}
+		if t.DevicePolicy == "record" {
+			say("INFO", "TAILNET_DEVICE_POLICY=record: node device dicatat dan ketidakcocokan diaudit; setel enforce setelah semua HP tersambung lewat tailnet")
+		}
+		if cfg.TrustTailscale {
+			say("INFO", "TRUST_TAILSCALE_HEADERS tidak diperlukan untuk listener tailnet ter-embed (identitas dari WhoIs)")
+		}
+	} else {
+		say("INFO", "tailnet ter-embed nonaktif: ekspos lewat `tailscale serve` (identitas device hanya laporan HP)")
+	}
+	if cfg.Tailnet.KeyMinting() {
+		c := &tsapi.Client{BaseURL: cfg.Tailnet.APIURL, Tailnet: cfg.Tailnet.Tailnet, ClientID: cfg.Tailnet.OAuthClientID, ClientSecret: cfg.Tailnet.OAuthClientSecret, APIKey: cfg.Tailnet.APIKey}
+		tctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := c.CheckAuth(tctx)
+		cancel()
+		switch {
+		case err != nil:
+			say("FAIL", "Tailscale API: %v", err)
+		case cfg.Tailnet.APIKey != "":
+			say("OK", "auth key enrollment otomatis lewat API key (validitas diuji saat enrollment pertama)")
+		default:
+			say("OK", "auth key enrollment otomatis lewat OAuth client (token berhasil diperoleh)")
+		}
 	}
 	if cfg.Mail.Enabled() {
 		say("OK", "SMTP aktif (%s:%d, mode %s)", cfg.Mail.Host, cfg.Mail.Port, cfg.Mail.Mode)

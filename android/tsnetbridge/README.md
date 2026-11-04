@@ -58,6 +58,10 @@ Auth key dihapus dari penyimpanan setelah node tersambung. Kunci node disimpan d
   - node HP mati lalu nyala lagi dengan state sama, kemudian online kembali.
 - `:typecheck` mengompilasi `app/src/tsnet` terhadap API Java asli hasil `gobind` (`typecheck/src/gobind`, buat ulang dengan `gen-java.sh`), dan varian `src/notsnet` dicek kesamaan API-nya.
 
+## Privasi log
+
+Seperti `tailscaled`, node tsnet secara default mengirim log diagnostik ke Tailscale. Untuk mematikannya, set env proses `TS_NO_LOGS_NO_SUPPORT=true`. Di aplikasi Android, panggil `Os.setenv("TS_NO_LOGS_NO_SUPPORT", "true", true)` sebelum `start` (belum dipasang di PoC).
+
 ## Belum terbukti (butuh HP nyata)
 
 - SOCKS5 + autentikasi di OkHttp Android (libcore). Di JVM sudah teruji, di Android perlu dicek.

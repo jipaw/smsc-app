@@ -87,6 +87,14 @@ groups:
         expr: sum by (subject) (increase(smsc_quota_rejections_total[1h])) > 0
         labels: {severity: info}
         annotations: {summary: "Ada pengiriman yang ditolak/campaign dijeda karena kuota harian {{ $labels.subject }} habis — naikkan kuota bila sah, atau periksa kebocoran API key"}
+      - alert: SmscTailnetDeviceRejected
+        expr: sum(increase(smsc_tailnet_device_checks_total{result=~"rejected_.*|mismatch_recorded"}[15m])) > 0
+        labels: {severity: warning}
+        annotations: {summary: "Koneksi device ditolak/dicatat karena identitas node tailnet (bukan lewat tailnet, tag salah, atau node berbeda dari yang terikat) — kemungkinan secret device bocor; periksa audit device.tailnet_mismatch"}
+      - alert: SmscTailnetAuthKeyFailing
+        expr: increase(smsc_tailnet_auth_keys_total{result="create_failed"}[1h]) > 0
+        labels: {severity: warning}
+        annotations: {summary: "Gagal membuat auth key Tailscale untuk enrollment (kredensial OAuth/API kedaluwarsa atau scope kurang) — enrollment baru gagal 502"}
       - alert: SmscDbPoolSaturated
         expr: smsc_db_pool_connections{state="acquired"} / smsc_db_pool_connections{state="max"} > 0.9
         for: 5m

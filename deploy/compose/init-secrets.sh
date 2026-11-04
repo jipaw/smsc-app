@@ -9,6 +9,9 @@ gen() { head -c 48 /dev/urandom | base64 | tr -d '\n/+=' | cut -c1-48; }
 [ -s secrets/session_secret ] || gen > secrets/session_secret
 [ -s secrets/webhook_enc_key ] || gen > secrets/webhook_enc_key
 [ -s secrets/database_url ] || printf 'postgres://smsc:%s@db:5432/smsc?sslmode=disable' "$(cat secrets/db_password)" > secrets/database_url
+# varian docker-compose.tsnet.yml: isi kedua berkas ini (kosong = tidak dipakai)
+[ -e secrets/tailnet_auth_key ] || : > secrets/tailnet_auth_key
+[ -e secrets/tailscale_oauth_secret ] || : > secrets/tailscale_oauth_secret
 # image berjalan sebagai nonroot (uid 65532): berkas harus terbaca olehnya
 chmod 0444 secrets/* 2>/dev/null || true
 echo "rahasia siap di $(pwd)/secrets — cadangkan webhook_enc_key: tanpanya secret webhook & TOTP tidak dapat dibuka."

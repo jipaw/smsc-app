@@ -191,6 +191,11 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 	deviceID, err := h.svc.AuthDevice(r.Context(), strings.TrimPrefix(auth, "Bearer "))
 	if err != nil {
+		var p *core.Problem
+		if errors.As(err, &p) && p.Status == http.StatusForbidden { // identitas tailnet ditolak (TAILNET_DEVICE_POLICY)
+			problem(w, p.Status, p.Type, p.Title)
+			return
+		}
 		problem(w, http.StatusUnauthorized, "auth.unauthenticated", "Tidak terautentikasi")
 		return
 	}

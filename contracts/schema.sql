@@ -233,7 +233,11 @@ CREATE TABLE devices (
   last_seen_at    timestamptz,
   connected_since timestamptz,
   created_at      timestamptz NOT NULL DEFAULT now(),
-  revoked_at      timestamptz
+  revoked_at      timestamptz,
+  tailnet_node_id     text,
+  tailnet_node_name   text,
+  tailnet_tags        text[],
+  tailnet_verified_at timestamptz
 );
 CREATE INDEX devices_status_idx ON devices (status);
 
@@ -261,7 +265,8 @@ CREATE TABLE device_enrollments (
   consumed_at           timestamptz,
   consumed_by_device_id uuid REFERENCES devices(id) ON DELETE SET NULL,
   revoked_at            timestamptz,
-  created_at            timestamptz NOT NULL DEFAULT now()
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  tailnet_key_id        text
 );
 
 CREATE TABLE sims (

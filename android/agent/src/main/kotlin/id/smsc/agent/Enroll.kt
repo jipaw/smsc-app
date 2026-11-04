@@ -16,8 +16,12 @@ import java.net.URI
 import java.net.URLDecoder
 import java.util.UUID
 
-/** Isi QR enrollment: `smsc://enroll?s=<server>&t=<token>` (sama dengan yang dipindai aplikasi). */
-data class EnrollLink(val server: String, val token: String) {
+/**
+ * Isi QR enrollment: `smsc://enroll?s=<server>&t=<token>[&k=<auth key tailnet>]` (sama dengan yang dipindai aplikasi).
+ * `k` = auth key Tailscale sekali pakai yang dibuat server; aplikasi memakainya untuk menyalakan tailnet ter-embed sebelum enroll.
+ */
+data class EnrollLink(val server: String, val token: String, val tailnetKey: String? = null) {
+    override fun toString() = "EnrollLink(server=$server, token=***, tailnetKey=${if (tailnetKey != null) "***" else "null"})"
     companion object {
         fun parse(link: String, serverFallback: String?): EnrollLink {
             if (link.startsWith("smsc://")) {
@@ -25,7 +29,7 @@ data class EnrollLink(val server: String, val token: String) {
                 val params = q.split("&").mapNotNull { kv ->
                     val i = kv.indexOf('='); if (i < 0) null else kv.substring(0, i) to URLDecoder.decode(kv.substring(i + 1), Charsets.UTF_8)
                 }.toMap()
-                return EnrollLink(params["s"] ?: error("tautan tanpa s=<server>"), params["t"] ?: error("tautan tanpa t=<token>"))
+                return EnrollLink(params["s"] ?: error("tautan tanpa s=<server>"), params["t"] ?: error("tautan tanpa t=<token>"), params["k"])
             }
             // token / short_code manual
             return EnrollLink(serverFallback ?: error("--server wajib bila memakai kode manual"), link)

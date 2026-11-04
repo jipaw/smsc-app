@@ -29,6 +29,11 @@ const magicDomain = "tail-lab.ts.net"
 
 // startLabControl: server koordinasi uji + DERP/STUN lokal — tailnet sungguhan tanpa internet.
 func startLabControl(t testing.TB) string {
+	return startLabControlServer(t, "").HTTPTestServer.URL
+}
+
+// startLabControlServer: requireKey != "" → setiap node wajib login dengan auth key itu.
+func startLabControlServer(t testing.TB, requireKey string) *testcontrol.Server {
 	t.Helper()
 	netns.SetEnabled(false)
 	t.Cleanup(func() { netns.SetEnabled(true) })
@@ -37,12 +42,13 @@ func startLabControl(t testing.TB) string {
 		DERPMap:        derpMap,
 		DNSConfig:      &tailcfg.DNSConfig{Proxied: true},
 		MagicDNSDomain: magicDomain,
+		RequireAuthKey: requireKey,
 		Logf:           logger.Discard,
 	}
 	control.HTTPTestServer = httptest.NewUnstartedServer(control)
 	control.HTTPTestServer.Start()
 	t.Cleanup(control.HTTPTestServer.Close)
-	return control.HTTPTestServer.URL
+	return control
 }
 
 // startGatewayNode: node "server" yang meneruskan tailnet:80 ke backend (setara `tailscale serve` di depan smscd).

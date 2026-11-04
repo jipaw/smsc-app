@@ -21,10 +21,12 @@ COPY --from=web /src/web/dist/ ./internal/webui/dist/
 ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w -X github.com/jipaw/smsc-app/server/internal/buildinfo.Version=${VERSION}" \
-    -o /out/smscd ./cmd/smscd
+    -o /out/smscd ./cmd/smscd && mkdir -p /out/state/tailnet
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=server /out/smscd /usr/local/bin/smscd
+# state tailnet ter-embed (TAILNET_STATE_DIR=/var/lib/smscd/tailnet) milik nonroot; volume bernama mewarisi pemilik ini
+COPY --from=server --chown=65532:65532 --chmod=0700 /out/state /var/lib/smscd
 USER nonroot:nonroot
 # Hanya loopback: ekspos lewat tailscale serve (sidecar berbagi network namespace) — lihat deploy/compose.
 ENV HTTP_ADDR=127.0.0.1:8080 METRICS_ADDR=127.0.0.1:9090

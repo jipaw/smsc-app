@@ -98,7 +98,10 @@ Aplikasi dapat menjadi node tailnet sendiri lewat `tsnet` (`android/tsnetbridge`
 - **Auth key**: ber-tag `tag:smsc-device`, sekali pakai, dimasukkan sekali dan dihapus setelah tersambung. Kunci node disimpan di penyimpanan privat aplikasi (tidak ikut cadangan).
 - **ACL**: sama dengan §1, karena node tetap ber-tag `tag:smsc-device`.
 - **Aktif bila**: APK dibangun dengan `tsnetbridge.aar` (`build-apk.ps1 -Tailnet`). Tanpa AAR, mode ini nonaktif dan cara di bawah (aplikasi Tailscale + Always-on VPN) tetap berlaku.
-- **Menyusul**: verifikasi identitas node di server (`WhoIs` + tag) dan pembuatan auth key otomatis saat enrollment.
+- **Server (fase 46)**: dengan `TAILNET_ENABLED=true`, smscd menjadi node tailnet sendiri (menggantikan `tailscale serve`) dan memanggil `WhoIs` untuk setiap permintaan.
+  - Device diikat ke node tailnet-nya (StableNodeID).
+  - `TAILNET_DEVICE_POLICY=enforce` menolak enroll, WebSocket, dan HTTP device bila koneksi tidak lewat tailnet, node tanpa tag device, atau node berbeda dari yang terikat. Secret device yang bocor tidak berguna dari HP lain.
+  - Dengan kredensial Tailscale API (OAuth client, scope `auth_keys`), setiap QR enrollment memuat auth key sekali pakai: pre-authorized, ber-tag, berumur sama dengan QR. Key dicabut saat enrollment dipakai atau dicabut, sehingga admin tidak perlu membuat auth key manual.
 
 ## 5. Panduan setup HP (sumber untuk dokumentasi pengguna)
 

@@ -148,6 +148,13 @@ func (a *API) trustedProxy(ip string) bool {
 // RemoteAddr selalu alamat proxy, sehingga dipakai: login Tailscale (bila TRUST_TAILSCALE_HEADERS=true), lalu alamat
 // X-Forwarded-For paling kanan yang bukan proxy tepercaya. Header dari klien yang tidak tepercaya diabaikan (tidak bisa dipalsukan).
 func (a *API) clientKey(r *http.Request) string {
+	// lewat listener tailnet smscd: identitas terverifikasi WhoIs (tidak dapat dipalsukan lewat header)
+	if id := core.TailnetIdentityFrom(r.Context()); id != nil {
+		if id.UserLogin != "" {
+			return "ts:" + strings.ToLower(id.UserLogin)
+		}
+		return "tsnode:" + id.NodeID
+	}
 	ip := clientIP(r)
 	if !a.trustedProxy(ip) {
 		return "ip:" + ip

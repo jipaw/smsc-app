@@ -47,6 +47,8 @@ type Metrics struct {
 	RetentionRuns   prometheus.Counter
 	RetentionRows   *prometheus.CounterVec
 	QuotaRejections *prometheus.CounterVec
+	TailnetChecks   *prometheus.CounterVec
+	TailnetKeys     *prometheus.CounterVec
 
 	SCIMReconcileRuns    *prometheus.CounterVec
 	SCIMReconcileChanged prometheus.Counter
@@ -92,6 +94,14 @@ func New(pool *pgxpool.Pool) *Metrics {
 	for _, k := range []string{"key", "user"} {
 		m.QuotaRejections.WithLabelValues(k)
 	}
+	m.TailnetChecks = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_tailnet_device_checks_total", Help: "Pemeriksaan identitas node tailnet device (TAILNET_DEVICE_POLICY) menurut hasil."}, []string{"result"})
+	for _, r := range []string{"ok", "bound", "mismatch_recorded", "rejected_no_tailnet", "rejected_tag", "rejected_node"} {
+		m.TailnetChecks.WithLabelValues(r)
+	}
+	m.TailnetKeys = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_tailnet_auth_keys_total", Help: "Auth key Tailscale untuk enrollment lewat Tailscale API menurut hasil (created|create_failed|deleted|delete_failed)."}, []string{"result"})
+	for _, r := range []string{"created", "create_failed", "deleted", "delete_failed"} {
+		m.TailnetKeys.WithLabelValues(r)
+	}
 	m.SCIMReconcileRuns = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_scim_reconcile_runs_total", Help: "Run rekonsiliasi grup SCIM pada instance ini menurut hasil (ok|error)."}, []string{"result"})
 	m.SCIMReconcileChanged = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_scim_reconcile_changed_total", Help: "Pengguna yang perannya dikoreksi oleh rekonsiliasi SCIM (lonjakan = drift atau perubahan pemetaan)."})
 	for _, r := range []string{"ok", "error"} {
@@ -112,7 +122,7 @@ func New(pool *pgxpool.Pool) *Metrics {
 	f(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "smsc_build_info", Help: "Info build (nilai selalu 1); label version berubah saat deploy.", ConstLabels: prometheus.Labels{"version": buildinfo.Version, "revision": buildinfo.Revision(), "go_version": runtime.Version()}}, func() float64 { return 1 }))
 	m.ScrapeErrors = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_scrape_errors_total", Help: "Kegagalan membaca metrik berbasis database saat scrape."})
 	for _, c := range []prometheus.Collector{m.HTTPRequests, m.HTTPDuration, m.MessagesCreated, m.Transitions, m.LeaseExpired, m.LeaseRecovered, m.SendingGrace, m.StatusQueries, m.MessagesPartial, m.EventIngest, m.WSConnections, m.WSConnects, m.WSMessages,
-		m.DispatchAssignments, m.DispatchWait, m.CampaignMaterialized, m.WebhookDeliveries, m.EmailResults, m.WebhookDuration, m.RetentionRuns, m.RetentionRows, m.QuotaRejections, m.SCIMReconcileRuns, m.SCIMReconcileChanged, m.Leader, m.LeaderChanges, m.HubRelay, m.HubRemoteSessions, m.ScrapeErrors} {
+		m.DispatchAssignments, m.DispatchWait, m.CampaignMaterialized, m.WebhookDeliveries, m.EmailResults, m.WebhookDuration, m.RetentionRuns, m.RetentionRows, m.QuotaRejections, m.TailnetChecks, m.TailnetKeys, m.SCIMReconcileRuns, m.SCIMReconcileChanged, m.Leader, m.LeaderChanges, m.HubRelay, m.HubRemoteSessions, m.ScrapeErrors} {
 		f(c)
 	}
 	f(collectors.NewGoCollector())

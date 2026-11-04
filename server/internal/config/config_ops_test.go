@@ -25,11 +25,61 @@ func TestSecretFromFile(t *testing.T) {
 	if _, err := Load(); err == nil {
 		t.Fatal("env + _FILE bersamaan harus ditolak")
 	}
+	// rahasia wajib dari berkas kosong ditolak; rahasia opsional kosong = tidak dipakai
+	empty := filepath.Join(dir, "kosong")
+	os.WriteFile(empty, []byte("\n"), 0o600)
 	t.Setenv("SESSION_SECRET", "")
+	t.Setenv("SESSION_SECRET_FILE", empty)
+	if _, err := Load(); err == nil {
+		t.Fatal("SESSION_SECRET_FILE kosong harus ditolak")
+	}
+	t.Setenv("SESSION_SECRET_FILE", f)
+	t.Setenv("TAILNET_AUTH_KEY_FILE", empty)
+	if c, err := Load(); err != nil || c.Tailnet.AuthKey != "" {
+		t.Fatalf("TAILNET_AUTH_KEY_FILE kosong: %v", err)
+	}
 	t.Setenv("SESSION_SECRET_FILE", filepath.Join(dir, "tidak-ada"))
 	if _, err := Load(); err == nil {
 		t.Fatal("berkas hilang harus ditolak")
 	}
+}
+
+func TestTailnetConfig(t *testing.T) {
+	base(t)
+	c, err := Load()
+	if err != nil || c.Tailnet.Enabled || c.Tailnet.DevicePolicy != "off" || c.Tailnet.KeyMinting() {
+		t.Fatalf("default: %v %+v", err, c.Tailnet)
+	}
+	t.Setenv("TAILNET_ENABLED", "true")
+	t.Setenv("TAILNET_STATE_DIR", t.TempDir())
+	t.Setenv("TAILSCALE_OAUTH_CLIENT_ID", "cid")
+	t.Setenv("TAILSCALE_OAUTH_CLIENT_SECRET", "cs")
+	c, err = Load()
+	if err != nil || c.Tailnet.DevicePolicy != "record" || c.Tailnet.Listen != "tls" || c.Tailnet.Hostname != "smsc" || !c.Tailnet.KeyMinting() ||
+		strings.Join(c.Tailnet.DeviceTags, ",") != "tag:smsc-device" || c.Tailnet.APIURL != "https://api.tailscale.com" || c.Tailnet.Tailnet != "-" {
+		t.Fatalf("aktif: %v %+v", err, c.Tailnet)
+	}
+	for k, v := range map[string]string{"TAILNET_DEVICE_POLICY": "ketat", "TAILNET_LISTEN": "udp", "TAILNET_DEVICE_TAGS": "smsc-device", "TAILNET_STATE_DIR": ""} {
+		t.Run(k, func(t *testing.T) {
+			t.Setenv(k, v)
+			if _, err := Load(); err == nil {
+				t.Fatalf("%s=%q harus ditolak", k, v)
+			}
+		})
+	}
+	t.Run("enforce tanpa tailnet", func(t *testing.T) {
+		t.Setenv("TAILNET_ENABLED", "false")
+		t.Setenv("TAILNET_DEVICE_POLICY", "enforce")
+		if _, err := Load(); err == nil {
+			t.Fatal("enforce tanpa listener tailnet harus ditolak")
+		}
+	})
+	t.Run("secret OAuth wajib", func(t *testing.T) {
+		t.Setenv("TAILSCALE_OAUTH_CLIENT_SECRET", "")
+		if _, err := Load(); err == nil {
+			t.Fatal("client id tanpa secret harus ditolak")
+		}
+	})
 }
 
 func TestTrustedProxiesAndPrefixes(t *testing.T) {

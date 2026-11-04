@@ -48,9 +48,33 @@ type SCIMConfig struct {
 	GroupRoles map[string]string
 }
 
+// TailnetConfig: smscd sebagai node tailnet sendiri (tsnet) + Tailscale API untuk auth key enrollment.
+type TailnetConfig struct {
+	Enabled      bool     // TAILNET_ENABLED: listener tailnet ter-embed (menggantikan tailscale serve)
+	Hostname     string   // TAILNET_HOSTNAME (default smsc) → https://<hostname>.<tailnet>.ts.net
+	StateDir     string   // TAILNET_STATE_DIR: kunci node (wajib bila aktif)
+	AuthKey      string   // TAILNET_AUTH_KEY(_FILE): login pertama node server
+	ControlURL   string   // TAILNET_CONTROL_URL: kosong = Tailscale (isi untuk Headscale/uji)
+	Listen       string   // TAILNET_LISTEN: tls (443, sertifikat Tailscale) | http (80)
+	DevicePolicy string   // TAILNET_DEVICE_POLICY: off | record | enforce
+	DeviceTags   []string // TAILNET_DEVICE_TAGS: tag node yang boleh menjadi device (default tag:smsc-device)
+	// Tailscale API untuk auth key sekali pakai saat enrollment: OAuth client (scope auth_keys) atau API key
+	APIURL            string // TAILSCALE_API_URL (default https://api.tailscale.com)
+	Tailnet           string // TAILSCALE_TAILNET (default "-" = tailnet milik kredensial)
+	OAuthClientID     string // TAILSCALE_OAUTH_CLIENT_ID
+	OAuthClientSecret string // TAILSCALE_OAUTH_CLIENT_SECRET(_FILE)
+	APIKey            string // TAILSCALE_API_KEY(_FILE)
+}
+
+// KeyMinting: kredensial Tailscale API tersedia untuk membuat auth key device.
+func (t TailnetConfig) KeyMinting() bool {
+	return (t.OAuthClientID != "" && t.OAuthClientSecret != "") || t.APIKey != ""
+}
+
 type Config struct {
-	OIDC OIDCConfig
-	SCIM SCIMConfig
+	OIDC    OIDCConfig
+	Tailnet TailnetConfig
+	SCIM    SCIMConfig
 
 	DatabaseURL          string
 	HTTPAddr             string
@@ -129,7 +153,11 @@ func envDur(k string, def time.Duration) time.Duration {
 }
 
 // SecretEnvs: variabel rahasia yang juga dapat dibaca dari berkas lewat <NAMA>_FILE (Docker/Kubernetes secrets, systemd credentials).
-var SecretEnvs = []string{"DATABASE_URL", "SESSION_SECRET", "SESSION_SECRET_PREVIOUS", "WEBHOOK_ENC_KEY", "WEBHOOK_ENC_KEY_PREVIOUS", "SMTP_PASSWORD", "OIDC_CLIENT_SECRET"}
+var SecretEnvs = []string{"DATABASE_URL", "SESSION_SECRET", "SESSION_SECRET_PREVIOUS", "WEBHOOK_ENC_KEY", "WEBHOOK_ENC_KEY_PREVIOUS", "SMTP_PASSWORD", "OIDC_CLIENT_SECRET",
+	"TAILNET_AUTH_KEY", "TAILSCALE_OAUTH_CLIENT_SECRET", "TAILSCALE_API_KEY"}
+
+// requiredSecrets: berkas kosong untuk rahasia ini adalah kesalahan; rahasia lain boleh kosong (= tidak dipakai).
+var requiredSecrets = map[string]bool{"DATABASE_URL": true, "SESSION_SECRET": true}
 
 // loadSecretFiles: untuk setiap NAMA dengan NAMA_FILE terisi, isi berkas (tanpa spasi/baris baru di ujung) menjadi nilai NAMA.
 // Mengisi keduanya sekaligus ditolak agar sumber nilai tidak ambigu.
@@ -149,7 +177,10 @@ func loadSecretFiles() (map[string]bool, error) {
 		}
 		v := strings.TrimSpace(string(b))
 		if v == "" {
-			return nil, fmt.Errorf("%s_FILE: berkas %s kosong", k, f)
+			if requiredSecrets[k] {
+				return nil, fmt.Errorf("%s_FILE: berkas %s kosong", k, f)
+			}
+			continue // rahasia opsional: berkas kosong = tidak dipakai (mis. secret Docker yang belum diisi)
 		}
 		_ = os.Setenv(k, v)
 		fromFile[k] = true
@@ -317,6 +348,9 @@ func Load() (Config, error) {
 			*dst = n
 		}
 	}
+	if err := c.loadTailnet(); err != nil {
+		return c, err
+	}
 	loc, err := time.LoadLocation(env("QUOTA_TIMEZONE", "Asia/Jakarta"))
 	if err != nil {
 		return c, fmt.Errorf("QUOTA_TIMEZONE tidak valid: %w", err)
@@ -452,4 +486,52 @@ func lowerAll(in []string) []string {
 		out = append(out, strings.ToLower(x))
 	}
 	return out
+}
+
+func (c *Config) loadTailnet() error {
+	t := TailnetConfig{
+		Enabled:       env("TAILNET_ENABLED", "false") == "true",
+		Hostname:      env("TAILNET_HOSTNAME", "smsc"),
+		StateDir:      os.Getenv("TAILNET_STATE_DIR"),
+		AuthKey:       os.Getenv("TAILNET_AUTH_KEY"),
+		ControlURL:    strings.TrimRight(os.Getenv("TAILNET_CONTROL_URL"), "/"),
+		Listen:        strings.ToLower(env("TAILNET_LISTEN", "tls")),
+		DeviceTags:    splitList(env("TAILNET_DEVICE_TAGS", "tag:smsc-device")),
+		APIURL:        strings.TrimRight(env("TAILSCALE_API_URL", "https://api.tailscale.com"), "/"),
+		Tailnet:       env("TAILSCALE_TAILNET", "-"),
+		OAuthClientID: os.Getenv("TAILSCALE_OAUTH_CLIENT_ID"), OAuthClientSecret: os.Getenv("TAILSCALE_OAUTH_CLIENT_SECRET"),
+		APIKey: os.Getenv("TAILSCALE_API_KEY"),
+	}
+	def := "off"
+	if t.Enabled {
+		def = "record"
+	}
+	t.DevicePolicy = strings.ToLower(env("TAILNET_DEVICE_POLICY", def))
+	switch t.DevicePolicy {
+	case "off", "record", "enforce":
+	default:
+		return fmt.Errorf("TAILNET_DEVICE_POLICY harus off, record, atau enforce")
+	}
+	if t.DevicePolicy != "off" && !t.Enabled {
+		return fmt.Errorf("TAILNET_DEVICE_POLICY=%s butuh TAILNET_ENABLED=true (identitas hanya diketahui lewat listener tailnet)", t.DevicePolicy)
+	}
+	if t.Listen != "tls" && t.Listen != "http" {
+		return fmt.Errorf("TAILNET_LISTEN harus tls atau http")
+	}
+	if t.Enabled && t.StateDir == "" {
+		return fmt.Errorf("TAILNET_STATE_DIR wajib bila TAILNET_ENABLED=true")
+	}
+	for _, tag := range t.DeviceTags {
+		if !strings.HasPrefix(tag, "tag:") {
+			return fmt.Errorf("TAILNET_DEVICE_TAGS: %q harus diawali tag:", tag)
+		}
+	}
+	if t.OAuthClientID != "" && t.OAuthClientSecret == "" {
+		return fmt.Errorf("TAILSCALE_OAUTH_CLIENT_SECRET wajib bila TAILSCALE_OAUTH_CLIENT_ID diisi")
+	}
+	if t.KeyMinting() && len(t.DeviceTags) == 0 {
+		return fmt.Errorf("auth key otomatis butuh TAILNET_DEVICE_TAGS")
+	}
+	c.Tailnet = t
+	return nil
 }

@@ -316,6 +316,7 @@ func (a *API) createEnrollment(w http.ResponseWriter, r *http.Request) {
 		DeviceName string     `json:"device_name"`
 		PolicyID   *uuid.UUID `json:"policy_id"`
 		TTLSeconds int        `json:"ttl_seconds"`
+		TailnetKey *bool      `json:"tailnet_auth_key"`
 	}
 	if !a.decode(w, r, &in) {
 		return
@@ -324,12 +325,12 @@ func (a *API) createEnrollment(w http.ResponseWriter, r *http.Request) {
 		a.writeProblem(w, r, core.Validation(core.FieldError{Field: "ttl_seconds", Message: "60..3600"}))
 		return
 	}
-	e, err := a.Svc.CreateEnrollment(r.Context(), principalOf(r.Context()).user.ID, in.DeviceName, in.PolicyID, time.Duration(in.TTLSeconds)*time.Second)
+	e, err := a.Svc.CreateEnrollment(r.Context(), principalOf(r.Context()).user.ID, in.DeviceName, in.PolicyID, time.Duration(in.TTLSeconds)*time.Second, in.TailnetKey)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	a.Svc.Audit(r.Context(), actorOf(principalOf(r.Context())), "device.enrollment.create", "enrollment", e.ID.String(), nil)
+	a.Svc.Audit(r.Context(), actorOf(principalOf(r.Context())), "device.enrollment.create", "enrollment", e.ID.String(), map[string]any{"tailnet_auth_key": e.TailnetAuthKey != nil})
 	a.writeJSON(w, http.StatusCreated, e)
 }
 

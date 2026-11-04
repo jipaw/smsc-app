@@ -25,6 +25,7 @@ import (
 	"github.com/jipaw/smsc-app/server/internal/db"
 	"github.com/jipaw/smsc-app/server/internal/hub"
 	"github.com/jipaw/smsc-app/server/internal/pwpolicy"
+	"github.com/jipaw/smsc-app/server/internal/tailnet"
 )
 
 func main() {
@@ -110,6 +111,25 @@ func serve(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, log *slog
 		}()
 		defer msrv.Close()
 		log.Info("metrik tersedia", "addr", cfg.MetricsAddr+"/metrics")
+	}
+	// listener tailnet ter-embed (tsnet): menggantikan `tailscale serve`, dengan identitas peer (WhoIs) per permintaan
+	var tn *tailnet.Node
+	if cfg.Tailnet.Enabled {
+		var err error
+		if tn, err = tailnet.Start(ctx, cfg.Tailnet, log); err != nil {
+			log.Error("tailnet gagal dinyalakan", "err", err)
+			os.Exit(1)
+		}
+		go func() {
+			if err := tn.Serve(handler, cfg.Tailnet.Listen); err != nil {
+				log.Error("listener tailnet berhenti", "err", err)
+			}
+		}()
+		defer func() {
+			sctx, c := context.WithTimeout(context.Background(), 10*time.Second)
+			defer c()
+			tn.Shutdown(sctx)
+		}()
 	}
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
 	errc := make(chan error, 1)
