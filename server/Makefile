@@ -18,6 +18,7 @@ contract: build
 
 alerts:
 	python3 ../ops/prometheus/check_alerts.py
+	python3 ../ops/grafana/test_import.py
 
 schema:
 	SMSC_TEST_DATABASE_URL='$(DB)' bash tests/schema_sync.sh
