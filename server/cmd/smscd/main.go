@@ -89,15 +89,7 @@ func serve(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, log *slog
 	leaderDone := make(chan struct{})
 	go func() {
 		defer close(leaderDone)
-		svc.RunLeader(leaderCtx, cfg.LeaderTick, func(lctx context.Context) {
-			go svc.RunDispatcher(lctx)
-			go svc.RunReaper(lctx)
-			go svc.RunCampaigns(lctx)
-			go svc.RunWebhooks(lctx)
-			go svc.RunEmails(lctx)
-			go svc.RunSCIMReconcile(lctx) // pemetaan grup SCIM → peran: saat start, lalu berkala
-			go svc.RunRetention(lctx)
-		})
+		svc.RunLeader(leaderCtx, cfg.LeaderTick, svc.LeaderWorkers) // pulihkan pesan assigned lalu jalankan worker leader
 	}()
 
 	// metrik Prometheus: listener TERPISAH (default loopback); kosongkan METRICS_ADDR untuk menonaktifkan

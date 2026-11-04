@@ -137,6 +137,9 @@ func (s *Service) dispatchOnce(ctx context.Context) (earliest time.Time) {
 	}
 	rows.Close()
 	for _, l := range lanes {
+		if ctx.Err() != nil {
+			return
+		}
 		if !s.link.Connected(l.deviceID) {
 			continue
 		}
@@ -267,6 +270,9 @@ func (s *Service) assignNext(ctx context.Context, l lane, eff policy.Effective) 
 }
 
 func (s *Service) sendToDevice(ctx context.Context, l lane, mid uuid.UUID, eff policy.Effective) {
+	if ctx.Err() != nil { // kepemimpinan hilang / shutdown: jangan kirim; leader berikutnya memulihkan pesan 'assigned' (RecoverAssigned)
+		return
+	}
 	m, err := scanMsg(s.Pool.QueryRow(ctx, `SELECT `+msgCols+` FROM messages WHERE id=$1`, mid))
 	if err != nil || m.Body == nil {
 		s.Log.Error("dispatcher: load pesan", "err", err)
@@ -398,6 +404,12 @@ var _ = fmt.Sprintf
 
 // ResendAssigned mengirim ulang sms.send untuk pesan 'assigned' yang belum dikenal device (setelah hello.ack).
 func (s *Service) ResendAssigned(ctx context.Context, deviceID uuid.UUID, ids []uuid.UUID) {
+	s.resendAssigned(ctx, deviceID, ids, false)
+}
+
+// resendAssigned: extendLease=true (pengambilalihan leader) memberi lease baru sepanjang ack timeout sebelum mengirim ulang.
+func (s *Service) resendAssigned(ctx context.Context, deviceID uuid.UUID, ids []uuid.UUID, extendLease bool) int {
+	n := 0
 	for _, id := range ids {
 		var slot int
 		var simPol, devPol *uuid.UUID
@@ -412,8 +424,15 @@ func (s *Service) ResendAssigned(ctx context.Context, deviceID uuid.UUID, ids []
 		if err != nil {
 			continue
 		}
+		if extendLease {
+			if _, err := s.Pool.Exec(ctx, `UPDATE messages SET lease_expires_at = now() + ($2::int * interval '1 millisecond') WHERE id=$1 AND status='assigned'`, id, eff.AckTimeoutMs); err != nil {
+				continue
+			}
+		}
 		s.sendToDevice(ctx, lane{simID: *m.SimID, deviceID: deviceID, slot: slot}, id, eff)
+		n++
 	}
+	return n
 }
 
 // devicePendingTTL: berapa lama secret baru yang belum dikonfirmasi device masih diterima.

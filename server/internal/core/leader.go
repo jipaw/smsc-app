@@ -41,6 +41,11 @@ func (s *Service) leadOnce(ctx context.Context, tick time.Duration, lead func(co
 		conn.Release()
 		return false
 	}
+	s.prevSeenNs.Store(0)
+	if t := s.readLeaderSeen(ctx); !t.IsZero() {
+		s.prevSeenNs.Store(t.UnixNano())
+	}
+	s.touchLeaderSeen(ctx)
 	lctx, cancel := context.WithCancel(ctx)
 	s.Log.Info("menjadi leader: dispatcher dan reaper aktif")
 	s.M.Leader.Set(1)
@@ -57,6 +62,7 @@ func (s *Service) leadOnce(ctx context.Context, tick time.Duration, lead func(co
 			conn.Release()
 			return false
 		case <-t.C:
+			s.touchLeaderSeen(ctx)
 			cctx, ccancel := context.WithTimeout(ctx, 5*time.Second)
 			var held bool
 			err := conn.QueryRow(cctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND classid=0 AND objid=$1 AND pid=pg_backend_pid() AND granted)`, leaderLockKey).Scan(&held)

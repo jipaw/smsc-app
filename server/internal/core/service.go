@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,10 +46,11 @@ type Service struct {
 	Bus    *bus.Bus
 	M      *metrics.Metrics
 
-	link      DeviceLink
-	wake      chan struct{}
-	wakeRelay func()   // meneruskan Wake ke instance lain (fase 20)
-	capSince  sync.Map // campaign id -> waktu pertama tanpa SIM online (no_capacity)
+	link       DeviceLink
+	wake       chan struct{}
+	prevSeenNs atomic.Int64 // UnixNano: leader sebelumnya terakhir terlihat (diisi saat menjadi leader)
+	wakeRelay  func()       // meneruskan Wake ke instance lain (fase 20)
+	capSince   sync.Map     // campaign id -> waktu pertama tanpa SIM online (no_capacity)
 }
 
 func New(pool *pgxpool.Pool, cfg config.Config, log *slog.Logger, b *bus.Bus) *Service {
