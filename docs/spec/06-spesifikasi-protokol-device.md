@@ -96,6 +96,13 @@ keputusan selama `STATUS_QUERY_WAIT` (default 15 dtk; maks. 2 pertanyaan per per
 
 Jawaban dengan `attempt` berbeda, untuk pesan yang bukan `sending`, atau dari device lain diabaikan.
 
+**Multi-bagian.** Hitungan `parts_sent`/`parts_delivered` menentukan kepercayaan: `sent` hanya diterima bila semua bagian terkirim,
+`delivered` bila semua bagian diterima (selainnya diturunkan ke `sent`/`sending`). Kemajuan (`parts_sent + parts_delivered` naik sejak
+jawaban sebelumnya) dicatat sebagai event `status_progress` dan mengembalikan satu kuota tanya, sehingga pesan panjang yang terus
+bergerak tidak dinilai `unknown` karena kuota habis; tanpa kemajuan kuota habis seperti biasa. `failed` setelah sebagian bagian
+terkirim (`parts_sent > 0`) dicatat `partial` dan TIDAK diantre ulang walau kodenya retryable, karena bagian itu sudah sampai ke
+penerima dan pengiriman ulang membuatnya ganda.
+
 ## 7. Pembaruan konfigurasi
 
 `config.update` dengan `config_version` lebih kecil/sama dari lokal diabaikan (tetap di-`command.ack`). Device menyimpan `config_version` terakhir dan mengirimnya di `hello`; jika lebih rendah dari server, server mengirim `config.update` setelah `hello.ack`.

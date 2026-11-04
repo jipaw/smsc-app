@@ -35,6 +35,17 @@ func backoff(eff policy.Effective, attempt int, code string) time.Duration {
 
 // OnSmsEvent memproses event status dari device (protocol V2-V4). Idempoten terhadap event_id.
 func (s *Service) OnSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.SmsEvent) error {
+	return s.onSmsEvent(ctx, deviceID, ev, eventOpts{})
+}
+
+// eventOpts: NoRetry = jangan antre ulang walau kodenya bisa dicoba ulang (kegagalan parsial multi-bagian: sebagian bagian
+// sudah sampai ke penerima, mengirim ulang seluruh pesan membuat bagian itu ganda); Extra = data tambahan pada catatan event.
+type eventOpts struct {
+	NoRetry bool
+	Extra   map[string]any
+}
+
+func (s *Service) onSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.SmsEvent, o eventOpts) error {
 	evID, err := uuid.Parse(ev.EventID)
 	mid, err2 := uuid.Parse(ev.MessageID)
 	if err != nil || err2 != nil {
@@ -60,6 +71,9 @@ func (s *Service) OnSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.S
 		}
 		out = cur
 		data := map[string]any{"state": ev.State, "parts_total": ev.PartsTotal}
+		for k, v := range o.Extra {
+			data[k] = v
+		}
 		if ev.PartIndex != nil {
 			data["part_index"] = *ev.PartIndex
 		}
@@ -135,7 +149,7 @@ func (s *Service) OnSmsEvent(ctx context.Context, deviceID uuid.UUID, ev proto.S
 				if err != nil {
 					return err
 				}
-				if retryable[code] && cur.Attempt < cur.MaxAttempts && cur.ExpiresAt.After(time.Now()) {
+				if retryable[code] && !o.NoRetry && cur.Attempt < cur.MaxAttempts && cur.ExpiresAt.After(time.Now()) {
 					next, nb := cur.Attempt+1, time.Now().Add(backoff(eff, cur.Attempt, code))
 					return do(StatusQueued, "requeued", TransitionOpts{NewAttempt: &next, NotBefore: &nb, ErrorCode: &code})
 				}

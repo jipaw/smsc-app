@@ -163,6 +163,30 @@ class CommandProcessorTest {
         assertEquals(SmsState("d1", 2, "delivered", 2, 2, 2, null), d)
     }
 
+    @Test fun `sms status multi-bagian melaporkan kemajuan bagian terkirim dan diterima`() {
+        gateGap = 0
+        gateway.parts = 3
+        p.onSmsSend(cmd()); p.pump()
+        assertEquals(SmsState("m1", 1, "sending", 3, 0, 0, null), p.onSmsStatus(SmsStatus("m1", 1)))
+        p.onPartSent("m1", 1, 0, AndroidSms.RESULT_OK); p.onPartSent("m1", 1, 1, AndroidSms.RESULT_OK)
+        assertEquals(SmsState("m1", 1, "sending", 3, 2, 0, null), p.onSmsStatus(SmsStatus("m1", 1)))   // belum semua bagian: tetap sending
+        p.onPartSent("m1", 1, 2, AndroidSms.RESULT_OK)
+        assertEquals("sent", p.onSmsStatus(SmsStatus("m1", 1)).state)
+        assertEquals(3, p.onSmsStatus(SmsStatus("m1", 1)).partsSent)
+    }
+
+    @Test fun `sms status gagal parsial melaporkan bagian yang sudah terkirim`() {
+        gateGap = 0
+        gateway.parts = 3
+        p.onSmsSend(cmd()); p.pump()
+        p.onPartSent("m1", 1, 0, AndroidSms.RESULT_OK)
+        p.onPartSent("m1", 1, 1, AndroidSms.ERROR_GENERIC_FAILURE)      // bagian ke-2 gagal
+        val s = p.onSmsStatus(SmsStatus("m1", 1))
+        assertEquals("failed", s.state)
+        assertEquals(1, s.partsSent)                                      // server memakai ini: jangan antre ulang
+        assertEquals("generic_failure", s.errorCode)
+    }
+
     @Test fun `inflight hanya memuat job tak-terminal`() {
         gateway.parts = 2
         p.onSmsSend(cmd("a")); p.onSmsSend(cmd("b")); p.pump()

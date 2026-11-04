@@ -43,7 +43,12 @@ func (s *Service) askDeviceStatus(ctx context.Context, id uuid.UUID) bool {
 	return true
 }
 
-// OnSmsState memproses jawaban device atas sms.status.
+// OnSmsState memproses jawaban device atas sms.status, termasuk pesan multi-bagian (fase 24):
+//   - hitungan bagian dinormalkan dulu: jawaban `sent` hanya dipercaya bila parts_sent mencapai parts_total, `delivered` bila
+//     parts_delivered mencapai parts_total (jawaban yang tidak konsisten diturunkan ke keadaan yang didukung hitungannya);
+//   - kemajuan (parts_sent + parts_delivered naik sejak jawaban sebelumnya) mengembalikan satu kuota tanya, sehingga pesan panjang
+//     yang terus bergerak tidak dinilai unknown hanya karena kuota habis;
+//   - `failed` setelah sebagian bagian terkirim TIDAK diantre ulang (bagian itu sudah sampai ke penerima) dan dicatat parsial.
 func (s *Service) OnSmsState(ctx context.Context, deviceID uuid.UUID, st proto.SmsState) {
 	mid, err := uuid.Parse(st.MessageID)
 	if err != nil {
@@ -51,35 +56,86 @@ func (s *Service) OnSmsState(ctx context.Context, deviceID uuid.UUID, st proto.S
 	}
 	var dev *uuid.UUID
 	var status Status
-	var attempt int
-	if err := s.Pool.QueryRow(ctx, `SELECT device_id, status, attempt FROM messages WHERE id=$1`, mid).Scan(&dev, &status, &attempt); err != nil {
+	var attempt, srvParts, lastProgress int
+	if err := s.Pool.QueryRow(ctx, `SELECT device_id, status, attempt, parts, status_progress FROM messages WHERE id=$1`, mid).Scan(&dev, &status, &attempt, &srvParts, &lastProgress); err != nil {
 		return
 	}
 	if dev == nil || *dev != deviceID || status != StatusSending || st.Attempt != attempt {
 		s.M.StatusQueries.WithLabelValues("stale").Inc() // bukan lagi sending / attempt lain / device lain: abaikan
 		return
 	}
-	switch st.State {
+	total := srvParts
+	if st.PartsTotal != nil {
+		total = *st.PartsTotal
+	}
+	sent, delivered := 0, 0
+	valid := total >= 1
+	if st.PartsSent != nil {
+		sent = *st.PartsSent
+	}
+	if st.PartsDelivered != nil {
+		delivered = *st.PartsDelivered
+	}
+	if sent < 0 || delivered < 0 || sent > total || delivered > total || delivered > sent {
+		valid = false // mustahil: bagian terkirim/diterima melebihi total, atau diterima tanpa terkirim
+	}
+	if !valid {
+		s.M.StatusQueries.WithLabelValues("invalid").Inc()
+		return
+	}
+	extra := map[string]any{"via": "sms.state", "parts_sent": sent, "parts_delivered": delivered}
+	if st.PartsTotal != nil && srvParts > 0 && *st.PartsTotal != srvParts {
+		extra["parts_total_server"] = srvParts // selisih hitungan bagian antara server dan device dicatat, bukan dianggap kesalahan
+	}
+	state := st.State
+	switch state { // normalkan jawaban yang tidak didukung hitungannya
+	case "delivered":
+		if st.PartsDelivered != nil && delivered < total {
+			state = "sending"
+			if sent >= total {
+				state = "sent"
+			}
+		}
+	}
+	if state == "sent" && st.PartsSent != nil && sent < total {
+		state = "sending"
+	}
+	switch state {
 	case "sent", "delivered", "failed":
-		parts := 1
-		if st.PartsTotal != nil && *st.PartsTotal > 0 {
-			parts = *st.PartsTotal
-		}
-		ev := proto.SmsEvent{EventID: uuid.NewString(), MessageID: st.MessageID, Attempt: attempt, State: st.State, PartsTotal: parts, ErrorCode: st.ErrorCode,
+		parts := total
+		ev := proto.SmsEvent{EventID: uuid.NewString(), MessageID: st.MessageID, Attempt: attempt, State: state, PartsTotal: parts, ErrorCode: st.ErrorCode,
 			At: time.Now().UTC().Format("2006-01-02T15:04:05.000Z")}
-		if st.State == "failed" && ev.ErrorCode == nil {
-			c := "generic_failure"
-			ev.ErrorCode = &c
+		o := eventOpts{Extra: extra}
+		if state == "failed" {
+			if ev.ErrorCode == nil {
+				c := "generic_failure"
+				ev.ErrorCode = &c
+			}
+			if sent > 0 {
+				o.NoRetry = true
+				extra["partial"] = true
+				s.M.StatusQueries.WithLabelValues("partial").Inc()
+			}
 		}
-		if err := s.OnSmsEvent(ctx, deviceID, ev); err != nil {
+		if err := s.onSmsEvent(ctx, deviceID, ev, o); err != nil {
 			s.Log.Warn("sms.state: terapkan keadaan gagal", "err", err, "message", mid)
 			return
 		}
 		s.M.StatusQueries.WithLabelValues("settled").Inc()
 	case "accepted", "sending":
 		// device masih mengerjakan: beri satu sent_timeout lagi (kuota tanya membatasi total perpanjangan)
+		progress := sent + delivered
 		if eff, err := s.Effective(ctx, s.Pool, nil, nil, nil); err == nil {
-			_, _ = s.Pool.Exec(ctx, `UPDATE messages SET sent_grace_ms = sent_grace_ms + $2::int WHERE id=$1 AND status='sending'`, mid, eff.SentTimeoutMs)
+			q := `UPDATE messages SET sent_grace_ms = sent_grace_ms + $2::int WHERE id=$1 AND status='sending' AND $3::int >= 0`
+			if progress > lastProgress { // ada kemajuan: kuota tanya dikembalikan satu dan kemajuan dicatat
+				q = `UPDATE messages SET sent_grace_ms = sent_grace_ms + $2::int, status_progress = $3::int,
+					status_queries = GREATEST(status_queries - 1, 0) WHERE id=$1 AND status='sending'`
+				_ = s.withTx(ctx, func(tx pgx.Tx) error {
+					return insertEvent(ctx, tx, mid, attempt, "status_progress", "device", nil, nil, extra, nil)
+				})
+				s.M.StatusQueries.WithLabelValues("progress").Inc()
+			}
+			_, _ = s.Pool.Exec(ctx, q, mid, eff.SentTimeoutMs, progress)
 		}
 		s.M.StatusQueries.WithLabelValues("alive").Inc()
 	case "unknown":

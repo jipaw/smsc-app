@@ -224,6 +224,10 @@ Server bertanya ketika pesan `sending` melewati `sent_timeout` sementara device 
 - `state`: `unknown` (device tidak punya job ini), `accepted`, `sending`, `sent`, `delivered`, `failed` (wajib `error_code`).
   Nilai selain `unknown` sama dengan `hello.inflight[].state`; job terminal yang masih tercatat dilaporkan apa adanya.
 - Device HARUS menjawab dari penyimpanan lokalnya tanpa efek samping (tidak mengirim ulang SMS, tidak membuat event baru).
+- Pesan multi-bagian: `parts_total`, `parts_sent`, `parts_delivered` WAJIB diisi device bila lebih dari satu bagian. Server hanya
+  mempercayai `sent` bila `parts_sent = parts_total` dan `delivered` bila `parts_delivered = parts_total` (jawaban yang tidak
+  konsisten diturunkan ke keadaan yang didukung hitungannya); hitungan mustahil (`parts_sent > parts_total`,
+  `parts_delivered > parts_sent`, negatif) diabaikan. `failed` dengan `parts_sent > 0` = kegagalan parsial: server TIDAK mengantre ulang.
 - Device lama yang belum mendukung membalas `error{code:"unknown_type"}`; server menganggapnya "tidak menjawab".
 - Server memperlakukan `sent`/`delivered`/`failed` sebagai event setara; `accepted`/`sending` memperpanjang batas waktu;
   `unknown` menandai pesan `unknown` (`device_lost`). Jawaban dengan `attempt` lebih rendah dari attempt server diabaikan.

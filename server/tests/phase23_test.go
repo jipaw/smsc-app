@@ -143,3 +143,142 @@ func TestStatusQueryAcrossInstances(t *testing.T) {
 		t.Fatalf("pertanyaan harus sampai ke device di B: %d", s2.StatusCount())
 	}
 }
+
+// ---------- fase 24: multi-bagian ----------
+
+func intp(v int) *int { return &v }
+
+func stateWith(state string, total, sent, delivered int, code *string) func(*Sim, proto.Envelope, proto.SmsStatus) {
+	return func(s *Sim, env proto.Envelope, q proto.SmsStatus) {
+		st := proto.SmsState{MessageID: q.MessageID, Attempt: q.Attempt, State: state, PartsTotal: intp(total), PartsSent: intp(sent), PartsDelivered: intp(delivered), ErrorCode: code}
+		e, _ := proto.New(proto.TypeSmsState, st, &env.ID)
+		s.write(e)
+	}
+}
+
+func progressOf(e *env, id string) int {
+	var n int
+	_ = e.pool.QueryRow(context.Background(), `SELECT status_progress FROM messages WHERE id=$1`, id).Scan(&n)
+	return n
+}
+
+// jawaban yang tidak didukung hitungan bagiannya diturunkan: "sent" tapi baru 2 dari 3 bagian => masih sending;
+// "delivered" tapi bagian diterima belum lengkap sedangkan semua terkirim => sent.
+func TestStatusStateNormalizesInconsistentPartCounts(t *testing.T) {
+	cases := []struct {
+		name  string
+		reply func(*Sim, proto.Envelope, proto.SmsStatus)
+		want  string
+	}{
+		{"sent-belum-lengkap", stateWith("sent", 3, 2, 0, nil), "sending"},
+		{"delivered-tapi-baru-sent", stateWith("delivered", 3, 3, 2, nil), "sent"},
+		{"delivered-lengkap", stateWith("delivered", 3, 3, 3, nil), "delivered"},
+		{"sent-lengkap", stateWith("sent", 3, 3, 0, nil), "sent"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e, admin, dev, s := newTakeoverEnv(t)
+			s.OnStatus = c.reply
+			id := craftSending(t, e, admin, dev, "4 seconds")
+			e.svc.ReapOnceForTest(context.Background())
+			waitFor(t, 5*time.Second, "pertanyaan dijawab", func() bool { return s.StatusCount() == 1 })
+			time.Sleep(400 * time.Millisecond)
+			if st := status(e, id); st != c.want {
+				t.Fatalf("status %s, mau %s", st, c.want)
+			}
+		})
+	}
+}
+
+// hitungan mustahil (terkirim > total, diterima > terkirim, negatif) diabaikan dan tidak mengubah apa pun.
+func TestStatusStateRejectsImpossibleCounts(t *testing.T) {
+	for _, c := range []struct{ total, sent, delivered int }{{2, 3, 0}, {3, 1, 2}, {3, -1, 0}} {
+		e, admin, dev, s := newTakeoverEnv(t)
+		s.OnStatus = stateWith("sent", c.total, c.sent, c.delivered, nil)
+		id := craftSending(t, e, admin, dev, "4 seconds")
+		e.svc.ReapOnceForTest(context.Background())
+		waitFor(t, 5*time.Second, "dijawab", func() bool { return s.StatusCount() == 1 })
+		time.Sleep(300 * time.Millisecond)
+		if status(e, id) != "sending" {
+			t.Fatalf("%+v: tidak boleh berubah: %s", c, status(e, id))
+		}
+		if v := gauge(t, e, "smsc_status_queries_total", map[string]string{"result": "invalid"}); v != 1 {
+			t.Fatalf("%+v: invalid=%v", c, v)
+		}
+	}
+}
+
+// pesan panjang yang terus bergerak tidak dinilai unknown karena kuota; yang macet akhirnya unknown.
+func TestStatusStateProgressRefundsQuota(t *testing.T) {
+	e, admin, dev, s := newTakeoverEnv(t)
+	ctx := context.Background()
+	sent := 0
+	s.OnStatus = func(s *Sim, env proto.Envelope, q proto.SmsStatus) {
+		stateWith("sending", 6, sent, 0, nil)(s, env, q)
+	}
+	id := craftSending(t, e, admin, dev, "4 seconds")
+	for round := 1; round <= 4; round++ { // 4 putaran > kuota 2: hanya bertahan karena ada kemajuan
+		sent = round
+		e.svc.ReapOnceForTest(ctx)
+		waitFor(t, 5*time.Second, "jawaban kemajuan", func() bool { return progressOf(e, id) == round })
+		e.sql(`UPDATE messages SET sent_grace_ms = 0 WHERE id=$1`, id) // paksa lewat batas lagi untuk putaran berikut
+		if status(e, id) != "sending" {
+			t.Fatalf("putaran %d: %s", round, status(e, id))
+		}
+		if queriesOf(e, id) > 1 {
+			t.Fatalf("putaran %d: kuota tidak dikembalikan: %d", round, queriesOf(e, id))
+		}
+	}
+	// macet: kemajuan tidak naik => kuota habis => unknown
+	for i := 0; i < 3; i++ {
+		e.svc.ReapOnceForTest(ctx)
+		time.Sleep(500 * time.Millisecond)
+		e.sql(`UPDATE messages SET sent_grace_ms = 0 WHERE id=$1`, id)
+	}
+	e.svc.ReapOnceForTest(ctx)
+	if status(e, id) != "unknown" {
+		t.Fatalf("macet harus unknown: %s q=%d", status(e, id), queriesOf(e, id))
+	}
+	var n int
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM message_events WHERE message_id=$1 AND type='status_progress'`, id).Scan(&n)
+	if n != 4 {
+		t.Fatalf("catatan kemajuan: %d", n)
+	}
+}
+
+// gagal setelah sebagian bagian terkirim: tidak diantre ulang walau kodenya retryable (bagian itu sudah sampai ke penerima).
+func TestStatusStatePartialFailureIsNotRetried(t *testing.T) {
+	gen := "generic_failure"
+	e, admin, dev, s := newTakeoverEnv(t)
+	s.OnStatus = stateWith("failed", 3, 1, 0, &gen)
+	id := craftSending(t, e, admin, dev, "4 seconds")
+	e.svc.ReapOnceForTest(context.Background())
+	waitStatusIs(t, e, id, "failed")
+	var attempt int
+	var partial bool
+	_ = e.pool.QueryRow(context.Background(), `SELECT attempt FROM messages WHERE id=$1`, id).Scan(&attempt)
+	_ = e.pool.QueryRow(context.Background(), `SELECT COALESCE((data->>'partial')::boolean,false) FROM message_events WHERE message_id=$1 AND type='failed' ORDER BY at DESC LIMIT 1`, id).Scan(&partial)
+	if attempt != 1 || !partial {
+		t.Fatalf("attempt=%d partial=%v", attempt, partial)
+	}
+	// kontrol: gagal tanpa bagian terkirim tetap diantre ulang (retry biasa)
+	e2, admin2, dev2, s2 := newTakeoverEnv(t)
+	s2.OnStatus = stateWith("failed", 3, 0, 0, &gen)
+	id2 := craftSending(t, e2, admin2, dev2, "4 seconds")
+	e2.svc.ReapOnceForTest(context.Background())
+	waitStatusIs(t, e2, id2, "queued")
+}
+
+// selisih jumlah bagian server vs device dicatat di data event, tidak dianggap kesalahan.
+func TestStatusStateRecordsPartsMismatch(t *testing.T) {
+	e, admin, dev, s := newTakeoverEnv(t)
+	s.OnStatus = stateWith("sent", 4, 4, 0, nil) // server menyimpan parts=1 untuk pesan uji
+	id := craftSending(t, e, admin, dev, "4 seconds")
+	e.svc.ReapOnceForTest(context.Background())
+	waitStatusIs(t, e, id, "sent")
+	var srv int
+	_ = e.pool.QueryRow(context.Background(), `SELECT COALESCE((data->>'parts_total_server')::int,0) FROM message_events WHERE message_id=$1 AND type='sent' ORDER BY at DESC LIMIT 1`, id).Scan(&srv)
+	if srv < 1 {
+		t.Fatalf("parts_total_server tidak tercatat: %d", srv)
+	}
+}
