@@ -24,6 +24,8 @@ class ProtocolVectorsTest {
                 MessageType.HEARTBEAT -> assertTrue(Codec.payload<Heartbeat>(env).battery.level in 0..100)
                 MessageType.SMS_SEND -> assertTrue(Codec.payload<SmsSend>(env).to.startsWith("+"))
                 MessageType.SMS_CANCEL -> Codec.payload<SmsCancel>(env)
+                MessageType.SMS_STATUS -> assertTrue(Codec.payload<SmsStatus>(env).attempt >= 1)
+                MessageType.SMS_STATE -> assertTrue(Codec.payload<SmsState>(env).state.isNotEmpty())
                 MessageType.COMMAND_ACK -> Codec.payload<CommandAck>(env)
                 MessageType.SMS_EVENT -> assertTrue(Codec.payload<SmsEvent>(env).partsTotal >= 1)
                 MessageType.EVENT_ACK -> assertTrue(Codec.payload<EventAck>(env).eventIds.isNotEmpty())

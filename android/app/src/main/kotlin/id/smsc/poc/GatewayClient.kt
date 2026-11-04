@@ -15,6 +15,7 @@ import id.smsc.poc.core.Hello
 import id.smsc.poc.core.HelloAck
 import id.smsc.poc.core.MessageType
 import id.smsc.poc.core.SmsCancel
+import id.smsc.poc.core.SmsStatus
 import id.smsc.poc.core.SmsEvent
 import id.smsc.poc.core.SmsSend
 import okhttp3.OkHttpClient
@@ -203,6 +204,10 @@ class GatewayClient(private val ctx: Context, private val url: String, private v
             MessageType.SMS_CANCEL -> {
                 val c = Codec.payload<SmsCancel>(env)
                 send(Codec.envelope(MessageType.COMMAND_ACK, PocRuntime.processor.onSmsCancel(c.messageId), ref = env.id))
+            }
+            MessageType.SMS_STATUS -> {
+                val q = Codec.payload<SmsStatus>(env)
+                send(Codec.envelope(MessageType.SMS_STATE, PocRuntime.processor.onSmsStatus(q), ref = env.id))
             }
             MessageType.EVENT_ACK -> PocRuntime.outbox.ack(Codec.payload<EventAck>(env).eventIds)
             MessageType.DEVICE_COMMAND -> {

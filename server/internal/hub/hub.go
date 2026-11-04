@@ -366,7 +366,7 @@ func (h *Hub) reply(s *session, typ string, payload any, ref *string) {
 }
 
 // knownTypes membatasi kardinalitas label: tipe dari HP tak tepercaya.
-var knownTypes = map[string]bool{proto.TypeHeartbeat: true, proto.TypeCommandAck: true, proto.TypeSmsEvent: true, proto.TypeSimReport: true, proto.TypeCommandResult: true, proto.TypeHello: true}
+var knownTypes = map[string]bool{proto.TypeHeartbeat: true, proto.TypeCommandAck: true, proto.TypeSmsEvent: true, proto.TypeSimReport: true, proto.TypeCommandResult: true, proto.TypeHello: true, proto.TypeSmsState: true, proto.TypeError: true}
 
 func (h *Hub) handle(ctx context.Context, s *session, m proto.Envelope) {
 	lbl := "unknown"
@@ -406,6 +406,13 @@ func (h *Hub) handle(ctx context.Context, s *session, m proto.Envelope) {
 		if json.Unmarshal(m.Payload, &r) == nil {
 			_ = h.svc.ApplySimReport(ctx, s.deviceID, r)
 		}
+	case proto.TypeSmsState:
+		var st proto.SmsState
+		if json.Unmarshal(m.Payload, &st) == nil {
+			h.svc.OnSmsState(ctx, s.deviceID, st)
+		}
+	case proto.TypeError: // mis. device lama: unknown_type untuk sms.status — dianggap tidak menjawab; jangan dibalas (cegah gema)
+		h.log.Debug("error dari device", "device", s.deviceID)
 	case proto.TypeCommandResult:
 		var r proto.CommandResult
 		if json.Unmarshal(m.Payload, &r) == nil {

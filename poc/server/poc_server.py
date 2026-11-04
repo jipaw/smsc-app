@@ -11,6 +11,7 @@ Perintah (ketik di terminal):
   burst <slot> <nomor> <n> [teks]         kirim n SMS (jeda ditegakkan guardrail di app)
   ping                                    perintah device.command ping
   cancel <message_id>                     sms.cancel
+  status <message_id> [attempt]           sms.status (tanya keadaan job; jawaban sms.state dicetak)
   report                                  ringkasan pesan + riwayat koneksi + celah heartbeat (R3)
   quit
 """
@@ -166,6 +167,9 @@ class Hub:
             await self.send(self.envelope("event.ack", {"event_ids": [p["event_id"]]}))
             if p["state"] in ("sent", "delivered", "failed"):
                 print(f"[evt] {p['message_id'][:8]} {p['state']} {p.get('error_code') or ''}")
+        elif t == "sms.state":
+            self.log("sms.state", **p)
+            print(f"[state] {p['message_id'][:8]} attempt={p['attempt']} {p['state']} {p.get('error_code') or ''}")
         elif t == "device.command_result":
             self.log("command_result", **p)
             print(f"[cmd] hasil {p}")
@@ -199,6 +203,9 @@ class Hub:
     async def cancel(self, mid: str):
         await self.send(self.envelope("sms.cancel", {"message_id": mid}))
 
+    async def status(self, mid: str, attempt: int = 1):
+        await self.send(self.envelope("sms.status", {"message_id": mid, "attempt": attempt}))
+
     def report(self) -> str:
         by_state: dict[str, int] = {}
         for m in self.messages.values():
@@ -218,7 +225,7 @@ class Hub:
 
 async def repl(hub: Hub, stop: asyncio.Event):
     loop = asyncio.get_running_loop()
-    print("Ketik: report | ping | send <slot> <nomor> <teks> | burst <slot> <nomor> <n> | cancel <id> | quit")
+    print("Ketik: report | ping | send <slot> <nomor> <teks> | burst <slot> <nomor> <n> | cancel <id> | status <id> [attempt] | quit")
     while not stop.is_set():
         line = await loop.run_in_executor(None, sys.stdin.readline)
         if not line:
@@ -239,6 +246,8 @@ async def repl(hub: Hub, stop: asyncio.Event):
                 await hub.ping()
             elif cmd == "cancel" and len(parts) == 2:
                 await hub.cancel(parts[1])
+            elif cmd == "status" and len(parts) in (2, 3):
+                await hub.status(parts[1], int(parts[2]) if len(parts) == 3 else 1)
             elif cmd == "report":
                 print(hub.report())
             elif cmd in ("quit", "exit"):

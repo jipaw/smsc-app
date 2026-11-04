@@ -121,6 +121,17 @@ class CommandProcessor(
     }
 
     /**
+     * Jawab sms.status dari penyimpanan lokal, tanpa efek samping (tidak mengirim ulang, tidak membuat event).
+     * Job tidak ada -> state "unknown". error_code dibatasi ke enum kontrak ("cancelled" lokal dilaporkan generic_failure).
+     */
+    fun onSmsStatus(q: SmsStatus): SmsState = synchronized(lock) {
+        val job = store.get(q.messageId) ?: return SmsState(q.messageId, q.attempt, "unknown")
+        val code = if (job.state == JobState.FAILED) (job.errorCode?.takeIf { it in CONTRACT_ERROR_CODES } ?: "generic_failure") else null
+        SmsState(job.messageId, job.attempt, job.state.name.lowercase(), job.partsTotal.takeIf { it > 0 },
+            job.sentParts.size, job.deliveredParts.size, code)
+    }
+
+    /**
      * Kirim item yang sudah diizinkan guardrail. Kembalikan ms sampai perlu dipanggil lagi,
      * atau null bila tidak ada antrean.
      */
@@ -240,3 +251,9 @@ class CommandProcessor(
         at = Time.iso(wallClock.nowMs()),
     )
 }
+
+/** Nilai `errorCode` pada ws-schema.json. */
+val CONTRACT_ERROR_CODES = setOf(
+    "invalid_destination", "short_code_blocked", "permission_denied", "radio_off", "no_service", "generic_failure", "null_pdu",
+    "os_rate_limited", "sim_unavailable", "delivery_failed", "ack_timeout", "sent_timeout", "device_lost", "device_revoked", "expired", "suppressed",
+)

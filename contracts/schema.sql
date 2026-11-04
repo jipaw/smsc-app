@@ -373,6 +373,7 @@ CREATE TABLE messages (
   delivered_at     timestamptz,
   finished_at      timestamptz,
   sent_grace_ms    integer NOT NULL DEFAULT 0 CHECK (sent_grace_ms >= 0),
+  status_queries   smallint NOT NULL DEFAULT 0 CHECK (status_queries >= 0),
   CHECK (status <> 'assigned' OR (sim_id IS NOT NULL AND lease_expires_at IS NOT NULL))
 );
 CREATE INDEX messages_dispatch_idx   ON messages (priority DESC, not_before, id) WHERE status = 'queued';

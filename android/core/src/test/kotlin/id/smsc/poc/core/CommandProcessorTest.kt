@@ -137,6 +137,32 @@ class CommandProcessorTest {
         time.advance(5000); p.pump(); assertEquals(listOf("m1"), gateway.sent.map { it.messageId })
     }
 
+    @Test fun `sms status dijawab dari penyimpanan lokal tanpa efek samping`() {
+        gateGap = 0
+        assertEquals(SmsState("tidak-ada", 1, "unknown"), p.onSmsStatus(SmsStatus("tidak-ada", 1)))
+        p.onSmsSend(cmd()); p.pump()
+        val sending = p.onSmsStatus(SmsStatus("m1", 1))
+        assertEquals("sending", sending.state)
+        assertNull(sending.errorCode)
+        val sentBefore = gateway.sent.size; val eventsBefore = events.size
+        repeat(3) { p.onSmsStatus(SmsStatus("m1", 1)) }
+        assertEquals(sentBefore, gateway.sent.size)      // tidak mengirim ulang
+        assertEquals(eventsBefore, events.size)           // tidak membuat event
+        p.onSmsCancel("m1")                                // sudah sending: ditolak, status tetap
+        assertEquals("sending", p.onSmsStatus(SmsStatus("m1", 1)).state)
+    }
+
+    @Test fun `sms status job gagal melaporkan error_code dalam enum kontrak`() {
+        gateGap = 0
+        store.put(SmsJob("f1", 1, JobState.FAILED, 0, 1, false, errorCode = "no_service"))
+        store.put(SmsJob("f2", 1, JobState.FAILED, 0, 1, false, errorCode = "cancelled"))    // kode lokal non-kontrak
+        assertEquals("no_service", p.onSmsStatus(SmsStatus("f1", 1)).errorCode)
+        assertEquals("generic_failure", p.onSmsStatus(SmsStatus("f2", 1)).errorCode)
+        store.put(SmsJob("d1", 2, JobState.DELIVERED, 0, 2, true, sentParts = setOf(0, 1), deliveredParts = setOf(0, 1)))
+        val d = p.onSmsStatus(SmsStatus("d1", 2))
+        assertEquals(SmsState("d1", 2, "delivered", 2, 2, 2, null), d)
+    }
+
     @Test fun `inflight hanya memuat job tak-terminal`() {
         gateway.parts = 2
         p.onSmsSend(cmd("a")); p.onSmsSend(cmd("b")); p.pump()

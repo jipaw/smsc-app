@@ -25,6 +25,8 @@ const (
 	TypeHeartbeat     = "heartbeat"
 	TypeSmsSend       = "sms.send"
 	TypeSmsCancel     = "sms.cancel"
+	TypeSmsStatus     = "sms.status"
+	TypeSmsState      = "sms.state"
 	TypeCommandAck    = "command.ack"
 	TypeSmsEvent      = "sms.event"
 	TypeEventAck      = "event.ack"
@@ -131,6 +133,22 @@ type SmsSend struct {
 
 type SmsCancel struct {
 	MessageID string `json:"message_id"`
+}
+
+// SmsStatus (S→D): tanya keadaan job di device. SmsState (D→S, ref = id SmsStatus): jawabannya.
+type SmsStatus struct {
+	MessageID string `json:"message_id"`
+	Attempt   int    `json:"attempt"`
+}
+
+type SmsState struct {
+	MessageID      string  `json:"message_id"`
+	Attempt        int     `json:"attempt"`
+	State          string  `json:"state"` // unknown | accepted | sending | sent | delivered | failed
+	PartsTotal     *int    `json:"parts_total,omitempty"`
+	PartsSent      *int    `json:"parts_sent,omitempty"`
+	PartsDelivered *int    `json:"parts_delivered,omitempty"`
+	ErrorCode      *string `json:"error_code,omitempty"`
 }
 
 type CommandAck struct {

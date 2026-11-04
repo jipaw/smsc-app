@@ -117,6 +117,22 @@ data class SmsSend(
 @Serializable
 data class SmsCancel(@SerialName("message_id") val messageId: String)
 
+/** S→D: tanya keadaan job (pesan sending yang lewat batas waktu). */
+@Serializable
+data class SmsStatus(@SerialName("message_id") val messageId: String, val attempt: Int)
+
+/** D→S: jawaban SmsStatus; state `unknown` = tidak ada job ini. */
+@Serializable
+data class SmsState(
+    @SerialName("message_id") val messageId: String,
+    val attempt: Int,
+    val state: String,
+    @SerialName("parts_total") val partsTotal: Int? = null,
+    @SerialName("parts_sent") val partsSent: Int? = null,
+    @SerialName("parts_delivered") val partsDelivered: Int? = null,
+    @SerialName("error_code") val errorCode: String? = null,
+)
+
 @Serializable
 data class CommandAck(val accepted: Boolean, val reason: String? = null)
 
@@ -162,6 +178,8 @@ object MessageType {
     const val HEARTBEAT = "heartbeat"
     const val SMS_SEND = "sms.send"
     const val SMS_CANCEL = "sms.cancel"
+    const val SMS_STATUS = "sms.status"
+    const val SMS_STATE = "sms.state"
     const val COMMAND_ACK = "command.ack"
     const val SMS_EVENT = "sms.event"
     const val EVENT_ACK = "event.ack"

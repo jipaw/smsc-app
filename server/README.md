@@ -18,6 +18,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
 | **Fase 13**: SCIM `Group` → peran (`SCIM_ADMIN_GROUPS`/`SCIM_OPERATOR_GROUPS`/`SCIM_VIEWER_GROUPS`), peran efektif = tertinggi(roles, grup), rekonsiliasi saat start | |
 | **Fase 14–15**: rekonsiliasi grup SCIM berkala (`SCIM_RECONCILE_INTERVAL`); status run terakhir tersimpan di database (`settings.scim_reconcile_last`) dan tampil di Pengaturan → SCIM | |
+| **Fase 23**: `sms.status`/`sms.state` — reaper bertanya ke device sebelum menilai pesan `sending` yang lewat batas (`STATUS_QUERY_WAIT`, `messages.status_queries`, `smsc_status_queries_total`) | |
 | **Fase 22**: grace `sent_timeout` untuk pesan `sending` saat leader berganti (`messages.sent_grace_ms`, `smsc_sending_grace_total`) | |
 | **Fase 21**: pemulihan pesan `assigned` saat leader berganti (lease diperbarui + kirim ulang, `settings.leader_seen`, `smsc_lease_recovered_total`) | |
 | **Fase 20**: WS Hub multi-instance (`device_sessions`, `hub_commands`, `cmd_refs`; relay perintah/Request/close, event SSE, dan wake lewat LISTEN/NOTIFY + poll cadangan; `HUB_TICK`) | |
@@ -84,6 +85,7 @@ Endpoint: `POST /auth/login` → (2FA aktif) `{mfa_required, mfa_token}` → `PO
 | `SCIM_ALLOW_ADMIN_ROLE` | `false` | Izinkan SCIM memberi/mengubah peran admin |
 | `SCIM_ADOPT_EXISTING` | `false` | Pengguna lokal yang sudah ada terlihat dan dapat dikelola SCIM |
 | `SCIM_ADMIN_GROUPS` | – | Nama grup IdP → admin (butuh `SCIM_ALLOW_ADMIN_ROLE=true`, jika tidak gagal start) |
+| `STATUS_QUERY_WAIT` | `15s` | Tunggu jawaban `sms.status` sebelum pesan `sending` dinilai ulang (maks. 2 pertanyaan) |
 | `HUB_TICK` | `1s` | Poll cadangan antar-instance WS Hub (drain `hub_commands`, segarkan sesi instance lain) |
 | `LEADER_TICK` | `5s` | Interval pemeriksaan lock leader / percobaan ambil alih oleh standby |
 | `SCIM_RECONCILE_INTERVAL` | `1h` | Rekonsiliasi berkala pemetaan grup → peran (leader); `0` = hanya saat start |

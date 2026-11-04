@@ -193,7 +193,7 @@ WITH c AS (
   ORDER BY m.priority DESC, m.not_before, m.id
   FOR UPDATE OF m SKIP LOCKED LIMIT 1)
 UPDATE messages m SET status='assigned', sim_id=$1, device_id=$2, attempt=GREATEST(m.attempt,1), assigned_at=now(),
-       lease_expires_at = now() + ($3::int * interval '1 millisecond'), error_code=NULL, sent_grace_ms=0
+       lease_expires_at = now() + ($3::int * interval '1 millisecond'), error_code=NULL, sent_grace_ms=0, status_queries=0
 FROM c WHERE m.id=c.id RETURNING m.id, extract(epoch FROM (now() - GREATEST(m.created_at, m.not_before)))`
 
 // assignNext: dalam satu transaksi - kunci baris SIM, periksa ulang jeda/inflight/rate, lalu ambil pesan (SKIP LOCKED).
@@ -361,6 +361,9 @@ func (s *Service) reapOnce(ctx context.Context) {
 	// 2. sending terlalu lama tanpa kabar -> unknown (atau requeue bila retry_on_unknown)
 	if eff, err := s.Effective(ctx, s.Pool, nil, nil, nil); err == nil {
 		for _, id := range s.idsQuery(ctx, `SELECT id FROM messages WHERE status='sending' AND assigned_at + (($1::int + sent_grace_ms) * interval '1 millisecond') < now() LIMIT 100`, eff.SentTimeoutMs) {
+			if s.askDeviceStatus(ctx, id) { // tanya device dulu; keputusan ditunda sampai jawaban/batas berikutnya
+				continue
+			}
 			c := "sent_timeout"
 			if eff.RetryOnUnknown {
 				var cur int

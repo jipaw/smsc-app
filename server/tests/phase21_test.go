@@ -30,6 +30,9 @@ func newTakeoverEnv(t *testing.T) (*env, *client, uuid.UUID, *Sim) {
 	id, secret := e.enroll(admin)
 	s, _ := e.connect(id, secret, nil)
 	s.OnSend = Happy
+	// gerbang dispatcher yang tidak bergantung pada kill switch: SIM dinonaktifkan agar dispatcher harness tidak ikut
+	// menugaskan pesan uji (pause saja rapuh di bawah beban); pemulihan/reaper tidak memeriksa sims.enabled
+	e.sql(`UPDATE sims SET enabled=false WHERE device_id=$1`, id)
 	return e, admin, id, s
 }
 
@@ -152,9 +155,10 @@ func graceOf(e *env, id string) int {
 func TestTakeoverExtendsSendingDeadlineAcrossGap(t *testing.T) {
 	e, admin, dev, _ := newTakeoverEnv(t)
 	ctx := context.Background()
-	inGap := craftSending(t, e, admin, dev, "4 seconds")   // batas (3 dtk) lewat 1 dtk lalu: setelah leader terakhir terlihat
-	before := craftSending(t, e, admin, dev, "20 seconds") // batas lewat 17 dtk lalu: sebelum leader terakhir terlihat
-	fresh := craftSending(t, e, admin, dev, "1 second")    // batas masih 2 dtk lagi
+	inGap := craftSending(t, e, admin, dev, "4 seconds")              // batas (3 dtk) lewat 1 dtk lalu: setelah leader terakhir terlihat
+	before := craftSending(t, e, admin, dev, "20 seconds")            // batas lewat 17 dtk lalu: sebelum leader terakhir terlihat
+	e.sql(`UPDATE messages SET status_queries=2 WHERE id=$1`, before) // kuota sms.status habis: uji jalur alur lama (fase 23)
+	fresh := craftSending(t, e, admin, dev, "1 second")               // batas masih 2 dtk lagi
 	since := time.Now().Add(-5 * time.Second)
 	if n := e.svc.ExtendSendingGrace(ctx, since); n != 2 {
 		t.Fatalf("dua pesan harus diperpanjang (inGap, fresh): %d", n)
@@ -197,6 +201,7 @@ func TestTakeoverGraceAvoidsDuplicateRetryOnUnknown(t *testing.T) {
 	protected := craftSending(t, e, admin, dev, "4 seconds")
 	unprotected := craftSending(t, e, admin, dev, "4 seconds")
 	e.sql(`UPDATE messages SET sent_grace_ms=0 WHERE id=$1`, unprotected)
+	e.sql(`UPDATE messages SET status_queries=2 WHERE id=$1`, unprotected) // kuota sms.status habis: jalur alur lama
 	// hanya `protected` yang melewati jalur pengambilalihan
 	e.sql(`UPDATE messages SET sent_grace_ms=3000 WHERE id=$1`, protected)
 	e.svc.ReapOnceForTest(ctx)
@@ -214,6 +219,7 @@ func TestAssignmentResetsSendingGrace(t *testing.T) {
 	s.OnSend = func(*Sim, proto.Envelope, proto.SmsSend) {}
 	m := admin.send(num, "reset grace")[0]
 	e.sql(`UPDATE messages SET sent_grace_ms=5000 WHERE id=$1`, m.ID)
+	e.sql(`UPDATE sims SET enabled=true WHERE device_id=$1`, dev) // dispatcher boleh bekerja untuk tes ini
 	_ = e.svc.SetPaused(context.Background(), false, "tes")
 	admin.waitStatus(m.ID, "assigned", 10*time.Second)
 	if g := graceOf(e, m.ID); g != 0 {

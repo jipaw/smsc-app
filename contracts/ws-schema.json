@@ -18,6 +18,8 @@
     { "if": { "properties": { "type": { "const": "heartbeat" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/heartbeat" } } } },
     { "if": { "properties": { "type": { "const": "sms.send" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/smsSend" } } } },
     { "if": { "properties": { "type": { "const": "sms.cancel" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/smsCancel" } } } },
+    { "if": { "properties": { "type": { "const": "sms.status" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/smsStatus" } } } },
+    { "if": { "properties": { "type": { "const": "sms.state" } } }, "then": { "required": ["ref"], "properties": { "ref": { "$ref": "#/$defs/uuid" }, "payload": { "$ref": "#/$defs/smsState" } } } },
     { "if": { "properties": { "type": { "const": "command.ack" } } }, "then": { "required": ["ref"], "properties": { "ref": { "$ref": "#/$defs/uuid" }, "payload": { "$ref": "#/$defs/commandAck" } } } },
     { "if": { "properties": { "type": { "const": "sms.event" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/smsEvent" } } } },
     { "if": { "properties": { "type": { "const": "event.ack" } } }, "then": { "properties": { "payload": { "$ref": "#/$defs/eventAck" } } } },
@@ -150,6 +152,26 @@
       }
     },
     "smsCancel": { "type": "object", "required": ["message_id"], "properties": { "message_id": { "$ref": "#/$defs/uuid" } } },
+    "smsStatus": {
+      "type": "object",
+      "required": ["message_id", "attempt"],
+      "properties": { "message_id": { "$ref": "#/$defs/uuid" }, "attempt": { "type": "integer", "minimum": 1 } }
+    },
+    "smsState": {
+      "type": "object",
+      "required": ["message_id", "attempt", "state"],
+      "properties": {
+        "message_id": { "$ref": "#/$defs/uuid" },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "state": { "enum": ["unknown", "accepted", "sending", "sent", "delivered", "failed"] },
+        "parts_total": { "type": "integer", "minimum": 1 },
+        "parts_sent": { "type": "integer", "minimum": 0 },
+        "parts_delivered": { "type": "integer", "minimum": 0 },
+        "error_code": { "oneOf": [{ "$ref": "#/$defs/errorCode" }, { "type": "null" }] }
+      },
+      "if": { "properties": { "state": { "const": "failed" } } },
+      "then": { "required": ["error_code"], "properties": { "error_code": { "$ref": "#/$defs/errorCode" } } }
+    },
     "commandAck": {
       "type": "object",
       "required": ["accepted"],

@@ -80,6 +80,22 @@ Aturan:
 | `accepted` (belum `sending`) | `accepted:true` | job dihapus/ditandai `failed(cancelled)` lokal tanpa event ke server |
 | `sending`/terminal | `accepted:false, reason:"already_sending"` | server menolak pembatalan (409) |
 
+## 6a. Tanya status (`sms.status` / `sms.state`)
+
+Pesan `sending` yang melewati `sent_timeout` sementara device tersambung: server mengirim `sms.status{message_id,attempt}` dan menunda
+keputusan selama `STATUS_QUERY_WAIT` (default 15 dtk; maks. 2 pertanyaan per percobaan kirim). Device menjawab `sms.state` (`ref` = id
+`sms.status`) dari penyimpanan lokal, TANPA efek samping.
+
+| `state` di jawaban | Efek di server |
+|---|---|
+| `sent` / `delivered` | diterapkan seperti event yang bersangkutan (tidak diantre ulang → tidak ada SMS ganda) |
+| `failed` (+`error_code`) | diterapkan seperti event `failed` (retry biasa berlaku) |
+| `accepted` / `sending` | device masih bekerja: batas diperpanjang satu `sent_timeout` |
+| `unknown` | device tidak punya job: pesan `unknown` (`device_lost`) |
+| tidak menjawab / `error unknown_type` (device lama) | setelah kuota habis: alur lama (`unknown`, atau antre ulang bila `retry_on_unknown`) |
+
+Jawaban dengan `attempt` berbeda, untuk pesan yang bukan `sending`, atau dari device lain diabaikan.
+
 ## 7. Pembaruan konfigurasi
 
 `config.update` dengan `config_version` lebih kecil/sama dari lokal diabaikan (tetap di-`command.ack`). Device menyimpan `config_version` terakhir dan mengirimnya di `hello`; jika lebih rendah dari server, server mengirim `config.update` setelah `hello.ack`.

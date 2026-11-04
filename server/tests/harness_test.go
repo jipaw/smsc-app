@@ -76,7 +76,7 @@ func newEnvOpts(t *testing.T, opts ...func(*config.Config)) *env {
 		WebhookTimeout: 2 * time.Second, WebhookBackoff: []time.Duration{300 * time.Millisecond, 400 * time.Millisecond, 500 * time.Millisecond}, WebhookAllowLoopback: true,
 		WebAuthnRPID: "example.test", WebAuthnRPName: "SMSC Test", WebAuthnOrigins: []string{"http://example.test"},
 		LoginRatePerMin: 6000, LoginBurst: 1000, DeviceRotateGrace: 1500 * time.Millisecond,
-		WebhookKey: strings.Repeat("k", 40), HubTick: 100 * time.Millisecond, WebhookWorkers: 4, WebhookTick: 100 * time.Millisecond, RetentionInterval: time.Hour, EmailTick: 100 * time.Millisecond, EmailBackoff: []time.Duration{200 * time.Millisecond, 300 * time.Millisecond}}
+		WebhookKey: strings.Repeat("k", 40), HubTick: 100 * time.Millisecond, StatusQueryWait: 400 * time.Millisecond, WebhookWorkers: 4, WebhookTick: 100 * time.Millisecond, RetentionInterval: time.Hour, EmailTick: 100 * time.Millisecond, EmailBackoff: []time.Duration{200 * time.Millisecond, 300 * time.Millisecond}}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -208,6 +208,9 @@ type Sim struct {
 	Acks     []string // event_id yang di-ack server
 	// perilaku (dapat diubah per tes)
 	OnSend func(s *Sim, env proto.Envelope, cmd proto.SmsSend)
+	// sms.status dari server; bila nil, device bersikap seperti versi lama (tidak menjawab)
+	OnStatus func(s *Sim, env proto.Envelope, q proto.SmsStatus)
+	Statuses []proto.SmsStatus
 	// device.command dari server (rotasi kredensial dll.); bila nil, command diabaikan
 	Commands  []proto.DeviceCommand
 	OnCommand func(s *Sim, env proto.Envelope, cmd proto.DeviceCommand)
@@ -333,6 +336,16 @@ func (s *Sim) loop() {
 			s.Ack(env, true, "")
 			if s.OnCommand != nil {
 				s.OnCommand(s, env, c)
+			}
+		case proto.TypeSmsStatus:
+			var q proto.SmsStatus
+			_ = json.Unmarshal(env.Payload, &q)
+			s.mu.Lock()
+			s.Statuses = append(s.Statuses, q)
+			hook := s.OnStatus
+			s.mu.Unlock()
+			if hook != nil {
+				hook(s, env, q)
 			}
 		case proto.TypeSmsCancel:
 			var c proto.SmsCancel
@@ -465,4 +478,23 @@ func (s *Sim) LastCommand() (proto.DeviceCommand, bool) {
 		return proto.DeviceCommand{}, false
 	}
 	return s.Commands[len(s.Commands)-1], true
+}
+
+// State menjawab sms.status dengan sms.state (ref = id permintaan).
+func (s *Sim) State(req proto.Envelope, q proto.SmsStatus, state string, errCode *string) {
+	st := proto.SmsState{MessageID: q.MessageID, Attempt: q.Attempt, State: state, ErrorCode: errCode}
+	env, _ := proto.New(proto.TypeSmsState, st, &req.ID)
+	s.write(env)
+}
+
+func (s *Sim) StatusCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.Statuses)
+}
+
+func (s *Sim) FirstStatus() proto.SmsStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Statuses[0]
 }

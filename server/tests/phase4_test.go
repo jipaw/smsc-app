@@ -152,7 +152,8 @@ func TestMFASetupEnableAndLoginFlow(t *testing.T) {
 	var en struct {
 		Codes []string `json:"recovery_codes"`
 	}
-	if st := u.c.do("POST", "/api/v1/auth/2fa/enable", map[string]string{"code": totp(setup.Secret, time.Now())}, &en); st != 200 || len(en.Codes) != 10 {
+	enableCode := totp(setup.Secret, time.Now()) // disimpan: batas langkah 30 dtk bisa terlewati antara enable dan login
+	if st := u.c.do("POST", "/api/v1/auth/2fa/enable", map[string]string{"code": enableCode}, &en); st != 200 || len(en.Codes) != 10 {
 		t.Fatalf("enable: %d %v", st, en.Codes)
 	}
 	var stt struct {
@@ -194,7 +195,7 @@ func TestMFASetupEnableAndLoginFlow(t *testing.T) {
 	if st, _ := e.verify(c2, tampered, totp(setup.Secret, time.Now())); st != 401 {
 		t.Fatalf("token diubah: %d", st)
 	}
-	good := totp(setup.Secret, time.Now())
+	good := enableCode
 	if st, _ := e.verify(c2, ch.Token, good); st != 401 {
 		t.Fatalf("kode yang dipakai saat enable tidak boleh dipakai lagi untuk login: %d", st)
 	}

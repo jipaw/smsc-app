@@ -43,6 +43,8 @@ Pesan dengan `type` tidak dikenal harus **diabaikan** (forward-compatible) dan d
 | D→S | `heartbeat` | Kesehatan periodik | – |
 | S→D | `sms.send` | Perintah kirim satu SMS | `command.ack` |
 | S→D | `sms.cancel` | Batalkan pesan yang belum dikirim | `command.ack` |
+| S→D | `sms.status` | Tanya keadaan job di device (pesan yang `sending` melewati batas waktu) | `sms.state` |
+| D→S | `sms.state` | Jawaban `sms.status` (`ref` = id `sms.status`) | – |
 | D→S | `command.ack` | Terima/tolak perintah | – |
 | D→S | `sms.event` | Perubahan status SMS (sending/sent/delivered/failed) | `event.ack` |
 | S→D | `event.ack` | Konfirmasi event tersimpan → boleh dihapus dari outbox | – |
@@ -207,6 +209,24 @@ Device menghapus event dari outbox hanya setelah menerima ini. Server idempoten 
 ```
 
 `rotate_credential` (dua tahap, tanpa risiko terkunci): server membuat secret baru dan mengirimnya dalam `device.command` sebagai `new_secret` (wajib untuk aksi ini, dilarang untuk aksi lain). Secret lama **tetap sah**. Device wajib menyimpan secret baru ke penyimpanan aman **sebelum** membalas `device.command_result` `ok=true`; bila gagal menyimpan, balas `ok=false` dan server membuang secret baru. Setelah `ok=true` (atau begitu secret baru dipakai untuk autentikasi, mis. bila hasil hilang di jalan) server memromosikan secret baru; secret lama masih berlaku 60 dtk (grace, `DEVICE_ROTATE_GRACE`) lalu mati. Secret tertunda kedaluwarsa dalam 10 menit. `new_secret` tidak boleh dicatat di log mana pun.
+
+### 3.10a `sms.status` (S→D) dan `sms.state` (D→S)
+
+Server bertanya ketika pesan `sending` melewati `sent_timeout` sementara device masih tersambung, sebelum memutuskan `unknown`
+(atau mengantre ulang bila `retry_on_unknown`, yang berisiko SMS ganda). Tambahan kompatibel di protokol v1.
+
+```json
+{ "type": "sms.status", "payload": { "message_id": "…", "attempt": 1 } }
+{ "type": "sms.state",  "ref": "<id sms.status>", "payload": { "message_id": "…", "attempt": 1, "state": "sending",
+                          "parts_total": 2, "parts_sent": 1, "parts_delivered": 0, "error_code": null } }
+```
+
+- `state`: `unknown` (device tidak punya job ini), `accepted`, `sending`, `sent`, `delivered`, `failed` (wajib `error_code`).
+  Nilai selain `unknown` sama dengan `hello.inflight[].state`; job terminal yang masih tercatat dilaporkan apa adanya.
+- Device HARUS menjawab dari penyimpanan lokalnya tanpa efek samping (tidak mengirim ulang SMS, tidak membuat event baru).
+- Device lama yang belum mendukung membalas `error{code:"unknown_type"}`; server menganggapnya "tidak menjawab".
+- Server memperlakukan `sent`/`delivered`/`failed` sebagai event setara; `accepted`/`sending` memperpanjang batas waktu;
+  `unknown` menandai pesan `unknown` (`device_lost`). Jawaban dengan `attempt` lebih rendah dari attempt server diabaikan.
 
 ### 3.11 `error`
 
