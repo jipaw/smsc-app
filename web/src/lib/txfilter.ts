@@ -40,6 +40,11 @@ export function filterLink(patch: Partial<TxFilter>): string {
   return '/transactions' + (s ? `?${s}` : '')
 }
 
+/** Alasan tampilan dengan filter ini tidak boleh dibagikan (nomor di-masking untuk viewer), atau '' bila boleh. */
+export function shareBlocker(f: TxFilter): string {
+  return f.to ? 'Tampilan dengan filter nomor tidak dapat dibagikan (awalan nomor akan terlihat oleh viewer).' : ''
+}
+
 /** Bentuk filter di API tampilan tersimpan (kunci sama; nilai kosong = ""). */
 export interface ViewFilterDTO { status?: string[]; source?: string; to?: string; since?: string; partial?: string; campaign?: string }
 

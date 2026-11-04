@@ -497,9 +497,12 @@ CREATE TABLE saved_views (
   name       text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 60),
   filter     jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  shared     boolean NOT NULL DEFAULT false,
+  CONSTRAINT saved_views_shared_no_number CHECK (NOT shared OR COALESCE(filter->>'to', '') = '')
 );
 CREATE UNIQUE INDEX saved_views_user_name_uq ON saved_views (user_id, lower(name));
+CREATE INDEX saved_views_shared_idx ON saved_views (lower(name)) WHERE shared;
 
 -- Seed: policy default sesuai docs/03 §4
 INSERT INTO dispatch_policies (id, name, is_default, min_delay_ms, max_delay_ms, burst_size, burst_pause_ms,

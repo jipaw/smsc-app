@@ -37,6 +37,9 @@ type SavedView struct {
 	ID        uuid.UUID  `json:"id"`
 	Name      string     `json:"name"`
 	Filter    ViewFilter `json:"filter"`
+	Shared    bool       `json:"shared"` // dibagikan ke seluruh tim (hanya-baca bagi pengguna lain)
+	Mine      bool       `json:"mine"`   // milik pengguna yang membaca
+	Owner     string     `json:"owner"`  // bagian lokal email pemilik (sebelum @), untuk label tampilan orang lain
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
@@ -104,7 +107,7 @@ func cleanViewName(n string) (string, error) {
 func scanView(r pgx.Row) (SavedView, error) {
 	var v SavedView
 	var raw []byte
-	if err := r.Scan(&v.ID, &v.Name, &raw, &v.CreatedAt, &v.UpdatedAt); err != nil {
+	if err := r.Scan(&v.ID, &v.Name, &raw, &v.CreatedAt, &v.UpdatedAt, &v.Shared, &v.Mine, &v.Owner); err != nil {
 		return v, err
 	}
 	_ = json.Unmarshal(raw, &v.Filter)
@@ -114,10 +117,13 @@ func scanView(r pgx.Row) (SavedView, error) {
 	return v, nil
 }
 
-const viewCols = `id, name, filter, created_at, updated_at`
+// viewSel: $1 = pengguna yang membaca (menentukan mine); pemilik diberi label bagian lokal email saja agar email penuh tidak bocor ke viewer.
+const viewSel = `v.id, v.name, v.filter, v.created_at, v.updated_at, v.shared, v.user_id = $1, split_part(u.email, '@', 1)`
+
+var errShareNumber = Validation(FieldError{"shared", "tampilan dengan filter nomor tidak boleh dibagikan (awalan nomor akan terlihat oleh viewer yang nomornya di-masking); kosongkan nomor atau jangan bagikan"})
 
 func (s *Service) ListSavedViews(ctx context.Context, user uuid.UUID) ([]SavedView, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT `+viewCols+` FROM saved_views WHERE user_id=$1 ORDER BY lower(name)`, user)
+	rows, err := s.Pool.Query(ctx, `SELECT `+viewSel+` FROM saved_views v JOIN users u ON u.id=v.user_id WHERE v.user_id=$1 OR v.shared ORDER BY (v.user_id <> $1), lower(v.name)`, user)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +143,7 @@ func dupView() error {
 	return NewProblem(http.StatusConflict, "saved_view.duplicate", "Nama sudah dipakai", "sudah ada tampilan dengan nama itu (huruf besar/kecil dianggap sama)")
 }
 
-func (s *Service) CreateSavedView(ctx context.Context, user uuid.UUID, name string, f ViewFilter) (SavedView, error) {
+func (s *Service) CreateSavedView(ctx context.Context, user uuid.UUID, name string, f ViewFilter, shared bool) (SavedView, error) {
 	name, err := cleanViewName(name)
 	if err != nil {
 		return SavedView{}, err
@@ -145,6 +151,9 @@ func (s *Service) CreateSavedView(ctx context.Context, user uuid.UUID, name stri
 	nf, err := f.normalize()
 	if err != nil {
 		return SavedView{}, err
+	}
+	if shared && nf.To != "" {
+		return SavedView{}, errShareNumber
 	}
 	raw, _ := json.Marshal(nf)
 	var v SavedView
@@ -161,7 +170,11 @@ func (s *Service) CreateSavedView(ctx context.Context, user uuid.UUID, name stri
 			return NewProblem(http.StatusConflict, "saved_view.limit", "Terlalu banyak tampilan", "maksimal 20 tampilan tersimpan per pengguna; hapus yang tidak dipakai")
 		}
 		var e error
-		v, e = scanView(tx.QueryRow(ctx, `INSERT INTO saved_views(id, user_id, name, filter) VALUES ($1,$2,$3,$4) RETURNING `+viewCols, newID(), user, name, raw))
+		id := newID()
+		if _, e = tx.Exec(ctx, `INSERT INTO saved_views(id, user_id, name, filter, shared) VALUES ($1,$2,$3,$4,$5)`, id, user, name, raw, shared); e != nil {
+			return e
+		}
+		v, e = scanView(tx.QueryRow(ctx, `SELECT `+viewSel+` FROM saved_views v JOIN users u ON u.id=v.user_id WHERE v.id=$2`, user, id))
 		return e
 	})
 	if isUnique(err, "") {
@@ -170,8 +183,9 @@ func (s *Service) CreateSavedView(ctx context.Context, user uuid.UUID, name stri
 	return v, err
 }
 
-// UpdateSavedView mengganti nama dan/atau filter; tampilan milik pengguna lain dilaporkan 404 (bukan 403).
-func (s *Service) UpdateSavedView(ctx context.Context, user, id uuid.UUID, name string, f ViewFilter) (SavedView, error) {
+// UpdateSavedView mengganti nama/filter (dan status berbagi bila shared != nil); tampilan milik pengguna lain dilaporkan 404.
+// Tampilan yang dibagikan tidak boleh memuat filter nomor.
+func (s *Service) UpdateSavedView(ctx context.Context, user, id uuid.UUID, name string, f ViewFilter, shared *bool) (SavedView, error) {
 	name, err := cleanViewName(name)
 	if err != nil {
 		return SavedView{}, err
@@ -181,23 +195,56 @@ func (s *Service) UpdateSavedView(ctx context.Context, user, id uuid.UUID, name 
 		return SavedView{}, err
 	}
 	raw, _ := json.Marshal(nf)
-	v, err := scanView(s.Pool.QueryRow(ctx, `UPDATE saved_views SET name=$3, filter=$4, updated_at=now() WHERE id=$1 AND user_id=$2 RETURNING `+viewCols, id, user, name, raw))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return SavedView{}, NotFound("tampilan")
-	}
+	var v SavedView
+	err = s.withTx(ctx, func(tx pgx.Tx) error {
+		var cur bool
+		if e := tx.QueryRow(ctx, `SELECT shared FROM saved_views WHERE id=$1 AND user_id=$2 FOR UPDATE`, id, user).Scan(&cur); e != nil {
+			if errors.Is(e, pgx.ErrNoRows) {
+				return NotFound("tampilan")
+			}
+			return e
+		}
+		final := cur
+		if shared != nil {
+			final = *shared
+		}
+		if final && nf.To != "" {
+			return errShareNumber
+		}
+		if _, e := tx.Exec(ctx, `UPDATE saved_views SET name=$3, filter=$4, shared=$5, updated_at=now() WHERE id=$1 AND user_id=$2`, id, user, name, raw, final); e != nil {
+			return e
+		}
+		var e error
+		v, e = scanView(tx.QueryRow(ctx, `SELECT `+viewSel+` FROM saved_views v JOIN users u ON u.id=v.user_id WHERE v.id=$2`, user, id))
+		return e
+	})
 	if isUnique(err, "") {
 		return SavedView{}, dupView()
 	}
 	return v, err
 }
 
-func (s *Service) DeleteSavedView(ctx context.Context, user, id uuid.UUID) error {
+// DeleteSavedView menghapus tampilan milik sendiri. Admin juga boleh menghapus tampilan BERBAGI milik orang lain (moderasi, diaudit);
+// tampilan pribadi orang lain tetap tak terlihat (404) bagi siapa pun.
+func (s *Service) DeleteSavedView(ctx context.Context, user uuid.UUID, role string, id uuid.UUID) error {
 	tag, err := s.Pool.Exec(ctx, `DELETE FROM saved_views WHERE id=$1 AND user_id=$2`, id, user)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return NotFound("tampilan")
+	if tag.RowsAffected() > 0 {
+		return nil
 	}
-	return nil
+	if role == "admin" {
+		var owner uuid.UUID
+		var name string
+		err := s.Pool.QueryRow(ctx, `DELETE FROM saved_views WHERE id=$1 AND shared RETURNING user_id, name`, id).Scan(&owner, &name)
+		if err == nil {
+			s.Audit(ctx, "user:"+user.String(), "saved_view.moderate_delete", "saved_view", id.String(), map[string]any{"owner": owner, "name": name})
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	}
+	return NotFound("tampilan")
 }

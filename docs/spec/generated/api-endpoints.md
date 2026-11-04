@@ -71,10 +71,10 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `GET` | `/messages/{messageId}` | Detail transaksi + timeline event | apiKey/sessionCookie | 200,404 |
 | `POST` | `/messages/{messageId}/cancel` | Batalkan pesan berstatus `queued` atau `assigned` | apiKey/sessionCookie | 200,409 |
 | `POST` | `/messages/{messageId}/retry` | Antrekan ulang pesan `failed`/`expired`/`unknown` | apiKey/sessionCookie | 200,409 |
-| `GET` | `/saved-views` | Tampilan (filter) transaksi tersimpan milik pengguna yang login | apiKey/sessionCookie | 200,403 |
+| `GET` | `/saved-views` | Tampilan (filter) transaksi — milik sendiri lebih dulu, lalu yang dibagikan pengguna lain (`mine=false`) | apiKey/sessionCookie | 200,403 |
 | `POST` | `/saved-views` | Simpan tampilan baru (maksimal 20 per pengguna; nama unik tanpa membedakan huruf besar/kecil) | apiKey/sessionCookie | 201,409,422 |
-| `PUT` | `/saved-views/{viewId}` | Ganti nama dan/atau filter tampilan milik sendiri (milik pengguna lain = 404) | apiKey/sessionCookie | 200,404,409,422 |
-| `DELETE` | `/saved-views/{viewId}` | Hapus tampilan milik sendiri | apiKey/sessionCookie | 204,404 |
+| `PUT` | `/saved-views/{viewId}` | Ganti nama, filter, dan/atau status berbagi tampilan milik sendiri (milik pengguna lain = 404, juga bila dibagikan) | apiKey/sessionCookie | 200,404,409,422 |
+| `DELETE` | `/saved-views/{viewId}` | Hapus tampilan milik sendiri; admin juga boleh menghapus tampilan BERBAGI milik orang lain (moderasi, diaudit `saved_view.moderate_delete`) | apiKey/sessionCookie | 204,404 |
 
 ## Campaigns
 

@@ -1866,6 +1866,7 @@ func (a *API) getSSO(w http.ResponseWriter, r *http.Request) {
 type savedViewIn struct {
 	Name   string          `json:"name"`
 	Filter core.ViewFilter `json:"filter"`
+	Shared *bool           `json:"shared"` // POST: default false; PUT: kosong = pertahankan
 }
 
 func (a *API) listSavedViews(w http.ResponseWriter, r *http.Request) {
@@ -1890,7 +1891,7 @@ func (a *API) createSavedView(w http.ResponseWriter, r *http.Request) {
 	if !a.decode(w, r, &in) {
 		return
 	}
-	v, err := a.Svc.CreateSavedView(r.Context(), p.user.ID, in.Name, in.Filter)
+	v, err := a.Svc.CreateSavedView(r.Context(), p.user.ID, in.Name, in.Filter, in.Shared != nil && *in.Shared)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -1912,7 +1913,7 @@ func (a *API) updateSavedView(w http.ResponseWriter, r *http.Request) {
 	if !a.decode(w, r, &in) {
 		return
 	}
-	v, err := a.Svc.UpdateSavedView(r.Context(), p.user.ID, id, in.Name, in.Filter)
+	v, err := a.Svc.UpdateSavedView(r.Context(), p.user.ID, id, in.Name, in.Filter, in.Shared)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -1930,7 +1931,7 @@ func (a *API) deleteSavedView(w http.ResponseWriter, r *http.Request) {
 		a.writeProblem(w, r, perr)
 		return
 	}
-	if err := a.Svc.DeleteSavedView(r.Context(), p.user.ID, id); err != nil {
+	if err := a.Svc.DeleteSavedView(r.Context(), p.user.ID, p.user.Role, id); err != nil {
 		a.fail(w, r, err)
 		return
 	}

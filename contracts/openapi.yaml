@@ -1103,8 +1103,8 @@ paths:
   /saved-views:
     get:
       tags: [Messages]
-      summary: Tampilan (filter) transaksi tersimpan milik pengguna yang login
-      description: Hanya sesi dashboard; API key tidak memiliki tampilan (403).
+      summary: Tampilan (filter) transaksi — milik sendiri lebih dulu, lalu yang dibagikan pengguna lain (`mine=false`)
+      description: Hanya sesi dashboard; API key tidak memiliki tampilan (403). Tampilan orang lain yang dibagikan hanya-baca; pemiliknya diberi label bagian lokal email.
       responses:
         '200':
           description: OK
@@ -1137,7 +1137,7 @@ paths:
       - {name: viewId, in: path, required: true, schema: {type: string, format: uuid}}
     put:
       tags: [Messages]
-      summary: Ganti nama dan/atau filter tampilan milik sendiri (milik pengguna lain = 404)
+      summary: Ganti nama, filter, dan/atau status berbagi tampilan milik sendiri (milik pengguna lain = 404, juga bila dibagikan)
       requestBody:
         required: true
         content:
@@ -1154,7 +1154,7 @@ paths:
         '422': {$ref: '#/components/responses/ValidationError'}
     delete:
       tags: [Messages]
-      summary: Hapus tampilan milik sendiri
+      summary: Hapus tampilan milik sendiri; admin juga boleh menghapus tampilan BERBAGI milik orang lain (moderasi, diaudit `saved_view.moderate_delete`)
       responses:
         '204': {description: Dihapus}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -2596,12 +2596,16 @@ components:
       properties:
         name: {type: string, minLength: 1, maxLength: 60}
         filter: {$ref: '#/components/schemas/TxFilter'}
+        shared: {type: boolean, description: 'Bagikan ke seluruh tim. POST: default false. PUT: kosong = pertahankan. Tampilan berbagi tidak boleh memuat `filter.to` (422): awalan nomor akan terlihat oleh viewer yang nomornya di-masking.'}
     SavedView:
       type: object
-      required: [id, name, filter, created_at, updated_at]
+      required: [id, name, filter, shared, mine, owner, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
+        shared: {type: boolean}
+        mine: {type: boolean, description: 'true bila milik pengguna yang membaca.'}
+        owner: {type: string, description: 'Bagian lokal email pemilik (sebelum @); email penuh tidak diekspos.'}
         filter: {$ref: '#/components/schemas/TxFilter'}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}

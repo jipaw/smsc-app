@@ -56,3 +56,12 @@ describe('tampilan tersimpan', () => {
     expect(sameFilter(EMPTY_FILTER, { ...EMPTY_FILTER, to: '+6' })).toBe(false)
   })
 })
+
+import { shareBlocker } from './txfilter'
+
+describe('shareBlocker', () => {
+  it('filter nomor tidak boleh dibagikan; selainnya boleh', () => {
+    expect(shareBlocker({ ...EMPTY_FILTER, to: '+62' })).toContain('nomor')
+    expect(shareBlocker({ ...EMPTY_FILTER, status: ['failed'], partial: 'partial' })).toBe('')
+  })
+})
