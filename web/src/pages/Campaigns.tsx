@@ -1,11 +1,13 @@
 import { ChangeEvent, DragEvent, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { del, get, patch, post, upload } from '../lib/api'
+import { del, get, patch, post, qs, upload } from '../lib/api'
 import { fmtTime, pct, rel } from '../lib/format'
 import { analyze, variables } from '../lib/sms'
 import { canOperate, useMe } from '../lib/session'
-import type { Campaign, CampaignPreview, DispatchPolicy, ImportResult, Page, Sim, Template, Device } from '../lib/types'
+import type { Campaign, CampaignPreview, DispatchPolicy, ImportResult, Page, Point, Sim, Template, Device } from '../lib/types'
+import { bucketSlots, campaignWindow } from '../lib/chart'
+import { SeriesChart } from '../components/SeriesChart'
 import { Confirm, Empty, ErrorBox, errMsg, Field, Loading, useToast } from '../components/ui'
 import { Transactions } from './Transactions'
 
@@ -102,6 +104,7 @@ export function CampaignDetail() {
         <Progress c={c} />
         {c.status === 'running' && c.estimated_finish_at && <div className="muted">Perkiraan selesai ± {fmtTime(c.estimated_finish_at)} (kasar; belum memperhitungkan jendela waktu kirim)</div>}
       </div>
+      {c.counters.total > 0 && <CampaignSeries c={c} live={live} />}
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'pesan'} onClick={() => setTab('pesan')}>Pesan</button>
         <button role="tab" aria-selected={tab === 'pengaturan'} onClick={() => setTab('pengaturan')}>Pengaturan</button>
@@ -388,3 +391,24 @@ function Review({ id, when, setWhen, onBack, saveSchedule, onDone }: { id: strin
   )
 }
 
+
+/** Deret waktu pengiriman campaign: dari mulai (atau dibuat) sampai selesai (atau sekarang). */
+function CampaignSeries({ c, live }: { c: Campaign; live: boolean }) {
+  const start = new Date(c.started_at ?? c.created_at).getTime()
+  const end = c.finished_at ? new Date(c.finished_at).getTime() : Date.now()
+  const w = campaignWindow(start, end)
+  const q = useQuery({
+    queryKey: ['campaign-series', c.id, w.bucket, w.count, c.finished_at ?? 'live', c.counters.sent + c.counters.delivered + c.counters.failed],
+    queryFn: () => get<{ points: Point[] }>('/stats/timeseries' + qs({ from: new Date(w.fromMs).toISOString(), to: new Date(w.toMs).toISOString(), bucket: w.bucket, campaign_id: c.id })),
+    refetchInterval: live ? 15000 : false,
+  })
+  const slots = bucketSlots(q.data?.points ?? [], w.bucket, w.toMs - 1, w.count)
+  const unit = { minute: 'menit', hour: 'jam', day: 'hari' }[w.bucket]
+  return (
+    <div className="card">
+      <h2>Pengiriman campaign</h2>
+      {q.isLoading ? <Loading /> : <SeriesChart slots={slots} bucket={w.bucket} title={`Grafik pengiriman campaign per ${unit}`} emptyText="Belum ada pesan terkirim atau gagal." leftLabel={w.truncated ? `${w.count} ${unit} terakhir` : fmtTime(slots[0].t)} rightLabel={c.finished_at ? fmtTime(c.finished_at) : 'sekarang'} />}
+      <ErrorBox error={q.error} />
+    </div>
+  )
+}

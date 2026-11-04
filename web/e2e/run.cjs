@@ -318,6 +318,9 @@ async function main() {
   check((await pb.getAttribute('aria-valuenow')) === '6' && (await pb.getAttribute('aria-valuemax')) === '6', 'progress bar: 6 dari 6 (aksesibel)')
   check((await page.getByText(/sampai 6/).count()) === 1, 'legenda progres: sampai 6')
   await until(async () => (await page.getByRole('row').filter({ hasText: 'Halo Budi3' }).count()) === 1, 10000, 'tab Pesan memuat pesan campaign')
+  await page.getByRole('img', { name: /Grafik pengiriman campaign per (menit|jam|hari)/ }).waitFor()
+  const campBars = await page.evaluate(() => [...document.querySelectorAll('.bars .d, .bars .s')].filter((e) => e.getBoundingClientRect().height > 1).length)
+  check(campBars > 0, `halaman campaign menggambar grafik deret waktu pengiriman (${campBars} segmen berisi)`)
   await axeCheck(page, 'detail campaign')
   await shot('14-campaign-detail-done')
 
