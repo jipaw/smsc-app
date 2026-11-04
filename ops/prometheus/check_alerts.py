@@ -32,7 +32,19 @@ for g in rules["groups"]:
             base = re.sub(r"_(bucket|sum|count)$", "", m)
             if m not in known and base not in known:
                 problems.append(f"{a}: metrik tidak terdaftar di metrics.go: {m}")
-print(f"{n} alert diperiksa, {len(known)} nama metrik dikenal")
+# dashboard Grafana: setiap metrik smsc_* yang dirujuk query/anotasi harus terdaftar di metrics.go
+nd = 0
+for f in sorted((root / "ops/grafana").glob("*.json")):
+    import json
+    d = json.loads(f.read_text())
+    exprs = [t.get("expr", "") for p in d.get("panels", []) for t in p.get("targets", [])] + [a.get("expr", "") for a in d.get("annotations", {}).get("list", [])]
+    nd += 1
+    for ex in exprs:
+        for m in re.findall(r"\bsmsc_[a-z0-9_]+", ex):
+            base = re.sub(r"_(bucket|sum|count)$", "", m)
+            if m not in known and base not in known:
+                problems.append(f"{f.name}: metrik tidak terdaftar di metrics.go: {m}")
+print(f"{n} alert dan {nd} dashboard diperiksa, {len(known)} nama metrik dikenal")
 for p in problems:
     print("MASALAH", p)
 sys.exit(1 if problems else 0)
