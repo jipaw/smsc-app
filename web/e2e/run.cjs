@@ -222,6 +222,9 @@ async function main() {
   await axeCheck(page, 'transaksi parsial')
   await page.keyboard.press('Escape')
   await page.getByLabel('Hanya gagal parsial').uncheck()
+  await page.getByRole('link', { name: 'Overview', exact: true }).click()
+  await page.getByText(/termasuk 1 gagal parsial/).waitFor()
+  check(true, 'Overview menampilkan jumlah gagal parsial hari ini')
   psqlDb(`DELETE FROM messages WHERE to_e164='+628155500001'`)
 
   // ---- overview + settings ----

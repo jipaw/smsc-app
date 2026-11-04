@@ -2026,6 +2026,7 @@ paths:
                       sent: {type: integer}
                       delivered: {type: integer}
                       failed: {type: integer}
+                      partial: {type: integer, description: 'Bagian dari `failed`: gagal setelah sebagian bagian SMS terkirim.'}
                   success_rate_24h: {type: number}
   /stats/timeseries:
     get:
@@ -2054,6 +2055,7 @@ paths:
                         sent: {type: integer}
                         delivered: {type: integer}
                         failed: {type: integer}
+                        partial: {type: integer, description: 'Bagian dari `failed` (kegagalan parsial).'}
 
   /events/stream:
     get:
@@ -2591,7 +2593,7 @@ components:
     CampaignCounters:
       type: object
       description: 'Invarian: total = queued + in_flight + sent + delivered + failed + cancelled + expired + unknown.'
-      required: [total, queued, in_flight, sent, delivered, failed, cancelled, expired, unknown]
+      required: [total, queued, in_flight, sent, delivered, failed, partial, cancelled, expired, unknown]
       properties:
         total: {type: integer, description: Jumlah penerima.}
         queued: {type: integer, description: Pesan antre + penerima yang belum dimaterialisasi (kecuali campaign dibatalkan).}
@@ -2599,6 +2601,7 @@ components:
         sent: {type: integer, description: 'Status `sent` (menunggu laporan delivery); `delivered` dihitung terpisah.'}
         delivered: {type: integer}
         failed: {type: integer}
+        partial: {type: integer, description: 'BAGIAN dari `failed` (bukan tambahan, tidak masuk invarian): gagal setelah sebagian bagian SMS terkirim.'}
         cancelled: {type: integer}
         expired: {type: integer}
         unknown: {type: integer}

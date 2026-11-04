@@ -37,6 +37,7 @@ type CampaignCounters struct {
 	Sent      int `json:"sent"`
 	Delivered int `json:"delivered"`
 	Failed    int `json:"failed"`
+	Partial   int `json:"partial"` // bagian dari failed (bukan tambahan): gagal setelah sebagian bagian SMS terkirim
 	Cancelled int `json:"cancelled"`
 	Expired   int `json:"expired"`
 	Unknown   int `json:"unknown"`
@@ -108,15 +109,15 @@ func (s *Service) hydrate(ctx context.Context, cs []*Campaign) error {
 		ids[i] = c.ID
 		byID[c.ID] = c
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT campaign_id, status::text, count(*) FROM messages WHERE campaign_id = ANY($1) GROUP BY 1,2`, ids)
+	rows, err := s.Pool.Query(ctx, `SELECT campaign_id, status::text, count(*), count(*) FILTER (WHERE partial_sent IS NOT NULL) FROM messages WHERE campaign_id = ANY($1) GROUP BY 1,2`, ids)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var id uuid.UUID
 		var st string
-		var n int
-		if err := rows.Scan(&id, &st, &n); err != nil {
+		var n, np int
+		if err := rows.Scan(&id, &st, &n, &np); err != nil {
 			rows.Close()
 			return err
 		}
@@ -132,6 +133,7 @@ func (s *Service) hydrate(ctx context.Context, cs []*Campaign) error {
 			c.Counters.Delivered += n
 		case "failed":
 			c.Counters.Failed += n
+			c.Counters.Partial += np
 		case "cancelled":
 			c.Counters.Cancelled += n
 		case "expired":

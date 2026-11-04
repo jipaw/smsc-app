@@ -212,7 +212,7 @@ func (s *Service) Overview(ctx context.Context) (map[string]any, error) {
 		dev[st] = n
 	}
 	rows.Close()
-	var simsActive, queue, acc, sent, deliv, failed, ok24, bad24 int
+	var simsActive, queue, acc, sent, deliv, failed, partial, ok24, bad24 int
 	err = s.Pool.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM sims s JOIN devices d ON d.id=s.device_id WHERE s.enabled AND s.status='active' AND d.status IN ('online','degraded')),
 		(SELECT count(*) FROM messages WHERE status='queued'),
@@ -220,9 +220,10 @@ func (s *Service) Overview(ctx context.Context) (map[string]any, error) {
 		(SELECT count(*) FROM messages WHERE sent_at >= date_trunc('day', now())),
 		(SELECT count(*) FROM messages WHERE delivered_at >= date_trunc('day', now())),
 		(SELECT count(*) FROM messages WHERE status='failed' AND finished_at >= date_trunc('day', now())),
+		(SELECT count(*) FROM messages WHERE status='failed' AND partial_sent IS NOT NULL AND finished_at >= date_trunc('day', now())),
 		(SELECT count(*) FROM messages WHERE sent_at >= now() - interval '24 hours'),
 		(SELECT count(*) FROM messages WHERE status='failed' AND finished_at >= now() - interval '24 hours')`).
-		Scan(&simsActive, &queue, &acc, &sent, &deliv, &failed, &ok24, &bad24)
+		Scan(&simsActive, &queue, &acc, &sent, &deliv, &failed, &partial, &ok24, &bad24)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +233,7 @@ func (s *Service) Overview(ctx context.Context) (map[string]any, error) {
 	}
 	return map[string]any{
 		"devices": dev, "sims_active": simsActive, "queue_depth": queue,
-		"today":            map[string]int{"accepted": acc, "sent": sent, "delivered": deliv, "failed": failed},
+		"today":            map[string]int{"accepted": acc, "sent": sent, "delivered": deliv, "failed": failed, "partial": partial},
 		"success_rate_24h": rate, "paused": s.Paused(ctx),
 	}, nil
 }
@@ -242,6 +243,7 @@ type Point struct {
 	Sent      int       `json:"sent"`
 	Delivered int       `json:"delivered"`
 	Failed    int       `json:"failed"`
+	Partial   int       `json:"partial"` // bagian dari failed: gagal setelah sebagian bagian SMS terkirim
 }
 
 func (s *Service) Timeseries(ctx context.Context, from, to time.Time, bucket string, campaignID, simID *uuid.UUID) ([]Point, error) {
@@ -253,7 +255,7 @@ func (s *Service) Timeseries(ctx context.Context, from, to time.Time, bucket str
 		return nil, Validation(FieldError{"bucket", "minute|hour|day"})
 	}
 	q := fmt.Sprintf(`SELECT date_trunc('%s', COALESCE(delivered_at, sent_at, finished_at)) AS t,
-		count(*) FILTER (WHERE sent_at IS NOT NULL), count(*) FILTER (WHERE delivered_at IS NOT NULL), count(*) FILTER (WHERE status='failed')
+		count(*) FILTER (WHERE sent_at IS NOT NULL), count(*) FILTER (WHERE delivered_at IS NOT NULL), count(*) FILTER (WHERE status='failed'), count(*) FILTER (WHERE status='failed' AND partial_sent IS NOT NULL)
 		FROM messages WHERE COALESCE(delivered_at, sent_at, finished_at) >= $1 AND COALESCE(delivered_at, sent_at, finished_at) < $2
 		  AND ($3::uuid IS NULL OR campaign_id=$3) AND ($4::uuid IS NULL OR sim_id=$4) GROUP BY 1 ORDER BY 1`, bucket)
 	rows, err := s.Pool.Query(ctx, q, from, to, campaignID, simID)
@@ -262,7 +264,7 @@ func (s *Service) Timeseries(ctx context.Context, from, to time.Time, bucket str
 	}
 	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Point, error) {
 		var p Point
-		return p, r.Scan(&p.T, &p.Sent, &p.Delivered, &p.Failed)
+		return p, r.Scan(&p.T, &p.Sent, &p.Delivered, &p.Failed, &p.Partial)
 	})
 	if out == nil {
 		out = []Point{}
