@@ -61,6 +61,11 @@ class MainActivity : Activity() {
                 }
             }
         }
+        // Prefs bisa berubah di layar lain (EnrollActivity mengaktifkan tailnet ter-embed): segarkan agar "Start service"
+        // tidak menimpa setelan baru dengan nilai lama layar ini.
+        cbTailnet.isChecked = TailnetRuntime.AVAILABLE && Prefs.tailnetEnabled(this)
+        etTsHost.setText(Prefs.tailnetHostname(this))
+        etTsControl.setText(Prefs.tailnetControl(this))
         ui.post(loop)
     }
 

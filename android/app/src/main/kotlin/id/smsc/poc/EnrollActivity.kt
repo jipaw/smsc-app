@@ -62,7 +62,7 @@ class EnrollActivity : Activity() {
 
     private fun refresh() {
         val c = CredentialStore.load(this)
-        current.text = if (c == null) "Belum terdaftar." else "Terdaftar: device ${c.deviceId.take(8)}… → ${c.wsUrl}${if (c.viaTailnet) " (tailnet ter-embed)" else ""}"
+        current.text = if (c == null) "Belum terdaftar." else "Terdaftar: device …${c.deviceId.takeLast(8)} → ${c.wsUrl}${if (c.viaTailnet) " (tailnet ter-embed)" else ""}"
     }
 
     private fun handleDeepLink(i: Intent?) {
@@ -108,7 +108,7 @@ class EnrollActivity : Activity() {
                 PocService.stop(this)
                 Prefs.setServiceEnabled(this, true)
                 PocService.start(this)
-                "✓ Terdaftar sebagai device ${c.deviceId.take(8)}… Service dimulai."
+                "✓ Terdaftar sebagai device …${c.deviceId.takeLast(8)}. Service dimulai."
             } catch (e: Exception) {
                 PocLog.i("enroll", "gagal: ${e.message}")
                 "✗ ${e.message}"

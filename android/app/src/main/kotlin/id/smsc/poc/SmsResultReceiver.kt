@@ -22,14 +22,14 @@ class SmsResultReceiver : BroadcastReceiver() {
             KIND_SENT -> {
                 // errorCode (kode modem) hanya ada bila fillIn diteruskan; dicatat untuk diagnosa R1.
                 val modemCode = intent.getIntExtra("errorCode", -1)
-                PocLog.i("rx", "sent msg=${messageId.take(8)} part=$part result=$code modemErr=$modemCode extras=${intent.extras?.keySet()}")
+                PocLog.i("rx", "sent msg=${messageId.takeLast(8)} part=$part result=$code modemErr=$modemCode extras=${intent.extras?.keySet()}")
                 PocRuntime.processor.onPartSent(messageId, attempt, part, code)
             }
             KIND_DELIVERED -> {
                 val pdu = intent.getByteArrayExtra("pdu")
                 val format = intent.getStringExtra("format")
                 val status = runCatching { if (pdu != null) SmsMessage.createFromPdu(pdu, format)?.status else null }.getOrNull()
-                PocLog.i("rx", "delivered msg=${messageId.take(8)} part=$part result=$code pdu=${pdu != null} tpStatus=$status")
+                PocLog.i("rx", "delivered msg=${messageId.takeLast(8)} part=$part result=$code pdu=${pdu != null} tpStatus=$status")
                 if (status == null) {
                     PocLog.i("rx", "DELIVERY_TANPA_PDU: extras tidak diteruskan, status tidak bisa dibaca (catat untuk R5)")
                 } else {

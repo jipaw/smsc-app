@@ -70,7 +70,7 @@ object PocRuntime {
             "ts_ms,at,message_id,attempt,state,part_index,parts_total,error_code,android_result_code",
             "${System.currentTimeMillis()},${ev.at},${ev.messageId},${ev.attempt},${ev.state},${ev.partIndex ?: ""},${ev.partsTotal},${ev.errorCode ?: ""},${ev.androidResultCode ?: ""}",
         )
-        PocLog.i("evt", "${ev.messageId.take(8)} ${ev.state}${ev.partIndex?.let { " part=$it" } ?: ""}${ev.errorCode?.let { " err=$it" } ?: ""}")
+        PocLog.i("evt", "${ev.messageId.takeLast(8)} ${ev.state}${ev.partIndex?.let { " part=$it" } ?: ""}${ev.errorCode?.let { " err=$it" } ?: ""}")
         listeners.forEach { runCatching { it(ev) } }
     }
 

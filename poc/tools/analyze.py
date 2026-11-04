@@ -20,7 +20,8 @@ def fmt_s(ms):
 
 
 def analyze_ledger(path):
-    rows = list(csv.DictReader(path.open(encoding="utf-8")))
+    with path.open(encoding="utf-8", newline="") as f:  # ditutup segera (Windows mengunci berkas terbuka)
+        rows = list(csv.DictReader(f))
     if not rows:
         return "ledger kosong"
     ts = lambda r: int(r["ts_ms"])  # noqa: E731
@@ -51,7 +52,8 @@ def analyze_ledger(path):
 
 
 def analyze_events(path):
-    rows = list(csv.DictReader(path.open(encoding="utf-8")))
+    with path.open(encoding="utf-8", newline="") as f:  # ditutup segera (Windows mengunci berkas terbuka)
+        rows = list(csv.DictReader(f))
     t = {}
     for r in rows:
         t.setdefault(r["message_id"], {})[r["state"]] = int(r["ts_ms"])

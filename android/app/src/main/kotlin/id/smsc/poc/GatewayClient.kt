@@ -212,7 +212,7 @@ class GatewayClient(private val ctx: Context, private val url: String, @Volatile
             MessageType.SMS_SEND -> {
                 val cmd = Codec.payload<SmsSend>(env)
                 val ack: CommandAck = PocRuntime.processor.onSmsSend(cmd)
-                PocLog.i("ws", "sms.send msg=${cmd.messageId.take(8)} slot=${cmd.sim.slotIndex} -> accepted=${ack.accepted} ${ack.reason ?: ""}")
+                PocLog.i("ws", "sms.send msg=${cmd.messageId.takeLast(8)} slot=${cmd.sim.slotIndex} -> accepted=${ack.accepted} ${ack.reason ?: ""}")
                 send(Codec.envelope(MessageType.COMMAND_ACK, ack, ref = env.id))
                 PocRuntime.schedulePump(0)
             }

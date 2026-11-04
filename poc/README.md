@@ -3,9 +3,9 @@
 Tujuan: membuktikan atau membantah risiko R1, R2, R3, R5, R6 (`docs/05` §1) **sebelum** membangun produk.
 Hasilnya mengubah default policy (`docs/03` §4), wizard onboarding (`docs/spec/03`), dan panduan OEM.
 
-> **Status jujur:** skeleton ini lulus 26 unit test (`:core`), 2 tes konstanta terhadap `SmsManager` asli, type-check seluruh `:app`
-> terhadap API Android 14, dan self-test server dengan validasi skema. **Belum pernah dijalankan di HP.** Semua perilaku platform
-> di bawah adalah hipotesis sampai Anda mengukurnya.
+> **Mulai dari [`WINBUILDER.md`](WINBUILDER.md)** (fase 48). Panduan itu memakai server `smscd` sungguhan, enrollment QR, tailnet ter-embed, dan alat `poc/tools/collect.py` / `doze.py`. Dokumen ini tetap menjadi rujukan prosedur rinci per risiko (§3) dan server PoC Python untuk uji cepat tanpa server penuh.
+
+> **Status jujur:** `:core` 43 tes, tes konstanta terhadap `SmsManager` asli, type-check seluruh `:app` (termasuk varian tailnet terhadap API gobind) terhadap API Android 14, tes manifest, agen JVM end-to-end terhadap smscd, dan self-test server. **Belum pernah dijalankan di HP.** Semua perilaku platform di bawah adalah hipotesis sampai Anda mengukurnya.
 
 ## 0. Yang dibutuhkan
 
@@ -53,6 +53,7 @@ Log server: `poc/server/out/server_events.jsonl`. Pesan yang melanggar `ws-schem
 Catat semua hasil di `poc/RESULTS_TEMPLATE.md` (salin ke `poc/hasil/`). Ambil berkas dari HP:
 
 ```bash
+py poc\tools\collect.py --label <uji>            # Windows; Linux: python3 poc/tools/collect.py. Atau manual:
 adb pull /sdcard/Android/data/id.smsc.poc/files/ poc/hasil/files
 python3 poc/tools/analyze.py poc/hasil/files
 ```
