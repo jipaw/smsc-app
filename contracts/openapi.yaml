@@ -2525,7 +2525,7 @@ components:
       properties:
         id: {type: string, format: uuid}
         attempt: {type: integer}
-        type: {type: string, enum: [created, queued, assigned, acked, sending, part_sent, sent, part_delivered, delivered, failed, requeued, cancelled, expired, marked_unknown, manual_retry, status_progress, stale_event]}
+        type: {type: string, enum: [created, queued, assigned, acked, sending, part_sent, sent, part_delivered, delivered, failed, requeued, cancelled, expired, marked_unknown, manual_retry, status_progress, parts_refreshed, stale_event]}
         at: {type: string, format: date-time}
         actor: {type: string, enum: [system, device, user, api]}
         sim_id: {type: [string, 'null'], format: uuid}

@@ -376,6 +376,7 @@ CREATE TABLE messages (
   status_queries   smallint NOT NULL DEFAULT 0 CHECK (status_queries >= 0),
   status_progress  integer NOT NULL DEFAULT 0 CHECK (status_progress >= 0),
   partial_sent     smallint CHECK (partial_sent >= 0),
+  partial_checked_at timestamptz,
   CHECK (status <> 'assigned' OR (sim_id IS NOT NULL AND lease_expires_at IS NOT NULL))
 );
 CREATE INDEX messages_dispatch_idx   ON messages (priority DESC, not_before, id) WHERE status = 'queued';

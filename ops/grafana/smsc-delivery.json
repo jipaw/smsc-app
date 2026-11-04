@@ -763,7 +763,7 @@
       "type": "prometheus",
       "uid": "${DS_PROMETHEUS}"
      },
-     "expr": "sum(increase(smsc_status_queries_total{result=\"queried\"}[1h])) - sum(increase(smsc_status_queries_total{result=~\"alive|settled|lost|stale|invalid\"}[1h]))",
+     "expr": "sum(increase(smsc_status_queries_total{result=\"queried\"}[1h])) - sum(increase(smsc_status_queries_total{result=~\"alive|settled|lost|stale|invalid|refined\"}[1h]))",
      "legendFormat": "",
      "refId": "A",
      "instant": true
@@ -937,7 +937,7 @@
       "type": "prometheus",
       "uid": "${DS_PROMETHEUS}"
      },
-     "expr": "sum(increase(smsc_status_queries_total{result=~\"alive|settled|lost|stale|invalid\"}[$__rate_interval]))",
+     "expr": "sum(increase(smsc_status_queries_total{result=~\"alive|settled|lost|stale|invalid|refined\"}[$__rate_interval]))",
      "legendFormat": "terjawab",
      "refId": "B"
     }

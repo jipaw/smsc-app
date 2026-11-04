@@ -375,6 +375,8 @@ func (s *Service) reapOnce(ctx context.Context) {
 			}
 		}
 	}
+	// 2b. pesan gagal-parsial: segarkan hitungan bagian terkirim dari HP (bagian bisa terus terkirim setelah kegagalan)
+	s.askPartialCounts(ctx)
 	// 3. kedaluwarsa
 	for _, id := range s.idsQuery(ctx, `SELECT id FROM messages WHERE status IN ('queued','assigned') AND expires_at < now() LIMIT 200`) {
 		c := "expired"

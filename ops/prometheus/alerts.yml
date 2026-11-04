@@ -150,7 +150,7 @@ groups:
         labels: {severity: warning}
         annotations: {summary: "Device mengirim sms.state dengan hitungan bagian mustahil (terkirim > total, dst.) — kemungkinan bug aplikasi Android; periksa versi aplikasi"}
       - alert: SmscStatusQueryUnanswered
-        expr: sum(increase(smsc_status_queries_total{result="queried"}[1h])) - sum(increase(smsc_status_queries_total{result=~"alive|settled|lost|stale|invalid"}[1h])) > 3
+        expr: sum(increase(smsc_status_queries_total{result="queried"}[1h])) - sum(increase(smsc_status_queries_total{result=~"alive|settled|lost|stale|invalid|refined"}[1h])) > 3
         for: 10m
         labels: {severity: warning}
         annotations: {summary: "Banyak sms.status tidak dijawab device (aplikasi versi lama tanpa dukungan, atau koneksi bermasalah) — pesan sending jatuh ke unknown/retry tanpa konfirmasi"}

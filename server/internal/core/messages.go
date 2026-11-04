@@ -368,7 +368,7 @@ func (s *Service) transition(ctx context.Context, tx pgx.Tx, id uuid.UUID, o Tra
 	switch o.To {
 	case StatusQueued:
 		q = `UPDATE messages SET status='queued', attempt=$2, not_before=COALESCE($3,not_before), lease_expires_at=NULL, error_code=$4, error_detail=$5,
-			finished_at=NULL, partial_sent=NULL WHERE id=$1`
+			finished_at=NULL, partial_sent=NULL, partial_checked_at=NULL WHERE id=$1`
 		_, err = tx.Exec(ctx, q, id, attempt, o.NotBefore, o.ErrorCode, o.ErrorDetail)
 	case StatusSending:
 		_, err = tx.Exec(ctx, `UPDATE messages SET status='sending', lease_expires_at=NULL WHERE id=$1`, id)

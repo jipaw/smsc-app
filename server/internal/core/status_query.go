@@ -57,10 +57,12 @@ func (s *Service) OnSmsState(ctx context.Context, deviceID uuid.UUID, st proto.S
 	var dev *uuid.UUID
 	var status Status
 	var attempt, srvParts, lastProgress int
-	if err := s.Pool.QueryRow(ctx, `SELECT device_id, status, attempt, parts, status_progress FROM messages WHERE id=$1`, mid).Scan(&dev, &status, &attempt, &srvParts, &lastProgress); err != nil {
+	var partialSent *int
+	if err := s.Pool.QueryRow(ctx, `SELECT device_id, status, attempt, parts, status_progress, partial_sent FROM messages WHERE id=$1`, mid).Scan(&dev, &status, &attempt, &srvParts, &lastProgress, &partialSent); err != nil {
 		return
 	}
-	if dev == nil || *dev != deviceID || status != StatusSending || st.Attempt != attempt {
+	refine := status == StatusFailed && partialSent != nil // pesan gagal-parsial: jawaban hanya menyegarkan hitungan bagian
+	if dev == nil || *dev != deviceID || (status != StatusSending && !refine) || st.Attempt != attempt {
 		s.M.StatusQueries.WithLabelValues("stale").Inc() // bukan lagi sending / attempt lain / device lain: abaikan
 		return
 	}
@@ -81,6 +83,10 @@ func (s *Service) OnSmsState(ctx context.Context, deviceID uuid.UUID, st proto.S
 	}
 	if !valid {
 		s.M.StatusQueries.WithLabelValues("invalid").Inc()
+		return
+	}
+	if refine {
+		s.refinePartial(ctx, mid, attempt, *partialSent, st.State, sent, total)
 		return
 	}
 	extra := map[string]any{"via": "sms.state", "parts_sent": sent, "parts_delivered": delivered}
@@ -154,4 +160,63 @@ func (s *Service) OnSmsState(ctx context.Context, deviceID uuid.UUID, st proto.S
 		s.Wake()
 		s.M.StatusQueries.WithLabelValues("lost").Inc()
 	}
+}
+
+// askPartialCounts (reaper): sebuah event `failed` hanya membawa cuplikan parts_sent saat event dibuat, padahal modem dapat terus
+// mengirim sisa bagian. Setelah PartialRefreshAfter, tanya device sekali untuk menyegarkan hitungan (hanya bila tersambung;
+// bila offline dicoba lagi pada putaran berikutnya selama pesan masih berumur < 1 jam).
+func (s *Service) askPartialCounts(ctx context.Context) {
+	if s.link == nil {
+		return
+	}
+	after := s.Cfg.PartialRefreshAfter
+	if after <= 0 {
+		after = 30 * time.Second
+	}
+	rows, err := s.Pool.Query(ctx, `SELECT id, device_id, attempt FROM messages
+		WHERE status='failed' AND partial_sent IS NOT NULL AND partial_checked_at IS NULL AND device_id IS NOT NULL
+		  AND finished_at < now() - ($1::bigint * interval '1 millisecond') AND finished_at > now() - interval '1 hour' LIMIT 50`, after.Milliseconds())
+	if err != nil {
+		return
+	}
+	type cand struct {
+		id, dev uuid.UUID
+		attempt int
+	}
+	var cs []cand
+	for rows.Next() {
+		var c cand
+		if rows.Scan(&c.id, &c.dev, &c.attempt) == nil {
+			cs = append(cs, c)
+		}
+	}
+	rows.Close()
+	for _, c := range cs {
+		if !s.link.Connected(c.dev) {
+			continue
+		}
+		env, err := proto.New(proto.TypeSmsStatus, proto.SmsStatus{MessageID: c.id.String(), Attempt: c.attempt}, nil)
+		if err != nil || s.link.Send(c.dev, env) != nil {
+			continue
+		}
+		if _, err := s.Pool.Exec(ctx, `UPDATE messages SET partial_checked_at=now() WHERE id=$1 AND partial_checked_at IS NULL`, c.id); err == nil {
+			s.M.StatusQueries.WithLabelValues("queried").Inc()
+		}
+	}
+}
+
+// refinePartial menerapkan jawaban sms.state untuk pesan gagal-parsial: hitungan hanya boleh NAIK (monoton). Device yang tidak
+// punya job ("unknown") atau melaporkan angka lebih kecil tidak mengubah apa pun. Perubahan dicatat sebagai event parts_refreshed.
+func (s *Service) refinePartial(ctx context.Context, mid uuid.UUID, attempt, current int, state string, sent, total int) {
+	s.M.StatusQueries.WithLabelValues("refined").Inc()
+	if state == "unknown" || sent <= current || sent > total {
+		return
+	}
+	_ = s.withTx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE messages SET partial_sent=$2 WHERE id=$1 AND status='failed' AND partial_sent IS NOT NULL AND partial_sent < $2`, mid, sent)
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		return insertEvent(ctx, tx, mid, attempt, "parts_refreshed", "device", nil, nil, map[string]any{"via": "sms.state", "parts_sent": sent, "previous": current, "parts_total": total}, nil)
+	})
 }

@@ -70,8 +70,8 @@ func New(pool *pgxpool.Pool) *Metrics {
 	m.LeaseExpired = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_lease_expired_total", Help: "Lease pesan yang kedaluwarsa karena HP tidak mengonfirmasi (ack_timeout)."})
 	m.LeaseRecovered = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_lease_recovered_total", Help: "Pesan assigned yang dipulihkan (lease diperbarui + sms.send dikirim ulang) saat leader baru mengambil alih."})
 	m.SendingGrace = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_sending_grace_total", Help: "Pesan sending yang batas sent_timeout-nya diperpanjang karena jeda tanpa leader."})
-	m.StatusQueries = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_status_queries_total", Help: "sms.status ke device untuk pesan sending yang lewat batas waktu, menurut hasil (queried|alive|settled|lost|stale|progress|partial|invalid)."}, []string{"result"})
-	for _, r := range []string{"queried", "alive", "settled", "lost", "stale", "progress", "partial", "invalid"} {
+	m.StatusQueries = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_status_queries_total", Help: "sms.status ke device untuk pesan sending yang lewat batas waktu, menurut hasil (queried|alive|settled|lost|stale|progress|partial|invalid|refined)."}, []string{"result"})
+	for _, r := range []string{"queried", "alive", "settled", "lost", "stale", "progress", "partial", "invalid", "refined"} {
 		m.StatusQueries.WithLabelValues(r)
 	}
 	m.MessagesPartial = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_messages_partial_total", Help: "Pesan yang gagal setelah sebagian bagian SMS terkirim (kegagalan parsial)."})

@@ -19,6 +19,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | **Fase 13**: SCIM `Group` → peran (`SCIM_ADMIN_GROUPS`/`SCIM_OPERATOR_GROUPS`/`SCIM_VIEWER_GROUPS`), peran efektif = tertinggi(roles, grup), rekonsiliasi saat start | |
 | **Fase 14–15**: rekonsiliasi grup SCIM berkala (`SCIM_RECONCILE_INTERVAL`); status run terakhir tersimpan di database (`settings.scim_reconcile_last`) dan tampil di Pengaturan → SCIM | |
 | **Fase 26**: jumlah gagal parsial di Overview (`today.partial`), deret waktu (`points[].partial`), dan `Campaign.counters.partial` | |
+| **Fase 33**: hitungan bagian terkirim pesan gagal-parsial disegarkan dari HP lewat `sms.status` (`PARTIAL_REFRESH_AFTER`, monoton, event `parts_refreshed`) | |
 | **Fase 25**: status parsial di API/dashboard (`partial`, `parts_sent`, filter `partial`, retry wajib konfirmasi, webhook, CSV, `smsc_messages_partial_total`) | |
 | **Fase 24**: multi-bagian di `sms.state` (normalisasi hitungan bagian, kemajuan mengembalikan kuota tanya, gagal parsial tidak diantre ulang; `messages.status_progress`) | |
 | **Fase 23**: `sms.status`/`sms.state` — reaper bertanya ke device sebelum menilai pesan `sending` yang lewat batas (`STATUS_QUERY_WAIT`, `messages.status_queries`, `smsc_status_queries_total`) | |
@@ -88,6 +89,7 @@ Endpoint: `POST /auth/login` → (2FA aktif) `{mfa_required, mfa_token}` → `PO
 | `SCIM_ALLOW_ADMIN_ROLE` | `false` | Izinkan SCIM memberi/mengubah peran admin |
 | `SCIM_ADOPT_EXISTING` | `false` | Pengguna lokal yang sudah ada terlihat dan dapat dikelola SCIM |
 | `SCIM_ADMIN_GROUPS` | – | Nama grup IdP → admin (butuh `SCIM_ALLOW_ADMIN_ROLE=true`, jika tidak gagal start) |
+| `PARTIAL_REFRESH_AFTER` | `30s` | Jeda sebelum hitungan bagian pesan gagal-parsial disegarkan lewat `sms.status` (sekali per kegagalan) |
 | `STATUS_QUERY_WAIT` | `15s` | Tunggu jawaban `sms.status` sebelum pesan `sending` dinilai ulang (maks. 2 pertanyaan) |
 | `HUB_TICK` | `1s` | Poll cadangan antar-instance WS Hub (drain `hub_commands`, segarkan sesi instance lain) |
 | `LEADER_TICK` | `5s` | Interval pemeriksaan lock leader / percobaan ambil alih oleh standby |

@@ -96,6 +96,7 @@ type Config struct {
 
 	// retensi & metrik (fase 3)
 	RetentionInterval     time.Duration
+	PartialRefreshAfter   time.Duration // jeda sebelum hitungan bagian pesan gagal-parsial disegarkan lewat sms.status
 	StatusQueryWait       time.Duration // tunggu jawaban sms.status sebelum menilai ulang pesan sending
 	HubTick               time.Duration // poll cadangan/antar-instance WS Hub
 	LeaderTick            time.Duration // interval cek/ambil-alih lock leader
@@ -150,6 +151,7 @@ func Load() (Config, error) {
 		EmailBackoff:          []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute, 2 * time.Hour},
 		EmailTick:             envDur("EMAIL_TICK", 2*time.Second),
 		RetentionInterval:     envDur("RETENTION_INTERVAL", time.Hour),
+		PartialRefreshAfter:   envDur("PARTIAL_REFRESH_AFTER", 30*time.Second),
 		StatusQueryWait:       envDur("STATUS_QUERY_WAIT", 15*time.Second),
 		HubTick:               envDur("HUB_TICK", time.Second),
 		LeaderTick:            envDur("LEADER_TICK", 5*time.Second),
