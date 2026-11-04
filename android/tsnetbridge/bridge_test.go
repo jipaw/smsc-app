@@ -69,7 +69,9 @@ func startGatewayNode(t testing.TB, controlURL, hostname, backend string) *tsnet
 func socksClient(p *Proxy, pass string) *http.Client {
 	d, _ := proxy.SOCKS5("tcp", net.JoinHostPort(p.Host, fmt.Sprint(p.Port)), &proxy.Auth{User: p.Username, Password: pass}, proxy.Direct)
 	return &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{
-		DialContext: func(ctx context.Context, n, a string) (net.Conn, error) { return d.(proxy.ContextDialer).DialContext(ctx, n, a) },
+		DialContext: func(ctx context.Context, n, a string) (net.Conn, error) {
+			return d.(proxy.ContextDialer).DialContext(ctx, n, a)
+		},
 	}}
 }
 
