@@ -160,6 +160,9 @@ func (a *API) Router() http.Handler {
 			r.With(operator("")).Post("/messages/{messageId}/cancel", a.cancelMessage)
 			r.With(operator("")).Post("/messages/{messageId}/retry", a.retryMessage)
 
+			r.With(viewer).Get("/notifications", a.listNotifications)
+			r.With(viewer).Post("/notifications/read-all", a.readAllNotifications)
+			r.With(viewer).Post("/notifications/{notificationId}/read", a.readNotification)
 			r.With(viewer).Get("/saved-views", a.listSavedViews)
 			r.With(viewer).Post("/saved-views", a.createSavedView)
 			r.With(viewer).Put("/saved-views/{viewId}", a.updateSavedView)

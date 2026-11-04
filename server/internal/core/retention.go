@@ -156,6 +156,8 @@ func (s *Service) RetentionOnce(ctx context.Context) (RetentionRun, error) {
 	if run.SessionsDeleted, err = s.batchExec(ctx, `DELETE FROM sessions WHERE id IN (SELECT id FROM sessions WHERE expires_at < now() OR last_seen_at < now() - interval '12 hours' LIMIT $1)`, retentionBatch); err != nil {
 		return run, err
 	}
+	// notifikasi: yang sudah dibaca > 30 hari dan semua > 90 hari (tidak dilaporkan di RetentionRun)
+	_, _ = s.batchExec(ctx, `DELETE FROM notifications WHERE id IN (SELECT id FROM notifications WHERE (read_at < now() - interval '30 days' OR created_at < now() - interval '90 days') LIMIT $1)`, retentionBatch)
 	if run.EnrollmentsDeleted, err = s.batchExec(ctx, `DELETE FROM device_enrollments WHERE id IN (SELECT id FROM device_enrollments
 		WHERE (consumed_at IS NOT NULL OR revoked_at IS NOT NULL OR expires_at < now()) AND created_at < now() - interval '30 days' LIMIT $1)`, retentionBatch); err != nil {
 		return run, err

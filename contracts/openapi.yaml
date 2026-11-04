@@ -1100,6 +1100,41 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/ValidationError'}
 
+  /notifications:
+    get:
+      tags: [Messages]
+      summary: Notifikasi dalam aplikasi milik pengguna yang login (terbaru dulu)
+      description: 'Hanya sesi dashboard. Jenis: `saved_view.shared` (tampilan dibagikan pengguna lain; data: view_id, name, owner) dan `saved_view.moderated` (tampilan berbagi milik Anda dihapus admin; data: view_id, name, by). Event SSE `notification.created` (tanpa muatan) memberi sinyal untuk refetch.'
+      parameters:
+        - {name: unread, in: query, schema: {type: boolean}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, unread_count]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Notification'}}
+                  unread_count: {type: integer, description: 'Jumlah belum dibaca keseluruhan (bukan hanya yang ada di items).'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /notifications/read-all:
+    post:
+      tags: [Messages]
+      summary: Tandai semua notifikasi milik sendiri sudah dibaca
+      responses:
+        '204': {description: Selesai}
+  /notifications/{notificationId}/read:
+    parameters:
+      - {name: notificationId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      tags: [Messages]
+      summary: Tandai satu notifikasi sudah dibaca (milik pengguna lain/tidak ada = 404)
+      responses:
+        '204': {description: Selesai}
+        '404': {$ref: '#/components/responses/NotFound'}
   /saved-views:
     get:
       tags: [Messages]
@@ -2580,6 +2615,15 @@ components:
         finished_at: {type: [string, 'null'], format: date-time}
         partial: {type: boolean, description: 'true bila pesan gagal setelah sebagian bagian SMS (multi-bagian) sudah terkirim. Retry membuat bagian itu ganda di penerima, sehingga wajib `confirm_duplicate_risk`.'}
         parts_sent: {type: [integer, 'null'], description: 'Jumlah bagian yang sudah terkirim saat gagal parsial; null bila bukan kegagalan parsial.'}
+    Notification:
+      type: object
+      required: [id, kind, data, created_at, read_at]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [saved_view.shared, saved_view.moderated]}
+        data: {type: object, additionalProperties: true}
+        created_at: {type: string, format: date-time}
+        read_at: {type: [string, 'null'], format: date-time}
     TxFilter:
       type: object
       description: Filter daftar transaksi di dashboard (kunci sama dengan parameter URL halaman Transaksi). Divalidasi ketat.

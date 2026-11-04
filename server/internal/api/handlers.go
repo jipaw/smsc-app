@@ -1937,3 +1937,48 @@ func (a *API) deleteSavedView(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ---------- notifikasi dalam aplikasi (fase 40; hanya sesi pengguna) ----------
+
+func (a *API) listNotifications(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	unreadOnly, _ := strconv.ParseBool(r.URL.Query().Get("unread"))
+	items, unread, err := a.Svc.ListNotifications(r.Context(), p.user.ID, unreadOnly, qInt(r, "limit", 50))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"items": items, "unread_count": unread})
+}
+
+func (a *API) readNotification(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	id, perr := pathUUID(r, "notificationId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	if err := a.Svc.MarkNotificationRead(r.Context(), p.user.ID, id); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) readAllNotifications(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	if _, err := a.Svc.MarkAllNotificationsRead(r.Context(), p.user.ID); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

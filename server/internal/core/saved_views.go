@@ -175,10 +175,16 @@ func (s *Service) CreateSavedView(ctx context.Context, user uuid.UUID, name stri
 			return e
 		}
 		v, e = scanView(tx.QueryRow(ctx, `SELECT `+viewSel+` FROM saved_views v JOIN users u ON u.id=v.user_id WHERE v.id=$2`, user, id))
+		if e == nil && shared {
+			e = s.notifyAllExcept(ctx, tx, user, "saved_view.shared", map[string]any{"view_id": id.String(), "name": name, "owner": v.Owner}, id.String())
+		}
 		return e
 	})
 	if isUnique(err, "") {
 		return SavedView{}, dupView()
+	}
+	if err == nil && v.Shared {
+		s.signalNotifications()
 	}
 	return v, err
 }
@@ -196,6 +202,7 @@ func (s *Service) UpdateSavedView(ctx context.Context, user, id uuid.UUID, name 
 	}
 	raw, _ := json.Marshal(nf)
 	var v SavedView
+	newlyShared := false
 	err = s.withTx(ctx, func(tx pgx.Tx) error {
 		var cur bool
 		if e := tx.QueryRow(ctx, `SELECT shared FROM saved_views WHERE id=$1 AND user_id=$2 FOR UPDATE`, id, user).Scan(&cur); e != nil {
@@ -216,10 +223,17 @@ func (s *Service) UpdateSavedView(ctx context.Context, user, id uuid.UUID, name 
 		}
 		var e error
 		v, e = scanView(tx.QueryRow(ctx, `SELECT `+viewSel+` FROM saved_views v JOIN users u ON u.id=v.user_id WHERE v.id=$2`, user, id))
+		if e == nil && final && !cur { // baru dibagikan (bukan sekadar disunting)
+			newlyShared = true
+			e = s.notifyAllExcept(ctx, tx, user, "saved_view.shared", map[string]any{"view_id": id.String(), "name": name, "owner": v.Owner}, id.String())
+		}
 		return e
 	})
 	if isUnique(err, "") {
 		return SavedView{}, dupView()
+	}
+	if err == nil && newlyShared {
+		s.signalNotifications()
 	}
 	return v, err
 }
@@ -240,6 +254,10 @@ func (s *Service) DeleteSavedView(ctx context.Context, user uuid.UUID, role stri
 		err := s.Pool.QueryRow(ctx, `DELETE FROM saved_views WHERE id=$1 AND shared RETURNING user_id, name`, id).Scan(&owner, &name)
 		if err == nil {
 			s.Audit(ctx, "user:"+user.String(), "saved_view.moderate_delete", "saved_view", id.String(), map[string]any{"owner": owner, "name": name})
+			// pemilik diberi tahu (bukan diam-diam): siapa (bagian lokal email admin) dan nama tampilan
+			if e := s.notifyUser(ctx, s.Pool, owner, "saved_view.moderated", map[string]any{"view_id": id.String(), "name": name, "by": s.userLocal(ctx, user)}); e == nil {
+				s.signalNotifications()
+			}
 			return nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {

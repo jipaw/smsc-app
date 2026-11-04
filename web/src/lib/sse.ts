@@ -26,6 +26,7 @@ export function useEventStream(): SseState {
     es.addEventListener('campaign.updated', () => mark('campaigns', 'campaign', 'overview'))
     es.addEventListener('device.updated', () => mark('devices', 'device', 'overview', 'sims'))
     es.addEventListener('sim.updated', () => mark('devices', 'sims', 'device'))
+    es.addEventListener('notification.created', () => mark('notifications'))
     es.addEventListener('settings.updated', () => mark('overview', 'pause'))
     es.addEventListener('resync', () => qc.invalidateQueries())
     return () => { es.close(); if (timer) window.clearTimeout(timer) }

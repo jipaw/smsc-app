@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (116 operasi)
+# Daftar endpoint (119 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -71,6 +71,9 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `GET` | `/messages/{messageId}` | Detail transaksi + timeline event | apiKey/sessionCookie | 200,404 |
 | `POST` | `/messages/{messageId}/cancel` | Batalkan pesan berstatus `queued` atau `assigned` | apiKey/sessionCookie | 200,409 |
 | `POST` | `/messages/{messageId}/retry` | Antrekan ulang pesan `failed`/`expired`/`unknown` | apiKey/sessionCookie | 200,409 |
+| `GET` | `/notifications` | Notifikasi dalam aplikasi milik pengguna yang login (terbaru dulu) | apiKey/sessionCookie | 200,403 |
+| `POST` | `/notifications/read-all` | Tandai semua notifikasi milik sendiri sudah dibaca | apiKey/sessionCookie | 204 |
+| `POST` | `/notifications/{notificationId}/read` | Tandai satu notifikasi sudah dibaca (milik pengguna lain/tidak ada = 404) | apiKey/sessionCookie | 204,404 |
 | `GET` | `/saved-views` | Tampilan (filter) transaksi — milik sendiri lebih dulu, lalu yang dibagikan pengguna lain (`mine=false`) | apiKey/sessionCookie | 200,403 |
 | `POST` | `/saved-views` | Simpan tampilan baru (maksimal 20 per pengguna; nama unik tanpa membedakan huruf besar/kecil) | apiKey/sessionCookie | 201,409,422 |
 | `PUT` | `/saved-views/{viewId}` | Ganti nama, filter, dan/atau status berbagi tampilan milik sendiri (milik pengguna lain = 404, juga bila dibagikan) | apiKey/sessionCookie | 200,404,409,422 |

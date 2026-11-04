@@ -19,6 +19,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | **Fase 13**: SCIM `Group` → peran (`SCIM_ADMIN_GROUPS`/`SCIM_OPERATOR_GROUPS`/`SCIM_VIEWER_GROUPS`), peran efektif = tertinggi(roles, grup), rekonsiliasi saat start | |
 | **Fase 14–15**: rekonsiliasi grup SCIM berkala (`SCIM_RECONCILE_INTERVAL`); status run terakhir tersimpan di database (`settings.scim_reconcile_last`) dan tampil di Pengaturan → SCIM | |
 | **Fase 26**: jumlah gagal parsial di Overview (`today.partial`), deret waktu (`points[].partial`), dan `Campaign.counters.partial` | |
+| **Fase 40**: notifikasi dalam aplikasi (tampilan dibagikan/dimoderasi; lonceng di dashboard; `/notifications`; SSE `notification.created`) | |
 | **Fase 39**: berbagi tampilan transaksi ke tim (hanya-baca; tanpa filter nomor; admin dapat memoderasi) | |
 | **Fase 38**: tampilan (filter) transaksi tersimpan per pengguna (`/saved-views`, maks. 20, validasi ketat, terisolasi per pengguna) | |
 | **Fase 33**: hitungan bagian terkirim pesan gagal-parsial disegarkan dari HP lewat `sms.status` (`PARTIAL_REFRESH_AFTER`, monoton, event `parts_refreshed`) | |

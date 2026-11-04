@@ -504,6 +504,17 @@ CREATE TABLE saved_views (
 CREATE UNIQUE INDEX saved_views_user_name_uq ON saved_views (user_id, lower(name));
 CREATE INDEX saved_views_shared_idx ON saved_views (lower(name)) WHERE shared;
 
+CREATE TABLE notifications (
+  id         uuid PRIMARY KEY,
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind       text NOT NULL,
+  data       jsonb NOT NULL DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  read_at    timestamptz
+);
+CREATE INDEX notifications_user_idx ON notifications (user_id, created_at DESC);
+CREATE INDEX notifications_unread_idx ON notifications (user_id) WHERE read_at IS NULL;
+
 -- Seed: policy default sesuai docs/03 §4
 INSERT INTO dispatch_policies (id, name, is_default, min_delay_ms, max_delay_ms, burst_size, burst_pause_ms,
   max_inflight_per_sim, rate_per_minute, rate_per_hour, rate_per_day, send_window, max_attempts,

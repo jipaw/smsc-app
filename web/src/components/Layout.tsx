@@ -6,6 +6,7 @@ import { isAdmin, useMe } from '../lib/session'
 import { useEventStream } from '../lib/sse'
 import type { Overview } from '../lib/types'
 import { errMsg, useToast } from './ui'
+import { NotificationBell } from './NotificationBell'
 
 const NAV: [string, string][] = [
   ['/', 'Overview'], ['/devices', 'Devices'], ['/sims', 'SIM'], ['/send', 'Kirim SMS'], ['/transactions', 'Transaksi'],
@@ -49,6 +50,7 @@ export function Layout({ onLogout }: { onLogout: () => void }) {
             <span className="badge muted" title={sseLabel}><span aria-hidden="true">{sse === 'live' ? '●' : '○'}</span>{sseLabel}</span>
           </div>
           <div className="row">
+            <NotificationBell />
             <NavLink to="/account" className="muted" title="Akun: password dan 2FA">{me.email} · {me.role}{me.mfa_enabled ? ' · 2FA' : ''}</NavLink>
             <button className="small" onClick={logout}>Keluar</button>
           </div>
