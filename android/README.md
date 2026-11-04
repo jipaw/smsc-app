@@ -31,8 +31,22 @@ cd ../server && make tailnet                                                    
 Nomor tujuan berakhiran `0000`/`0001`/`0002`/`0003` memicu gagal sinkron / gagal parsial (pesan multi-bagian) / delivery gagal / job macet (memancing `sms.status`).
 Agen **tidak** menguji perilaku `SmsManager`, batas OS, laporan operator, Doze, atau multi-SIM nyata — itu tetap butuh HP (R1/R2/R3/R5/R6).
 
+## Pendaftaran device (fase 47)
+
+Buka **4. Koneksi → Daftarkan device**. Ada tiga cara:
+
+- **Pindai QR** dari dashboard (Devices → Tambah device). Memakai Camera2 platform + ZXing (`QrDecoder` di `:core`), tanpa AndroidX atau Google Play services. Butuh izin kamera.
+- **Deep link** `smsc://enroll?...`, misalnya dari kamera bawaan atau tautan yang disalin dashboard.
+- **Tempel tautan / ketik kode manual** + URL server.
+
+Perilaku:
+- Selalu muncul konfirmasi yang menampilkan host server, karena tautan dari luar aplikasi bisa menunjuk server lain.
+- Bila QR memuat auth key tailnet (`k=`) dan APK dibangun dengan `tsnetbridge.aar`, HP bergabung ke tailnet sendiri dulu, lalu enroll lewat tailnet. Bila server belum mengenali tag node, enroll dicoba ulang sebentar.
+- Kredensial device disimpan terenkripsi AES-GCM dengan kunci **Android Keystore**, ditulis sinkron. `rotate_credential` kini didukung: secret baru disimpan dulu, baru dikonfirmasi ke server.
+- Alur enrollment (`EnrollFlow`) ada di `:core` dan dipakai juga oleh agen JVM. `make agent` meng-enroll agen dari **gambar QR yang dirender seperti dashboard** (library `qrcode` yang sama, margin 1, lebar 240) dan menguji kode manual.
+
 ## Batasan skeleton yang disengaja
 - Belum pernah dijalankan di perangkat fisik oleh pembuatnya; perilaku platform adalah hipotesis yang diuji PoC.
 - Job `ACCEPTED` yang belum terkirim hilang dari antrean memori bila proses mati (pemulihan = pekerjaan implementasi sebenarnya).
-- Satu server/token, `ws://` cleartext (dilindungi tailnet), tanpa enrollment QR, tanpa Room/Hilt/Compose. (Enrollment dari tautan QR dan rotasi kredensial sudah ada di `:agent` sebagai acuan implementasi.)
+- `ws://` cleartext diizinkan (dilindungi tailnet); tanpa Room/Hilt/Compose. Pemindai QR belum diuji di kamera HP nyata (decoder diuji dengan frame sintetis dan gambar QR dashboard).
 - `type-check` memakai `android-all` yang menyertakan API `@hide`; pemakaian API tersembunyi tidak tertangkap.

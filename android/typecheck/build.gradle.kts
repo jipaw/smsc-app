@@ -42,4 +42,7 @@ dependencies {
 // varian tanpa AAR ikut dikompilasi pada setiap check/test
 tasks.named("test") { dependsOn("compileNotsnetKotlin") }
 
-tasks.test { useJUnitPlatform(); testLogging { events("passed", "failed", "skipped") } }
+tasks.test {
+    useJUnitPlatform(); testLogging { events("passed", "failed", "skipped") }
+    inputs.dir("../app/src").withPropertyName("appSources") // ManifestTest membaca manifest & sumber :app
+}

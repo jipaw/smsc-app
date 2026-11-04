@@ -108,7 +108,7 @@ Aplikasi dapat menjadi node tailnet sendiri lewat `tsnet` (`android/tsnetbridge`
 1. Pasang **Tailscale**, login, pastikan node ber-tag `tag:smsc-device` (admin dapat membuat auth key bertag lebih dulu), aktifkan *Always-on VPN* dan *Block connections without VPN* bila ingin ketat.
 2. Pasang APK SMSC (izinkan instalasi dari sumber ini).
 3. Buka app → wizard izin. Jika izin SMS abu-abu: *Pengaturan → Aplikasi → SMSC → ⋮ → Izinkan setelan terbatas*, lalu ulangi.
-4. Scan QR dari dashboard (*Devices → Tambah device*).
+4. Di aplikasi: *Daftarkan device → Pindai QR* dari dashboard (*Devices → Tambah device*), lalu konfirmasi host server. Alternatif: deep link `smsc://enroll`, atau kode manual + URL server. Bila QR memuat auth key tailnet dan APK dibangun dengan tailnet ter-embed, langkah 1 (aplikasi Tailscale) tidak diperlukan.
 5. Hardening ketahanan (wizard menampilkan checklist, dengan panduan per merek):
    - Pengecualian optimasi baterai untuk **SMSC dan Tailscale**.
    - Izinkan *auto-start* / *run in background* (Xiaomi, Oppo, Vivo, Huawei) dan keluarkan dari "sleeping apps" (Samsung).

@@ -131,6 +131,8 @@ class MainActivity : Activity() {
         burstText = body(); root.addView(burstText)
 
         root.addView(title("4. Koneksi & standby (R3)"))
+        root.addView(btn("Daftarkan device (pindai QR dari dashboard)") { startActivity(android.content.Intent(this, EnrollActivity::class.java)) })
+        root.addView(body().apply { text = "Setelah terdaftar lewat QR, URL & kredensial di bawah tidak dipakai (diambil dari Keystore)." })
         etUrl = edit("ws://100.x.y.z:8765/ws/device", Prefs.serverUrl(this))
         etToken = edit("token", Prefs.token(this))
         cbWake = CheckBox(this).apply { text = "Partial wake lock (eksperimen pembanding)"; isChecked = Prefs.wakeLock(this@MainActivity) }

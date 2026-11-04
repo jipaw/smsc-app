@@ -1,5 +1,6 @@
 package id.smsc.agent
 
+import id.smsc.poc.core.EnrollLink
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -23,7 +24,7 @@ class AgentUnitTest {
         assertEquals("tskey-auth-abc+def", k.tailnetKey)
         kotlin.test.assertFalse(k.toString().contains("tskey") || k.toString().contains("T0K"))
         assertEquals(null, l.tailnetKey)
-        assertFailsWith<IllegalStateException> { EnrollLink.parse("K0DE1234", null) }
-        assertFailsWith<IllegalStateException> { EnrollLink.parse("smsc://enroll?t=X", null) }
+        assertFailsWith<IllegalArgumentException> { EnrollLink.parse("K0DE1234", null) }
+        assertFailsWith<IllegalArgumentException> { EnrollLink.parse("smsc://enroll?t=X", null) }
     }
 }

@@ -1,5 +1,7 @@
 package id.smsc.agent
 
+import id.smsc.poc.core.EnrollException
+import id.smsc.poc.core.EnrollLink
 import id.smsc.poc.core.ProxySpec
 import okhttp3.OkHttpClient
 import java.io.File
@@ -25,6 +27,8 @@ Opsi:
   --sims N          jumlah SIM simulasi (default 1)
   --latency-ms MS   jeda simulasi sent/delivered per bagian (default 300)
   --ws-url URL      timpa ws_url dari server (mis. ws://127.0.0.1:8080/ws/device saat uji lokal)
+  --enroll-qr FILE  enroll dari gambar QR (PNG/JPEG, mis. tangkapan layar dashboard) — decoder sama dengan aplikasi
+  --enroll-only true  keluar setelah enroll berhasil (tanpa menyambung WebSocket)
   --proxy URL       proxy keluar untuk enroll & WebSocket: socks5://user:pass@127.0.0.1:PORT (proxy tsnet) atau http://host:port
 
 Nomor tujuan berakhiran 0000 / 0001 / 0002 / 0003 memicu gagal sinkron / gagal parsial / delivery gagal / macet."""
@@ -46,12 +50,21 @@ fun main(args: Array<String>) {
     proxy?.let { log("proxy keluar: $it") }
     val credStore = CredentialStore(File(stateDir, "credentials.json"))
 
+    opts["enroll-qr"]?.let { f ->
+        val text = QrImage.decode(java.io.File(f)) ?: run { System.err.println("QR tidak terbaca di $f"); exitProcess(4) }
+        log("QR terbaca dari $f")
+        opts["enroll"] = text
+    }
     opts["enroll"]?.let { link ->
-        val parsed = EnrollLink.parse(link, opts["server"])
-        if (parsed.tailnetKey != null) log("tautan memuat auth key tailnet: aplikasi memakainya untuk tailnet ter-embed; agen JVM memakai --proxy dari node yang sudah tersambung")
-        val c = Enroller.enroll(http, parsed, sims, AGENT_VERSION)
+        val parsed = try { EnrollLink.parse(link, opts["server"]) } catch (e: IllegalArgumentException) {
+            System.err.println("enroll gagal: ${e.message}"); exitProcess(4)
+        }
+        val c = try { Enroller.enroll(http, parsed, sims, AGENT_VERSION, proxy) { log(it) } } catch (e: EnrollException) {
+            System.err.println("enroll gagal: ${e.message}"); exitProcess(4)
+        }
         credStore.save(c)
         log("enroll OK device_id=${c.deviceId} ws_url=${c.wsUrl}")
+        if (opts["enroll-only"] == "true") return
     }
     val creds = credStore.load() ?: run { System.err.println("belum ada kredensial di $stateDir — jalankan dengan --enroll"); exitProcess(2) }
 

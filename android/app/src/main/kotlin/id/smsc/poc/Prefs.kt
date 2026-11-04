@@ -28,6 +28,14 @@ object Prefs {
     }
     fun clearTailnetAuthKey(ctx: Context) = sp(ctx).edit().remove("tailnet_auth_key").apply()
 
+    fun tailnetHostnameOrDefault(ctx: Context) =
+        tailnetHostname(ctx).ifBlank { "smsc-" + android.os.Build.MODEL.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-') }
+
+    /** UUID per instalasi: enroll ulang dari HP yang sama memakai baris device yang sama di server. */
+    @Synchronized fun installId(ctx: Context): String = sp(ctx).getString("install_id", null) ?: java.util.UUID.randomUUID().toString().also {
+        sp(ctx).edit().putString("install_id", it).commit()
+    }
+
     fun getString(ctx: Context, key: String, def: String) = sp(ctx).getString(key, def) ?: def
     fun putString(ctx: Context, key: String, v: String) = sp(ctx).edit().putString(key, v).apply()
 }

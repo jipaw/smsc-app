@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- pindai QR enrollment; kamera opsional (kode manual / deep link tetap bisa) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <!-- PoC: ws:// ke alamat tailnet (WireGuard sudah mengenkripsi). Produksi memakai wss:// tanpa cleartext. -->
     <application
@@ -31,6 +34,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Pendaftaran: pindai QR / tempel tautan / deep link smsc://enroll (selalu dengan konfirmasi host server) -->
+        <activity
+            android:name=".EnrollActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="smsc" android:host="enroll" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".ScanActivity" android:exported="false" android:screenOrientation="portrait" />
 
         <service
             android:name=".PocService"

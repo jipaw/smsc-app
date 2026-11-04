@@ -40,7 +40,8 @@ class PocService : Service() {
         startForegroundCompat(buildNotification("memulai..."))
         PocLog.i("svc", "onStartCommand restart=${intent == null} flags=$flags")
         if (client == null) {
-            val url = Prefs.serverUrl(this)
+            val creds = CredentialStore.load(this) // hasil enrollment QR; bila tidak ada, setelan manual PoC
+            val url = creds?.wsUrl ?: Prefs.serverUrl(this)
             if (url.isBlank() || url.contains("100.x.y.z")) {
                 PocLog.i("svc", "URL server belum diisi, service berhenti")
                 stopSelf(); return START_NOT_STICKY
@@ -51,24 +52,25 @@ class PocService : Service() {
                     .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "smsc:poc").apply { setReferenceCounted(false); acquire() }
                 PocLog.i("svc", "partial wake lock DIAKTIFKAN (eksperimen)")
             }
-            if (Prefs.tailnetEnabled(this)) startViaTailnet(url) else client = GatewayClient(applicationContext, url, Prefs.token(this)).also { it.start() }
+            val token = creds?.deviceSecret ?: Prefs.token(this)
+            if (Prefs.tailnetEnabled(this)) startViaTailnet(url, token) else client = GatewayClient(applicationContext, url, token).also { it.start() }
             registerNetworkCallback()
         }
         return START_STICKY
     }
 
     /** Tailnet ter-embed: nyalakan node tsnet (blocking, di thread latar), lalu sambungkan WebSocket lewat proxy SOCKS5-nya. */
-    private fun startViaTailnet(url: String) {
+    private fun startViaTailnet(url: String, token: String) {
         if (tailnetStarting) return
         tailnetStarting = true
         updateNotification(this, "menyambung ke tailnet...")
         Thread({
             try {
-                val host = Prefs.tailnetHostname(this).ifBlank { "smsc-" + Build.MODEL.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-') }
+                val host = Prefs.tailnetHostnameOrDefault(this)
                 val spec = TailnetRuntime.start(applicationContext, host, Prefs.tailnetAuthKey(this), Prefs.tailnetControl(this))
                 Prefs.clearTailnetAuthKey(this) // kunci node sudah tersimpan; auth key tidak diperlukan lagi
                 PocLog.i("tailnet", "tersambung sebagai $host, ${TailnetRuntime.status()}")
-                if (client == null && Prefs.serviceEnabled(this)) client = GatewayClient(applicationContext, url, Prefs.token(this), spec).also { it.start() }
+                if (client == null && Prefs.serviceEnabled(this)) client = GatewayClient(applicationContext, url, token, spec).also { it.start() }
             } catch (e: Exception) {
                 PocLog.i("tailnet", "gagal menyalakan tailnet ter-embed: ${e.message}")
                 updateNotification(this, "tailnet gagal: ${e.message}")

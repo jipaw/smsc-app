@@ -91,9 +91,14 @@ def main():
         print("1. enrollment dari tautan QR", flush=True)
         en = call("POST", "/api/v1/device-enrollments", {"device_name": "agen-jvm"})
         ok(en["enroll_url"].startswith("smsc://enroll?"), "server membuat enroll_url (isi QR)")
-        agent = start_agent(state, "--enroll", en["enroll_url"])
+        # QR dirender PERSIS seperti dashboard (library qrcode, margin 1, lebar 240) lalu didecode QrDecoder (sama dengan ScanActivity)
+        qr_png = os.path.join(state, "qr.png")
+        web = pathlib.Path(__file__).resolve().parents[2] / "web"
+        subprocess.run(["node", "-e", "require('qrcode').toFile(process.argv[1], process.argv[2], {margin: 1, width: 240}).catch(e => { console.error(e); process.exit(1) })",
+                        qr_png, en["enroll_url"]], cwd=web, check=True)
+        agent = start_agent(state, "--enroll-qr", qr_png)
         d = wait(lambda: (x := device()) and x["status"] == "online" and x, timeout=30)
-        ok(d, "agen ter-enroll dan online (hello → hello.ack)")
+        ok(d, "agen ter-enroll dari GAMBAR QR dashboard dan online (hello → hello.ack)")
         creds = json.loads(pathlib.Path(state, "credentials.json").read_text())
         ok(oct(os.stat(pathlib.Path(state, "credentials.json")).st_mode & 0o777) == "0o600", "kredensial disimpan dengan mode 0600")
         sims = call("GET", f"/api/v1/devices/{d['id']}").get("sims") or []
@@ -137,7 +142,20 @@ def main():
         jobs = json.loads(pathlib.Path(state, "jobs.json").read_text())
         ok(len(jobs) >= 5, f"job tersimpan persisten di agen ({len(jobs)})")
 
-        print("5. kredensial lama ditolak", flush=True)
+        print("5. QR bukan enrollment / kode manual", flush=True)
+        other_png = os.path.join(state, "lain.png")
+        subprocess.run(["node", "-e", "require('qrcode').toFile(process.argv[1], 'https://contoh.id/bukan-enroll', {margin: 1, width: 240})", other_png], cwd=web, check=True)
+        bad = subprocess.run([AGENT, "--state", _old_state(creds), "--enroll-qr", other_png], capture_output=True, text=True, timeout=60)
+        ok(bad.returncode != 0 and "bukan tautan enrollment" in (bad.stdout + bad.stderr), "QR yang bukan enrollment SMSC ditolak dengan pesan jelas")
+        en2 = call("POST", "/api/v1/device-enrollments", {"device_name": "manual"})
+        man_state = tempfile.mkdtemp(prefix="smsc-agent-man-")
+        man = subprocess.run([AGENT, "--state", man_state, "--enroll", en2["short_code"], "--server", URL, "--enroll-only", "true"],
+                             capture_output=True, text=True, timeout=60)
+        ok("enroll OK" in man.stdout, "enroll dengan kode manual + URL server (jalur input manual aplikasi)")
+        again = subprocess.run([AGENT, "--state", tempfile.mkdtemp(), "--enroll", en2["short_code"], "--server", URL], capture_output=True, text=True, timeout=60)
+        ok(again.returncode == 4 and "kedaluwarsa, atau sudah dipakai" in again.stderr, "kode yang sudah dipakai ditolak dengan pesan yang dapat ditindaklanjuti")
+
+        print("6. kredensial lama ditolak", flush=True)
         old = subprocess.run([AGENT, "--state", _old_state(creds), "--latency-ms", "150"], capture_output=True, text=True, timeout=30)
         ok(old.returncode == 3 and "kredensial ditolak (401)" in old.stdout, "agen dengan secret lama ditolak (HTTP 401 saat upgrade) dan berhenti, tidak mencoba ulang")
     finally:

@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit
  * Klien WebSocket protokol v1 (device-ws-protocol.md). Mencatat "ledger" koneksi untuk analisis R3:
  * kapan tersambung/putus, durasi, dan penyebab.
  */
-class GatewayClient(private val ctx: Context, private val url: String, private val token: String, private val proxy: ProxySpec? = null) {
+class GatewayClient(private val ctx: Context, private val url: String, @Volatile private var token: String, private val proxy: ProxySpec? = null) {
     // proxy: SOCKS5 loopback dari tailnet ter-embed (TailnetRuntime) — nama MagicDNS di-resolve oleh node tailnet
     private val http = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).readTimeout(0, TimeUnit.MILLISECONDS).applyProxy(proxy).build()
     private val exec = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "poc-ws").apply { isDaemon = true } }
@@ -184,6 +184,18 @@ class GatewayClient(private val ctx: Context, private val url: String, private v
             onDown(webSocket, "failure:${t.javaClass.simpleName}:${t.message}", response?.code)
     }
 
+    /** Rotasi kredensial: simpan secret baru di Keystore DULU, baru balas ok (secret lama tetap sah sampai server menerima ok). */
+    private fun rotate(c: DeviceCommand): DeviceCommandResult {
+        val ns = c.newSecret
+        val cur = CredentialStore.load(ctx)
+        return when {
+            ns.isNullOrEmpty() -> DeviceCommandResult(c.commandId, false, "new_secret kosong")
+            cur == null -> DeviceCommandResult(c.commandId, false, "device tidak terdaftar lewat QR (setelan manual)")
+            !CredentialStore.save(ctx, cur.copy(deviceSecret = ns)) -> DeviceCommandResult(c.commandId, false, "gagal menyimpan di Keystore")
+            else -> { token = ns; DeviceCommandResult(c.commandId, true) }
+        }
+    }
+
     private fun handle(env: Envelope) {
         when (env.type) {
             MessageType.HELLO_ACK -> {
@@ -216,8 +228,13 @@ class GatewayClient(private val ctx: Context, private val url: String, private v
             MessageType.DEVICE_COMMAND -> {
                 val c = Codec.payload<DeviceCommand>(env)
                 send(Codec.envelope(MessageType.COMMAND_ACK, CommandAck(true, null), ref = env.id))
-                val ok = c.action == "ping" || c.action == "refresh_sims"
-                send(Codec.envelope(MessageType.DEVICE_COMMAND_RESULT, DeviceCommandResult(c.commandId, ok, if (ok) null else "tidak didukung di PoC")))
+                val result = when (c.action) {
+                    "ping", "refresh_sims" -> DeviceCommandResult(c.commandId, true)
+                    "rotate_credential" -> rotate(c)
+                    else -> DeviceCommandResult(c.commandId, false, "tidak didukung di PoC")
+                }
+                ledger("command", "${c.action} -> ok=${result.ok}")
+                send(Codec.envelope(MessageType.DEVICE_COMMAND_RESULT, result))
             }
             MessageType.CONFIG_UPDATE -> send(Codec.envelope(MessageType.COMMAND_ACK, CommandAck(true, null), ref = env.id))
             MessageType.ERROR -> PocLog.i("ws", "error dari server: ${Codec.payload<ErrorPayload>(env)}")
