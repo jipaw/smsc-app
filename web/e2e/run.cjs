@@ -225,6 +225,11 @@ async function main() {
   await page.getByRole('link', { name: 'Overview', exact: true }).click()
   await page.getByText(/termasuk 1 gagal parsial/).waitFor()
   check(true, 'Overview menampilkan jumlah gagal parsial hari ini')
+  await page.getByText(/gagal parsial \(1\)/).waitFor()
+  const partH = await page.evaluate(() => Math.max(-1, ...[...document.querySelectorAll('.bars .p')].map((e) => e.getBoundingClientRect().height)))
+  check(partH > 1, `grafik Overview menggambar segmen gagal parsial berpola (tinggi ${Math.round(partH)}px) dengan legenda`)
+  check(((await page.getByRole('img', { name: /1 di antaranya gagal parsial/ }).count()) === 1), 'label aksesibel grafik menyebut jumlah gagal parsial')
+  await axeCheck(page, 'overview dengan parsial')
   psqlDb(`DELETE FROM messages WHERE to_e164='+628155500001'`)
 
   // ---- overview + settings ----

@@ -86,6 +86,8 @@ dialog.drawer { margin: 0 0 0 auto; height: 100vh; max-height: 100vh; width: min
 .timeline li { position: relative; } .timeline li::before { content: ""; position: absolute; left: -20px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--primary); }
 .bars { display: flex; align-items: stretch; gap: 3px; height: 130px; } .bars .b { flex: 1; display: flex; flex-direction: column-reverse; min-width: 4px; height: 100%; }
 .bars .b > i { display: block; min-height: 0; } .bars .s { background: var(--ok); opacity: .6; } .bars .d { background: var(--ok); } .bars .f { background: var(--bad); }
+.bars .p, .swatch-partial { background: repeating-linear-gradient(45deg, var(--bad) 0 3px, var(--warn) 3px 6px); } /* berpola agar tidak hanya bergantung warna */
+.swatch-partial { display: inline-block; width: 11px; height: 11px; vertical-align: -1px; }
 .toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 50; }
 .toast { background: var(--text); color: var(--bg); padding: 10px 14px; border-radius: 8px; box-shadow: var(--shadow); max-width: 360px; }
 .toast.bad { background: var(--bad); color: #fff; }

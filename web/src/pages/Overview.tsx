@@ -4,6 +4,7 @@ import { get, put, qs } from '../lib/api'
 import { fmtTime, pct, rel, ERROR_LABEL } from '../lib/format'
 import { isAdmin, useMe } from '../lib/session'
 import type { Device, Overview as Ov, Page, Point } from '../lib/types'
+import { chartMax, hourSlots, splitFailed } from '../lib/chart'
 import { Badge, ErrorBox, errMsg, Loading, useToast, Confirm } from '../components/ui'
 import { useState } from 'react'
 
@@ -11,36 +12,29 @@ function Stat({ label, value, tone, note }: { label: string; value: string | num
   return <div className="card stat"><div className="l">{label}</div><div className="v" style={tone ? { color: `var(--${tone})` } : undefined}>{value}</div>{note && <div className="hint">{note}</div>}</div>
 }
 
-/** 24 slot jam terakhir (selalu 24 kolom, jam tanpa data = kosong) agar skala batang konsisten. */
-function hourSlots(points: Point[]): Point[] {
-  const hour = 3600_000
-  const end = Math.floor(Date.now() / hour) * hour
-  const byT = new Map(points.map((p) => [Math.floor(new Date(p.t).getTime() / hour) * hour, p]))
-  return Array.from({ length: 24 }, (_, i) => {
-    const t = end - (23 - i) * hour
-    return byT.get(t) ?? { t: new Date(t).toISOString(), sent: 0, delivered: 0, failed: 0 }
-  })
-}
-
 function Chart({ points }: { points: Point[] }) {
   const slots = hourSlots(points)
   const total = slots.reduce((a, p) => a + p.sent + p.failed, 0)
+  const partialTotal = slots.reduce((a, p) => a + splitFailed(p).partial, 0)
   if (total === 0) return <p className="muted">Belum ada pengiriman pada 24 jam terakhir.</p>
-  const max = Math.max(1, ...slots.map((p) => Math.max(p.sent, p.delivered) + p.failed))
+  const max = chartMax(slots)
   return (
     <div>
-      <div className="bars" role="img" aria-label={`Grafik pengiriman per jam selama 24 jam terakhir: ${total} pesan`}>
-        {slots.map((p) => (
-          <div className="b" key={p.t} title={`${fmtTime(p.t)}: terkirim ${p.sent}, sampai ${p.delivered}, gagal ${p.failed}`}>
-            <i className="f" style={{ height: `${(p.failed / max) * 100}%` }} />
+      <div className="bars" role="img" aria-label={`Grafik pengiriman per jam selama 24 jam terakhir: ${total} pesan${partialTotal ? `, ${partialTotal} di antaranya gagal parsial` : ''}`}>
+        {slots.map((p) => {
+          const { full, partial: part } = splitFailed(p) // parsial adalah bagian dari gagal: digambar terpisah, tidak dihitung dua kali
+          return (
+          <div className="b" key={p.t} title={`${fmtTime(p.t)}: terkirim ${p.sent}, sampai ${p.delivered}, gagal ${p.failed}${part ? ` (parsial ${part})` : ''}`}>
+            <i className="f" style={{ height: `${(full / max) * 100}%` }} />
+            <i className="p" style={{ height: `${(part / max) * 100}%` }} />
             <i className="d" style={{ height: `${(p.delivered / max) * 100}%` }} />
             <i className="s" style={{ height: `${(Math.max(0, p.sent - p.delivered) / max) * 100}%` }} />
-          </div>
-        ))}
+          </div>)
+        })}
       </div>
       <div className="row spread hint" style={{ marginTop: 4 }}><span>24 jam lalu</span><span>sekarang</span></div>
       <div className="row hint" style={{ marginTop: 6 }}>
-        <span><i style={{ color: 'var(--ok)' }}>■</i> sampai</span><span><i style={{ color: 'var(--ok)', opacity: .6 }}>■</i> terkirim (menunggu laporan)</span><span><i style={{ color: 'var(--bad)' }}>■</i> gagal</span>
+        <span><i style={{ color: 'var(--ok)' }}>■</i> sampai</span><span><i style={{ color: 'var(--ok)', opacity: .6 }}>■</i> terkirim (menunggu laporan)</span><span><i style={{ color: 'var(--bad)' }}>■</i> gagal</span>{partialTotal > 0 && <span><i className="swatch-partial" aria-hidden="true" /> gagal parsial ({partialTotal})</span>}
       </div>
     </div>
   )

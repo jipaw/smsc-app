@@ -7,7 +7,7 @@ merusak UI langsung gagal di `tsc`. Spesifikasi: `docs/spec/08`.
 ```bash
 npm ci
 npm run build        # gen:api + tsc + vite build  (JS ±96 KB gzip)
-npm run test         # vitest: kalkulator segmen (kasus sama dengan server)
+npm run test         # vitest: kalkulator segmen (kasus sama dengan server) + logika grafik Overview (lib/chart.ts)
 npm run e2e          # Chromium + HP palsu + biner nyata (lihat server/Makefile `make e2e`)
 npm run dev          # dev server; proxy /api & /ws ke 127.0.0.1:8080
 ```
