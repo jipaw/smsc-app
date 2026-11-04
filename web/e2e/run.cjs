@@ -230,7 +230,20 @@ async function main() {
   check(partH > 1, `grafik Overview menggambar segmen gagal parsial berpola (tinggi ${Math.round(partH)}px) dengan legenda`)
   check(((await page.getByRole('img', { name: /1 di antaranya gagal parsial/ }).count()) === 1), 'label aksesibel grafik menyebut jumlah gagal parsial')
   await axeCheck(page, 'overview dengan parsial')
-  psqlDb(`DELETE FROM messages WHERE to_e164='+628155500001'`)
+  // semua bagian terkirim tetapi pesan dinyatakan gagal (hitungan disegarkan dari HP mencapai total): teks tidak boleh bilang "sisanya tidak"
+  psqlDb(`INSERT INTO messages(id, source, to_e164, body, encoding, parts, status, attempt, max_attempts, error_code, expires_at, finished_at, partial_sent)
+          VALUES (gen_random_uuid(), 'api', '+628155500002', 'pesan panjang lengkap', 'gsm7', 3, 'failed', 1, 3, 'generic_failure', now() + interval '1 day', now(), 3)`)
+  await page.getByRole('link', { name: 'Transaksi', exact: true }).click()
+  await page.reload()
+  const arow = page.getByRole('row').filter({ hasText: '+628155500002' })
+  await arow.waitFor()
+  check((await arow.getByText('Semua bagian terkirim (3/3)').count()) === 1, 'baris dengan semua bagian terkirim menampilkan lencana "Semua bagian terkirim (3/3)"')
+  await arow.click()
+  await page.getByRole('heading', { name: 'Timeline' }).waitFor()
+  check((await page.getByText(/SUDAH sampai utuh/).count()) === 1 && (await page.getByText(/sisanya tidak/).count()) === 0, 'drawer menjelaskan pesan sudah utuh dan tidak menulis "sisanya tidak"')
+  check((await page.getByRole('button', { name: 'Retry (kirim ulang lengkap)' }).count()) === 1, 'tombol retry menyebut kirim ulang lengkap')
+  await page.keyboard.press('Escape')
+  psqlDb(`DELETE FROM messages WHERE to_e164='+628155500001' OR to_e164='+628155500002'`)
 
   // ---- overview + settings ----
   await page.getByRole('link', { name: 'Overview', exact: true }).click()

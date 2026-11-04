@@ -3,6 +3,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { get, post, qs } from '../lib/api'
 import { ERROR_LABEL, fmtTime, rel } from '../lib/format'
 import { canOperate, useMe } from '../lib/session'
+import { partialBadge, partialExplain, partialRetryLabel, partialRetryWarning } from '../lib/partial'
 import type { Message, MessageDetail, Page } from '../lib/types'
 import { Badge, Empty, ErrorBox, errMsg, Loading, Modal, useToast } from '../components/ui'
 
@@ -84,7 +85,7 @@ export function Transactions({ campaignId }: { campaignId?: string } = {}) {
               <td data-l="Waktu" title={fmtTime(m.created_at)}>{rel(m.created_at)}</td>
               <td data-l="Nomor" className="mono">{m.to}</td>
               <td data-l="Isi" style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.body ?? ''}>{m.body}</td>
-              <td data-l="Sumber">{m.source}</td><td data-l="Status"><Badge status={m.status} />{m.partial && <> <Badge status="partial" label={`Parsial ${m.parts_sent ?? 0}/${m.parts}`} /></>}</td><td data-l="Try">{m.attempt}/{m.max_attempts}</td>
+              <td data-l="Sumber">{m.source}</td><td data-l="Status"><Badge status={m.status} />{m.partial && <> <Badge status="partial" label={partialBadge(m)} /></>}</td><td data-l="Try">{m.attempt}/{m.max_attempts}</td>
               <td data-l="Keterangan" className="muted">{m.error_code ? ERROR_LABEL[m.error_code] ?? m.error_code : ''}</td>
             </tr>))}</tbody>
         </table>
@@ -114,11 +115,11 @@ function Detail({ id, onClose }: { id: string | null; onClose: () => void }) {
         <div className="row spread"><span className="mono">{m.to}</span><Badge status={m.status} /></div>
         <div className="card" style={{ whiteSpace: 'pre-wrap' }}>{m.body}</div>
         <div className="muted">{m.encoding?.toUpperCase()} · {m.parts} segmen · prioritas {m.priority} · percobaan {m.attempt}/{m.max_attempts}</div>
-        {m.partial && <div className="err" role="status">Gagal parsial: {m.parts_sent ?? 0} dari {m.parts} bagian sudah terkirim ke penerima, sisanya tidak. Pesan tidak diantre ulang otomatis agar bagian yang sudah sampai tidak ganda.</div>}
+        {m.partial && <div className="err" role="status">{partialExplain(m)}</div>}
         {m.error_code && <div className="err">{ERROR_LABEL[m.error_code] ?? m.error_code} <span className="mono">({m.error_code})</span>{m.status === 'unknown' && <div>HP terputus saat mengirim; hasil tidak pasti. Tunggu HP kembali online (status dikoreksi otomatis) sebelum retry.</div>}</div>}
         {op && <div className="row">
           {['failed', 'expired'].includes(m.status) && !m.partial && <button onClick={() => act.mutate({ kind: 'retry', body: {} })}>Retry</button>}
-          {m.partial && <button className="danger" onClick={() => window.confirm(`${m.parts_sent ?? 0} dari ${m.parts} bagian pesan ini sudah terkirim. Retry mengirim ulang SEMUA bagian sehingga bagian itu ganda di penerima. Yakin?`) && act.mutate({ kind: 'retry', body: { confirm_duplicate_risk: true } })}>Retry (bagian ganda)</button>}
+          {m.partial && <button className="danger" onClick={() => window.confirm(partialRetryWarning(m)) && act.mutate({ kind: 'retry', body: { confirm_duplicate_risk: true } })}>{partialRetryLabel(m)}</button>}
           {m.status === 'unknown' && <button className="danger" onClick={() => window.confirm('Retry pesan tidak pasti dapat mengirim SMS ganda. Yakin?') && act.mutate({ kind: 'retry', body: { confirm_duplicate_risk: true } })}>Retry (risiko ganda)</button>}
           {['queued', 'assigned'].includes(m.status) && <button onClick={() => act.mutate({ kind: 'cancel' })}>Batalkan</button>}
         </div>}
