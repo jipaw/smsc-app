@@ -7,6 +7,7 @@ Skeleton untuk PoC risiko R1/R2/R3/R5/R6 (lihat `docs/05` dan `poc/README.md`). 
 | `:core` | Protokol WS v1, `CommandProcessor` (dedup, persist-before-act, antrean per slot, agregasi part), `SlotGate` (jeda/rate/os-guard), `Outbox`, `Backoff`, pemetaan error. JVM murni. | Mana saja (JDK 17+) |
 | `:typecheck` | Meng-compile sumber `:app` terhadap API Android asli (`android-all`, API 34) + tes konstanta `SmsManager`. Tidak menghasilkan APK. | Mana saja (tanpa Android SDK) |
 | `:agent` | Agen perangkat **headless** (aplikasi JVM): protokol WS v1 lengkap memakai `CommandProcessor`/`Outbox`/`SlotGate` dari `:core` dan OkHttp (sama dengan `:app`), enrollment dari tautan QR, rotasi kredensial, job persisten; **SMS disimulasikan**. Untuk menguji integrasi Kotlin↔smscd tanpa HP/emulator. | Mana saja (JDK 17+) |
+| `tsnetbridge/` (Go) | Node Tailscale userspace (`tsnet`) untuk di-embed ke aplikasi lewat `gomobile bind`: proxy SOCKS5 loopback ber-kredensial, tanpa izin VPN. Lihat `tsnetbridge/README.md`. | AAR: mesin dengan NDK (winbuilder); tes Go: mana saja |
 | `:app` | Aplikasi: UI uji, foreground service, klien WebSocket, `SmsManager` nyata, receiver hasil kirim. | Mesin dengan Android SDK (mis. winbuilder) |
 
 ```bash
@@ -24,6 +25,7 @@ Windows (winbuilder): `powershell -File android\scripts\build-apk.ps1 [-Install]
 agent/build/install/smsc-agent/bin/smsc-agent --enroll 'smsc://enroll?s=...&t=...'   # tautan dari Devices → Tambah device
 agent/build/install/smsc-agent/bin/smsc-agent                                         # berikutnya: pakai kredensial tersimpan (agent-state/)
 cd ../server && make agent                                                             # E2E: agen ↔ biner smscd nyata (17 pemeriksaan)
+cd ../server && make tailnet                                                           # lab: agen --proxy → tsnet → tailnet → smscd
 ```
 
 Nomor tujuan berakhiran `0000`/`0001`/`0002`/`0003` memicu gagal sinkron / gagal parsial (pesan multi-bagian) / delivery gagal / job macet (memancing `sms.status`).

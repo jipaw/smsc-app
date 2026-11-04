@@ -6,10 +6,11 @@
    .\android\scripts\build-apk.ps1               # tes + build debug APK
    .\android\scripts\build-apk.ps1 -Install      # + adb install -r ke HP yang tersambung
    .\android\scripts\build-apk.ps1 -Install -Serial R5CT123456
+   .\android\scripts\build-apk.ps1 -Tailnet    # bangun dulu tsnetbridge.aar (Go + NDK) -> APK dengan tailnet ter-embed
  Prasyarat: JDK 17+ (JAVA_HOME), Android SDK (ANDROID_HOME atau %LOCALAPPDATA%\Android\Sdk) dengan platform android-35
             dan build-tools; adb di PATH bila memakai -Install.
 #>
-param([switch]$Install, [string]$Serial = "")
+param([switch]$Install, [string]$Serial = "", [switch]$Tailnet)
 $ErrorActionPreference = "Stop"
 $androidDir = Split-Path -Parent $PSScriptRoot
 Set-Location $androidDir
@@ -28,6 +29,12 @@ if (-not (Test-Path (Join-Path $sdk "platforms"))) { throw "Android SDK tidak di
 $sdkFwd = $sdk -replace '\\', '/'
 Set-Content -Path (Join-Path $androidDir "local.properties") -Value "sdk.dir=$sdkFwd" -Encoding ascii
 Write-Host "SDK: $sdk"
+
+# 2b. Tailnet ter-embed (opsional): AAR gomobile dari android\tsnetbridge
+if ($Tailnet) {
+    & (Join-Path $androidDir "tsnetbridge\build-aar.ps1")
+    Set-Location $androidDir
+}
 
 # 3. Tes unit + type-check + build
 & .\gradlew.bat :core:test :typecheck:test :app:assembleDebug --console=plain

@@ -91,6 +91,15 @@ volumes: { ts-state: {}, pg: {} }
 
 Backup: `pg_dump` terjadwal (harian) + uji restore; `device_credentials` ter-hash sehingga backup tidak membocorkan secret.
 
+### Mode alternatif: tailnet ter-embed di aplikasi (fase 45)
+
+Aplikasi dapat menjadi node tailnet sendiri lewat `tsnet` (`android/tsnetbridge`), tanpa aplikasi Tailscale resmi dan tanpa `VpnService`. `GatewayClient` memakai proxy SOCKS5 loopback ber-kredensial milik node itu. Nama MagicDNS di-resolve oleh node, dan hanya lalu lintas aplikasi SMSC yang lewat tailnet.
+
+- **Auth key**: ber-tag `tag:smsc-device`, sekali pakai, dimasukkan sekali dan dihapus setelah tersambung. Kunci node disimpan di penyimpanan privat aplikasi (tidak ikut cadangan).
+- **ACL**: sama dengan §1, karena node tetap ber-tag `tag:smsc-device`.
+- **Aktif bila**: APK dibangun dengan `tsnetbridge.aar` (`build-apk.ps1 -Tailnet`). Tanpa AAR, mode ini nonaktif dan cara di bawah (aplikasi Tailscale + Always-on VPN) tetap berlaku.
+- **Menyusul**: verifikasi identitas node di server (`WhoIs` + tag) dan pembuatan auth key otomatis saat enrollment.
+
 ## 5. Panduan setup HP (sumber untuk dokumentasi pengguna)
 
 1. Pasang **Tailscale**, login, pastikan node ber-tag `tag:smsc-device` (admin dapat membuat auth key bertag lebih dulu), aktifkan *Always-on VPN* dan *Block connections without VPN* bila ingin ketat.

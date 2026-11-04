@@ -2,7 +2,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 DB ?= postgres://nobody@localhost:55432/postgres?sslmode=disable
 
-.PHONY: build test unit integration contract schema alerts load web e2e agent image verify
+.PHONY: build test unit integration contract schema alerts load web e2e agent tailnet image verify
 build:
 	go build -ldflags "-X github.com/jipaw/smsc-app/server/internal/buildinfo.Version=$(VERSION)" -o bin/smscd ./cmd/smscd
 
@@ -43,8 +43,14 @@ e2e: web build
 agent: build
 	cd ../android && ./gradlew -q :agent:installDist && SMSC_TEST_DATABASE_URL='$(DB)' python3 agent/e2e.py ../server/bin/smscd agent/build/install/smsc-agent/bin/smsc-agent
 
+# tailnet ter-embed: bridge tsnet (Go) + lab end-to-end: agen JVM --SOCKS5--> tsnet --tailnet--> node "smsc" --> smscd
+tailnet: build
+	cd ../android && ./gradlew -q :agent:installDist
+	cd ../android/tsnetbridge && SMSC_LAB_SMSCD=$(CURDIR)/bin/smscd SMSC_LAB_AGENT=$(CURDIR)/../android/agent/build/install/smsc-agent/bin/smsc-agent \
+		SMSC_TEST_DATABASE_URL='$(DB)' go test -count=1 ./...
+
 # image Docker (dashboard ter-embed); di balik proxy TLS: make image DOCKER_BUILD_ARGS='--secret id=ca_bundle,src=/path/ca.crt'
 image:
 	cd .. && docker build $(DOCKER_BUILD_ARGS) -t smsc/server:$(VERSION) -t smsc/server:latest --build-arg VERSION=$(VERSION) .
 
-verify: test e2e agent
+verify: test e2e agent tailnet

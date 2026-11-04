@@ -17,3 +17,7 @@ server/internal/webui/dist/*
 !server/internal/webui/dist/.gitkeep
 web/e2e/out/
 web/src/api/schema.d.ts
+
+# AAR gomobile (dibangun di winbuilder dari android/tsnetbridge)
+android/app/libs/*.aar
+android/app/libs/*-sources.jar

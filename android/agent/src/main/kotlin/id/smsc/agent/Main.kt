@@ -1,5 +1,6 @@
 package id.smsc.agent
 
+import id.smsc.poc.core.ProxySpec
 import okhttp3.OkHttpClient
 import java.io.File
 import java.time.LocalTime
@@ -24,6 +25,7 @@ Opsi:
   --sims N          jumlah SIM simulasi (default 1)
   --latency-ms MS   jeda simulasi sent/delivered per bagian (default 300)
   --ws-url URL      timpa ws_url dari server (mis. ws://127.0.0.1:8080/ws/device saat uji lokal)
+  --proxy URL       proxy keluar untuk enroll & WebSocket: socks5://user:pass@127.0.0.1:PORT (proxy tsnet) atau http://host:port
 
 Nomor tujuan berakhiran 0000 / 0001 / 0002 / 0003 memicu gagal sinkron / gagal parsial / delivery gagal / macet."""
 
@@ -39,7 +41,9 @@ fun main(args: Array<String>) {
     val stateDir = File(opts["state"] ?: "agent-state")
     val sims = opts["sims"]?.toInt() ?: 1
     val latency = opts["latency-ms"]?.toLong() ?: 300L
-    val http = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).readTimeout(0, TimeUnit.MILLISECONDS).build()
+    val proxy = opts["proxy"]?.let { runCatching { ProxySpec.parse(it) }.getOrElse { e -> System.err.println("--proxy: ${e.message}"); exitProcess(2) } }
+    val http = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).readTimeout(0, TimeUnit.MILLISECONDS).applyProxy(proxy).build()
+    proxy?.let { log("proxy keluar: $it") }
     val credStore = CredentialStore(File(stateDir, "credentials.json"))
 
     opts["enroll"]?.let { link ->

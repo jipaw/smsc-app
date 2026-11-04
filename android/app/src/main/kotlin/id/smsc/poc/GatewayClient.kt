@@ -14,6 +14,7 @@ import id.smsc.poc.core.Heartbeat
 import id.smsc.poc.core.Hello
 import id.smsc.poc.core.HelloAck
 import id.smsc.poc.core.MessageType
+import id.smsc.poc.core.ProxySpec
 import id.smsc.poc.core.SmsCancel
 import id.smsc.poc.core.SmsStatus
 import id.smsc.poc.core.SmsEvent
@@ -31,8 +32,9 @@ import java.util.concurrent.TimeUnit
  * Klien WebSocket protokol v1 (device-ws-protocol.md). Mencatat "ledger" koneksi untuk analisis R3:
  * kapan tersambung/putus, durasi, dan penyebab.
  */
-class GatewayClient(private val ctx: Context, private val url: String, private val token: String) {
-    private val http = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).readTimeout(0, TimeUnit.MILLISECONDS).build()
+class GatewayClient(private val ctx: Context, private val url: String, private val token: String, private val proxy: ProxySpec? = null) {
+    // proxy: SOCKS5 loopback dari tailnet ter-embed (TailnetRuntime) — nama MagicDNS di-resolve oleh node tailnet
+    private val http = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).readTimeout(0, TimeUnit.MILLISECONDS).applyProxy(proxy).build()
     private val exec = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "poc-ws").apply { isDaemon = true } }
     private val backoff = Backoff()
 
@@ -65,7 +67,7 @@ class GatewayClient(private val ctx: Context, private val url: String, private v
     fun start() {
         stopped = false
         PocRuntime.listeners.add(eventListener)
-        ledger("start", url)
+        ledger("start", if (proxy != null) "$url via $proxy" else url)
         exec.execute { connect() }
     }
 

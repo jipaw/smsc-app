@@ -37,6 +37,10 @@ class MainActivity : Activity() {
     private lateinit var etUrl: EditText
     private lateinit var etToken: EditText
     private lateinit var cbWake: CheckBox
+    private lateinit var cbTailnet: CheckBox
+    private lateinit var etTsKey: EditText
+    private lateinit var etTsHost: EditText
+    private lateinit var etTsControl: EditText
     private var simListener: SubscriptionManager.OnSubscriptionsChangedListener? = null
     private var tick = 0
 
@@ -74,7 +78,8 @@ class MainActivity : Activity() {
         override fun run() {
             tick++
             burstText.text = Metrics.summary() + "\nantrean lokal=${PocRuntime.processor.queueDepth()}"
-            connText.text = PocService.client?.summary() ?: "service tidak berjalan"
+            connText.text = (PocService.client?.summary() ?: "service tidak berjalan") +
+                (if (Prefs.tailnetEnabled(this@MainActivity)) "\ntailnet: ${TailnetRuntime.summary}" else "")
             logText.text = PocLog.tail(40).joinToString("\n")
             if (tick % 5 == 0) { refreshChecks(); refreshSims() }
             ui.postDelayed(this, 1000)
@@ -129,7 +134,14 @@ class MainActivity : Activity() {
         etUrl = edit("ws://100.x.y.z:8765/ws/device", Prefs.serverUrl(this))
         etToken = edit("token", Prefs.token(this))
         cbWake = CheckBox(this).apply { text = "Partial wake lock (eksperimen pembanding)"; isChecked = Prefs.wakeLock(this@MainActivity) }
-        listOf(etUrl, etToken, cbWake).forEach { root.addView(it) }
+        cbTailnet = CheckBox(this).apply {
+            text = if (TailnetRuntime.AVAILABLE) "Tailnet ter-embed (tanpa aplikasi Tailscale)" else "Tailnet ter-embed (tidak tersedia di build ini)"
+            isEnabled = TailnetRuntime.AVAILABLE; isChecked = TailnetRuntime.AVAILABLE && Prefs.tailnetEnabled(this@MainActivity)
+        }
+        etTsKey = edit("auth key tskey-auth-… (sekali, login pertama)", "")
+        etTsHost = edit("hostname tailnet (kosong = smsc-<model>)", Prefs.tailnetHostname(this))
+        etTsControl = edit("control server (kosong = Tailscale)", Prefs.tailnetControl(this))
+        listOf(etUrl, etToken, cbWake, cbTailnet, etTsKey, etTsHost, etTsControl).forEach { root.addView(it) }
         root.addView(row(btn("Start service") { startService() }, btn("Stop service") { PocService.stop(this) }))
         connText = body(); root.addView(connText)
 
@@ -194,6 +206,8 @@ class MainActivity : Activity() {
 
     private fun startService() {
         Prefs.setServer(this, etUrl.text.toString().trim(), etToken.text.toString().trim(), cbWake.isChecked)
+        Prefs.setTailnet(this, cbTailnet.isChecked, etTsKey.text.toString().trim(), etTsHost.text.toString().trim(), etTsControl.text.toString().trim())
+        etTsKey.setText("") // jangan biarkan auth key tampil di layar
         PocService.start(this)
     }
 

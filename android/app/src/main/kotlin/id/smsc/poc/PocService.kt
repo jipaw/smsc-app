@@ -18,6 +18,7 @@ import android.os.PowerManager
 class PocService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var netCb: ConnectivityManager.NetworkCallback? = null
+    @Volatile private var tailnetStarting = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -50,10 +51,31 @@ class PocService : Service() {
                     .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "smsc:poc").apply { setReferenceCounted(false); acquire() }
                 PocLog.i("svc", "partial wake lock DIAKTIFKAN (eksperimen)")
             }
-            client = GatewayClient(applicationContext, url, Prefs.token(this)).also { it.start() }
+            if (Prefs.tailnetEnabled(this)) startViaTailnet(url) else client = GatewayClient(applicationContext, url, Prefs.token(this)).also { it.start() }
             registerNetworkCallback()
         }
         return START_STICKY
+    }
+
+    /** Tailnet ter-embed: nyalakan node tsnet (blocking, di thread latar), lalu sambungkan WebSocket lewat proxy SOCKS5-nya. */
+    private fun startViaTailnet(url: String) {
+        if (tailnetStarting) return
+        tailnetStarting = true
+        updateNotification(this, "menyambung ke tailnet...")
+        Thread({
+            try {
+                val host = Prefs.tailnetHostname(this).ifBlank { "smsc-" + Build.MODEL.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-') }
+                val spec = TailnetRuntime.start(applicationContext, host, Prefs.tailnetAuthKey(this), Prefs.tailnetControl(this))
+                Prefs.clearTailnetAuthKey(this) // kunci node sudah tersimpan; auth key tidak diperlukan lagi
+                PocLog.i("tailnet", "tersambung sebagai $host, ${TailnetRuntime.status()}")
+                if (client == null && Prefs.serviceEnabled(this)) client = GatewayClient(applicationContext, url, Prefs.token(this), spec).also { it.start() }
+            } catch (e: Exception) {
+                PocLog.i("tailnet", "gagal menyalakan tailnet ter-embed: ${e.message}")
+                updateNotification(this, "tailnet gagal: ${e.message}")
+            } finally {
+                tailnetStarting = false
+            }
+        }, "tailnet-start").start()
     }
 
     override fun onDestroy() {
@@ -67,6 +89,7 @@ class PocService : Service() {
         netCb?.let { runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } }
         netCb = null
         client?.stop(); client = null
+        TailnetRuntime.stop()
         wakeLock?.let { if (it.isHeld) it.release() }; wakeLock = null
     }
 
