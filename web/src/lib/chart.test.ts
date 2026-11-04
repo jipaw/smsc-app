@@ -3,13 +3,19 @@ import { chartMax, hourSlots, splitFailed } from './chart'
 
 describe('splitFailed', () => {
   it('memisahkan parsial dari gagal tanpa menghitung dua kali', () => {
-    expect(splitFailed({ failed: 5, partial: 2 })).toEqual({ full: 3, partial: 2 })
-    expect(splitFailed({ failed: 5, partial: 0 })).toEqual({ full: 5, partial: 0 })
+    expect(splitFailed({ failed: 5, partial: 2 })).toEqual({ full: 3, partial: 2, allSent: 0 })
+    expect(splitFailed({ failed: 5, partial: 0 })).toEqual({ full: 5, partial: 0, allSent: 0 })
+  })
+  it('semua-terkirim adalah bagian dari parsial: tiga segmen berjumlah = failed', () => {
+    expect(splitFailed({ failed: 6, partial: 3, all_sent: 1 })).toEqual({ full: 3, partial: 2, allSent: 1 })
+    expect(splitFailed({ failed: 6, partial: 3, all_sent: 9 })).toEqual({ full: 3, partial: 0, allSent: 3 }) // dibatasi ≤ parsial
+    const r = splitFailed({ failed: 7, partial: 4, all_sent: 2 })
+    expect(r.full + r.partial + r.allSent).toBe(7)
   })
   it('parsial kosong/tidak ada = 0; parsial melebihi gagal dibatasi; negatif ditolak', () => {
-    expect(splitFailed({ failed: 4 })).toEqual({ full: 4, partial: 0 })
-    expect(splitFailed({ failed: 1, partial: 9 })).toEqual({ full: 0, partial: 1 })
-    expect(splitFailed({ failed: 3, partial: -2 })).toEqual({ full: 3, partial: 0 })
+    expect(splitFailed({ failed: 4 })).toEqual({ full: 4, partial: 0, allSent: 0 })
+    expect(splitFailed({ failed: 1, partial: 9 })).toEqual({ full: 0, partial: 1, allSent: 0 })
+    expect(splitFailed({ failed: 3, partial: -2 })).toEqual({ full: 3, partial: 0, allSent: 0 })
   })
 })
 

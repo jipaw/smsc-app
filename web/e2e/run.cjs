@@ -243,6 +243,10 @@ async function main() {
   check((await page.getByText(/SUDAH sampai utuh/).count()) === 1 && (await page.getByText(/sisanya tidak/).count()) === 0, 'drawer menjelaskan pesan sudah utuh dan tidak menulis "sisanya tidak"')
   check((await page.getByRole('button', { name: 'Retry (kirim ulang lengkap)' }).count()) === 1, 'tombol retry menyebut kirim ulang lengkap')
   await page.keyboard.press('Escape')
+  await page.getByRole('link', { name: 'Overview', exact: true }).click()
+  await page.reload()
+  await page.getByText(/termasuk 1 gagal parsial \(sebagian bagian sudah sampai\) dan 1 gagal tetapi semua bagian terkirim/).waitFor()
+  check(true, 'Overview membedakan gagal parsial dan gagal-tetapi-semua-bagian-terkirim')
   psqlDb(`DELETE FROM messages WHERE to_e164='+628155500001' OR to_e164='+628155500002'`)
 
   // ---- overview + settings ----

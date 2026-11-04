@@ -22,43 +22,59 @@ func TestPartialCountsInOverviewTimeseriesAndCampaign(t *testing.T) {
 	plain2 := craftSending(t, e, admin, dev, "1 second")
 	e.sql(`UPDATE messages SET status='failed', error_code='generic_failure', finished_at=now() WHERE id=$1`, plain2)
 
+	// gagal tetapi SEMUA bagian terkirim (hitungan disegarkan dari HP mencapai total) pada campaign yang sama
+	allSent := craftSending(t, e, admin, dev, "1 second")
+	e.sql(`UPDATE messages SET status='failed', error_code='generic_failure', finished_at=now(), parts=3, partial_sent=3, campaign_id=$2 WHERE id=$1`, allSent, camp.ID)
+
 	var ov struct {
-		Today struct{ Failed, Partial int } `json:"today"`
+		Today struct {
+			Failed, Partial int
+			AllSent         int `json:"all_sent"`
+		} `json:"today"`
 	}
-	if st := admin.do("GET", "/api/v1/stats/overview", nil, &ov); st != 200 || ov.Today.Failed != 3 || ov.Today.Partial != 1 {
+	if st := admin.do("GET", "/api/v1/stats/overview", nil, &ov); st != 200 || ov.Today.Failed != 4 || ov.Today.Partial != 2 || ov.Today.AllSent != 1 {
 		t.Fatalf("overview: %d %+v", st, ov)
 	}
 	var ts struct {
-		Points []struct{ Failed, Partial int } `json:"points"`
+		Points []struct {
+			Failed, Partial int
+			AllSent         int `json:"all_sent"`
+		} `json:"points"`
 	}
 	from, to := time.Now().Add(-2*time.Hour).UTC().Format(time.RFC3339), time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	if st := admin.do("GET", "/api/v1/stats/timeseries?bucket=hour&from="+from+"&to="+to, nil, &ts); st != 200 {
 		t.Fatalf("timeseries: %d", st)
 	}
-	f, p := 0, 0
+	f, p, a := 0, 0, 0
 	for _, pt := range ts.Points {
-		f, p = f+pt.Failed, p+pt.Partial
-		if pt.Partial > pt.Failed {
-			t.Fatalf("partial harus bagian dari failed: %+v", pt)
+		f, p, a = f+pt.Failed, p+pt.Partial, a+pt.AllSent
+		if pt.AllSent > pt.Partial || pt.Partial > pt.Failed {
+			t.Fatalf("all_sent ⊆ partial ⊆ failed: %+v", pt)
 		}
 	}
-	if f != 3 || p != 1 {
-		t.Fatalf("deret waktu failed=%d partial=%d", f, p)
+	if f != 4 || p != 2 || a != 1 {
+		t.Fatalf("deret waktu failed=%d partial=%d all_sent=%d", f, p, a)
 	}
 	var cs struct {
-		Counters struct{ Failed, Partial int } `json:"counters"`
+		Counters struct {
+			Failed, Partial int
+			AllSent         int `json:"all_sent"`
+		} `json:"counters"`
 	}
-	if st := admin.do("GET", "/api/v1/campaigns/"+camp.ID, nil, &cs); st != 200 || cs.Counters.Failed != 2 || cs.Counters.Partial != 1 {
+	if st := admin.do("GET", "/api/v1/campaigns/"+camp.ID, nil, &cs); st != 200 || cs.Counters.Failed != 3 || cs.Counters.Partial != 2 || cs.Counters.AllSent != 1 {
 		t.Fatalf("campaign: %d %+v", st, cs)
 	}
 	var list struct {
 		Items []struct {
 			ID       string
-			Counters struct{ Failed, Partial int }
+			Counters struct {
+				Failed, Partial int
+				AllSent         int `json:"all_sent"`
+			}
 		}
 	}
 	admin.do("GET", "/api/v1/campaigns", nil, &list)
-	if len(list.Items) != 1 || list.Items[0].Counters.Partial != 1 {
+	if len(list.Items) != 1 || list.Items[0].Counters.Partial != 2 || list.Items[0].Counters.AllSent != 1 {
 		t.Fatalf("daftar campaign: %+v", list)
 	}
 	// retry terkonfirmasi menghapus penanda => angka turun
@@ -67,7 +83,7 @@ func TestPartialCountsInOverviewTimeseriesAndCampaign(t *testing.T) {
 	}
 	admin.do("GET", "/api/v1/campaigns/"+camp.ID, nil, &cs)
 	admin.do("GET", "/api/v1/stats/overview", nil, &ov)
-	if cs.Counters.Partial != 0 || cs.Counters.Failed != 1 || ov.Today.Partial != 0 {
+	if cs.Counters.Partial != 1 || cs.Counters.AllSent != 1 || cs.Counters.Failed != 2 || ov.Today.Partial != 1 || ov.Today.AllSent != 1 {
 		t.Fatalf("setelah retry: %+v %+v", cs, ov)
 	}
 }

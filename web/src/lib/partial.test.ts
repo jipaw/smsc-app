@@ -27,3 +27,24 @@ describe('teks pesan parsial', () => {
     expect(partialBadge({ parts: 2 })).toBe('Parsial 0/2')
   })
 })
+
+import { aggregateParts, campaignFailedSuffix, overviewNote } from './partial'
+
+describe('agregat parsial vs semua-terkirim', () => {
+  it('parsial sejati = partial - all_sent; all_sent dibatasi ≤ partial', () => {
+    expect(aggregateParts(5, 2)).toEqual({ strict: 3, allSent: 2 })
+    expect(aggregateParts(2, 9)).toEqual({ strict: 0, allSent: 2 })
+    expect(aggregateParts(undefined, undefined)).toEqual({ strict: 0, allSent: 0 })
+  })
+  it('catatan Overview membedakan keduanya dan kosong bila tidak ada', () => {
+    expect(overviewNote(0, 0)).toBeUndefined()
+    expect(overviewNote(2, 0)).toBe('termasuk 2 gagal parsial (sebagian bagian sudah sampai)')
+    expect(overviewNote(1, 1)).toBe('termasuk 1 gagal tetapi semua bagian terkirim')
+    expect(overviewNote(3, 1)).toBe('termasuk 2 gagal parsial (sebagian bagian sudah sampai) dan 1 gagal tetapi semua bagian terkirim')
+  })
+  it('akhiran legenda campaign', () => {
+    expect(campaignFailedSuffix(0, 0)).toBe('')
+    expect(campaignFailedSuffix(2, 0)).toBe(' (parsial 2)')
+    expect(campaignFailedSuffix(3, 1)).toBe(' (parsial 2, semua bagian terkirim 1)')
+  })
+})

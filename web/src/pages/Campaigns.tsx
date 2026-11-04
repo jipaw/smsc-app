@@ -7,6 +7,7 @@ import { analyze, variables } from '../lib/sms'
 import { canOperate, useMe } from '../lib/session'
 import type { Campaign, CampaignPreview, DispatchPolicy, ImportResult, Page, Point, Sim, Template, Device } from '../lib/types'
 import { bucketSlots, campaignWindow } from '../lib/chart'
+import { campaignFailedSuffix } from '../lib/partial'
 import { SeriesChart } from '../components/SeriesChart'
 import { Confirm, Empty, ErrorBox, errMsg, Field, Loading, useToast } from '../components/ui'
 import { Transactions } from './Transactions'
@@ -39,7 +40,7 @@ export function Progress({ c }: { c: Campaign }) {
       </div>
       <div className="legend muted" style={{ marginTop: 6 }}>
         <span>{done}/{k.total} selesai ({pct(done / total)})</span><span>sampai {k.delivered}</span><span>terkirim {k.sent}</span><span>proses {k.in_flight}</span>
-        <span>antre {k.queued}</span><span>gagal {k.failed}{k.partial > 0 && ` (parsial ${k.partial})`}</span>{k.unknown > 0 && <span>tidak pasti {k.unknown}</span>}{k.expired > 0 && <span>kedaluwarsa {k.expired}</span>}{k.cancelled > 0 && <span>batal {k.cancelled}</span>}
+        <span>antre {k.queued}</span><span>gagal {k.failed}{campaignFailedSuffix(k.partial, k.all_sent)}</span>{k.unknown > 0 && <span>tidak pasti {k.unknown}</span>}{k.expired > 0 && <span>kedaluwarsa {k.expired}</span>}{k.cancelled > 0 && <span>batal {k.cancelled}</span>}
       </div>
     </div>
   )

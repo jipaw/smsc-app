@@ -2027,6 +2027,7 @@ paths:
                       delivered: {type: integer}
                       failed: {type: integer}
                       partial: {type: integer, description: 'Bagian dari `failed`: gagal setelah sebagian bagian SMS terkirim.'}
+                      all_sent: {type: integer, description: 'Bagian dari `partial`: pesan dinyatakan gagal tetapi SEMUA bagiannya dilaporkan terkirim. Parsial sejati = partial - all_sent.'}
                   success_rate_24h: {type: number}
   /stats/timeseries:
     get:
@@ -2056,6 +2057,7 @@ paths:
                         delivered: {type: integer}
                         failed: {type: integer}
                         partial: {type: integer, description: 'Bagian dari `failed` (kegagalan parsial).'}
+                        all_sent: {type: integer, description: 'Bagian dari `partial`: semua bagian ternyata terkirim.'}
 
   /events/stream:
     get:
@@ -2593,7 +2595,7 @@ components:
     CampaignCounters:
       type: object
       description: 'Invarian: total = queued + in_flight + sent + delivered + failed + cancelled + expired + unknown.'
-      required: [total, queued, in_flight, sent, delivered, failed, partial, cancelled, expired, unknown]
+      required: [total, queued, in_flight, sent, delivered, failed, partial, all_sent, cancelled, expired, unknown]
       properties:
         total: {type: integer, description: Jumlah penerima.}
         queued: {type: integer, description: Pesan antre + penerima yang belum dimaterialisasi (kecuali campaign dibatalkan).}
@@ -2602,6 +2604,7 @@ components:
         delivered: {type: integer}
         failed: {type: integer}
         partial: {type: integer, description: 'BAGIAN dari `failed` (bukan tambahan, tidak masuk invarian): gagal setelah sebagian bagian SMS terkirim.'}
+        all_sent: {type: integer, description: 'BAGIAN dari `partial` (bukan tambahan): gagal tetapi semua bagian terkirim. Parsial sejati = partial - all_sent.'}
         cancelled: {type: integer}
         expired: {type: integer}
         unknown: {type: integer}

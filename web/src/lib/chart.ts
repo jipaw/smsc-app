@@ -12,14 +12,14 @@ export function bucketSlots(points: Point[], bucket: Bucket, endMs: number, coun
   const ms = BUCKET_MS[bucket]
   const end = Math.floor(endMs / ms) * ms
   const slots: Point[] = Array.from({ length: count }, (_, i) => ({
-    t: new Date(end - (count - 1 - i) * ms).toISOString(), sent: 0, delivered: 0, failed: 0, partial: 0,
+    t: new Date(end - (count - 1 - i) * ms).toISOString(), sent: 0, delivered: 0, failed: 0, partial: 0, all_sent: 0,
   }))
   const first = end - (count - 1) * ms
   for (const p of points) {
     const i = Math.floor((new Date(p.t).getTime() - first) / ms)
     if (i < 0 || i >= count) continue
     const s = slots[i]
-    s.sent += p.sent; s.delivered += p.delivered; s.failed += p.failed; s.partial = (s.partial ?? 0) + (p.partial ?? 0)
+    s.sent += p.sent; s.delivered += p.delivered; s.failed += p.failed; s.partial = (s.partial ?? 0) + (p.partial ?? 0); s.all_sent = (s.all_sent ?? 0) + (p.all_sent ?? 0)
   }
   return slots
 }
@@ -49,10 +49,14 @@ export function campaignWindow(startMs: number, endMs: number): SeriesWindow {
   return { bucket, count, fromMs: end - (count - 1) * ms, toMs: end + ms, truncated: wanted > count }
 }
 
-/** Gagal parsial adalah BAGIAN dari gagal: kembalikan {gagal penuh, parsial} yang jumlahnya = failed (parsial dibatasi ≤ failed). */
-export function splitFailed(p: Pick<Point, 'failed' | 'partial'>): { full: number; partial: number } {
-  const partial = Math.max(0, Math.min(p.partial ?? 0, p.failed))
-  return { full: p.failed - partial, partial }
+/**
+ * Gagal terbagi tiga yang jumlahnya = failed: gagal penuh, parsial sejati (sebagian bagian terkirim), dan "semua terkirim"
+ * (dinyatakan gagal tetapi semua bagian dilaporkan terkirim). API: partial ⊆ failed dan all_sent ⊆ partial; nilai dibatasi agar konsisten.
+ */
+export function splitFailed(p: Pick<Point, 'failed' | 'partial' | 'all_sent'>): { full: number; partial: number; allSent: number } {
+  const anyPartial = Math.max(0, Math.min(p.partial ?? 0, p.failed))
+  const allSent = Math.max(0, Math.min(p.all_sent ?? 0, anyPartial))
+  return { full: p.failed - anyPartial, partial: anyPartial - allSent, allSent }
 }
 
 /** Tinggi tumpukan terbesar (skala batang): max(sent, delivered) + failed; minimal 1. */

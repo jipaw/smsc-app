@@ -51,11 +51,11 @@ export interface Overview {
   devices: { online: number; degraded: number; offline: number }
   sims_active: number
   queue_depth: number
-  today: { accepted: number; sent: number; delivered: number; failed: number; partial?: number }
+  today: { accepted: number; sent: number; delivered: number; failed: number; partial?: number; all_sent?: number }
   success_rate_24h: number
   paused: boolean
 }
-export interface Point { t: string; sent: number; delivered: number; failed: number; partial?: number }
+export interface Point { t: string; sent: number; delivered: number; failed: number; partial?: number; all_sent?: number }
 export type MessageDetail = Message & { events: MessageEvent[] }
 export interface SendResult {
   messages: Message[]

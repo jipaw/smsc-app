@@ -5,6 +5,7 @@ import { pct, rel, ERROR_LABEL } from '../lib/format'
 import { isAdmin, useMe } from '../lib/session'
 import type { Device, Overview as Ov, Page, Point } from '../lib/types'
 import { hourSlots } from '../lib/chart'
+import { overviewNote } from '../lib/partial'
 import { SeriesChart } from '../components/SeriesChart'
 import { Badge, ErrorBox, errMsg, Loading, useToast, Confirm } from '../components/ui'
 import { useState } from 'react'
@@ -48,7 +49,7 @@ export function Overview() {
         <Stat label="Antrean" value={o.queue_depth} />
         <Stat label="Terkirim hari ini" value={o.today.sent} />
         <Stat label="Sampai hari ini" value={o.today.delivered} tone="ok" />
-        <Stat label="Gagal hari ini" value={o.today.failed} tone={o.today.failed ? 'bad' : undefined} note={o.today.partial ? `termasuk ${o.today.partial} gagal parsial (sebagian bagian sudah sampai)` : undefined} />
+        <Stat label="Gagal hari ini" value={o.today.failed} tone={o.today.failed ? 'bad' : undefined} note={overviewNote(o.today.partial, o.today.all_sent)} />
         <Stat label="Sukses 24 jam" value={pct(o.success_rate_24h)} />
       </div>
       <div className="card"><h2>Pengiriman 24 jam terakhir</h2>{series.data ? <Chart points={series.data.points} /> : <Loading />}</div>

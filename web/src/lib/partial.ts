@@ -32,3 +32,31 @@ export function partialRetryWarning(m: PartialInfo): string {
 export function partialRetryLabel(m: PartialInfo): string {
   return isAllSent(m) ? 'Retry (kirim ulang lengkap)' : 'Retry (bagian ganda)'
 }
+
+/**
+ * Ringkasan agregat (Overview/campaign). API: partial ⊆ failed, all_sent ⊆ partial. Parsial sejati = partial − all_sent.
+ * Mengembalikan potongan kalimat (kosong bila tidak ada).
+ */
+export function aggregateParts(partial: number | undefined, allSent: number | undefined): { strict: number; allSent: number } {
+  const p = Math.max(0, partial ?? 0)
+  const a = Math.max(0, Math.min(allSent ?? 0, p))
+  return { strict: p - a, allSent: a }
+}
+
+/** Catatan di kartu "Gagal hari ini". */
+export function overviewNote(partial: number | undefined, allSent: number | undefined): string | undefined {
+  const { strict, allSent: a } = aggregateParts(partial, allSent)
+  const parts: string[] = []
+  if (strict > 0) parts.push(`${strict} gagal parsial (sebagian bagian sudah sampai)`)
+  if (a > 0) parts.push(`${a} gagal tetapi semua bagian terkirim`)
+  return parts.length ? `termasuk ${parts.join(' dan ')}` : undefined
+}
+
+/** Potongan legenda progres campaign setelah "gagal X". */
+export function campaignFailedSuffix(partial: number | undefined, allSent: number | undefined): string {
+  const { strict, allSent: a } = aggregateParts(partial, allSent)
+  const parts: string[] = []
+  if (strict > 0) parts.push(`parsial ${strict}`)
+  if (a > 0) parts.push(`semua bagian terkirim ${a}`)
+  return parts.length ? ` (${parts.join(', ')})` : ''
+}
