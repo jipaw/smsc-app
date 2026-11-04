@@ -22,7 +22,7 @@ export function Send() {
   const policies = useQuery({ queryKey: ['policies'], queryFn: () => get<{ items: DispatchPolicy[] }>('/dispatch-policies') })
   const sims = useQuery({ queryKey: ['sims'], queryFn: () => get<{ items: Sim[] }>('/sims') })
   const devices = useQuery({ queryKey: ['devices'], queryFn: () => get<{ items: Device[] }>('/devices') })
-  const quota = useQuery({ queryKey: ['quota'], queryFn: () => get<Quota>('/quota'), enabled: canOperate(me) })
+  const quota = useQuery({ queryKey: ['quota'], queryFn: () => get<Quota>('/quota'), enabled: canOperate(me), refetchOnMount: 'always' }) // admin dapat mengubah kuota kapan saja
   const qc = useQueryClient()
 
   const list = useMemo(() => parseRecipients(to), [to])

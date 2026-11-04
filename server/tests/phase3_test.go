@@ -454,8 +454,9 @@ func TestWebhookCampaignAndDeviceEvents(t *testing.T) {
 	for _, h := range rcv.all() {
 		env := h.env(t)
 		if env.Event == "campaign.completed" {
+			// "selesai" = tidak ada lagi pesan queued/assigned/sending; pesan "sent" yang laporan delivery-nya belum tiba sudah terhitung selesai
 			c := env.Data["counters"].(map[string]any)
-			if env.Data["campaign_id"] != cm.ID || env.Data["name"] != "Webhook Camp" || c["delivered"].(float64) != 3 || !h.validSig(w.SigningSecret) {
+			if env.Data["campaign_id"] != cm.ID || env.Data["name"] != "Webhook Camp" || c["delivered"].(float64)+c["sent"].(float64) != 3 || !h.validSig(w.SigningSecret) {
 				t.Fatalf("payload completed: %+v", env.Data)
 			}
 		}

@@ -109,7 +109,7 @@ function QuotaCell({ label, q, path, invalidate }: { label: string; q?: Quota | 
   const [val, setVal] = useState('')
   const save = useMutation({
     mutationFn: () => put<Quota>(path, { daily_quota: mode === 'default' ? null : mode === 'none' ? 0 : Number(val) }),
-    onSuccess: () => { setOpen(false); toast('Kuota disimpan'); qc.invalidateQueries({ queryKey: [invalidate] }) },
+    onSuccess: () => { setOpen(false); toast('Kuota disimpan'); qc.invalidateQueries({ queryKey: [invalidate] }); qc.invalidateQueries({ queryKey: ['quota'] }) },
   })
   const begin = () => {
     const d = q?.daily_quota
