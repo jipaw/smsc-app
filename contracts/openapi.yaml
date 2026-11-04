@@ -1100,6 +1100,64 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/ValidationError'}
 
+  /saved-views:
+    get:
+      tags: [Messages]
+      summary: Tampilan (filter) transaksi tersimpan milik pengguna yang login
+      description: Hanya sesi dashboard; API key tidak memiliki tampilan (403).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/SavedView'}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [Messages]
+      summary: Simpan tampilan baru (maksimal 20 per pengguna; nama unik tanpa membedakan huruf besar/kecil)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SavedViewInput'}
+      responses:
+        '201':
+          description: Dibuat
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SavedView'}
+        '409': {description: 'Nama sudah dipakai (`saved_view.duplicate`) / batas 20 tampilan (`saved_view.limit`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {$ref: '#/components/responses/ValidationError'}
+  /saved-views/{viewId}:
+    parameters:
+      - {name: viewId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      tags: [Messages]
+      summary: Ganti nama dan/atau filter tampilan milik sendiri (milik pengguna lain = 404)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SavedViewInput'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SavedView'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: 'Nama sudah dipakai (`saved_view.duplicate`) / batas 20 tampilan (`saved_view.limit`)', content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+        '422': {$ref: '#/components/responses/ValidationError'}
+    delete:
+      tags: [Messages]
+      summary: Hapus tampilan milik sendiri
+      responses:
+        '204': {description: Dihapus}
+        '404': {$ref: '#/components/responses/NotFound'}
   /templates:
     get:
       tags: [Templates]
@@ -2522,6 +2580,31 @@ components:
         finished_at: {type: [string, 'null'], format: date-time}
         partial: {type: boolean, description: 'true bila pesan gagal setelah sebagian bagian SMS (multi-bagian) sudah terkirim. Retry membuat bagian itu ganda di penerima, sehingga wajib `confirm_duplicate_risk`.'}
         parts_sent: {type: [integer, 'null'], description: 'Jumlah bagian yang sudah terkirim saat gagal parsial; null bila bukan kegagalan parsial.'}
+    TxFilter:
+      type: object
+      description: Filter daftar transaksi di dashboard (kunci sama dengan parameter URL halaman Transaksi). Divalidasi ketat.
+      properties:
+        status: {type: array, items: {$ref: '#/components/schemas/MessageStatus'}}
+        source: {type: string, enum: ['', dashboard, api, campaign]}
+        to: {type: string, pattern: '^[+0-9]{0,20}$'}
+        since: {type: string, description: 'Waktu lokal browser, format YYYY-MM-DDTHH:MM atau kosong.'}
+        partial: {type: string, enum: ['', partial, allsent], description: 'partial = parsial sejati; allsent = gagal tetapi semua bagian terkirim.'}
+        campaign: {type: string, description: 'UUID campaign atau kosong.'}
+    SavedViewInput:
+      type: object
+      required: [name, filter]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 60}
+        filter: {$ref: '#/components/schemas/TxFilter'}
+    SavedView:
+      type: object
+      required: [id, name, filter, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        filter: {$ref: '#/components/schemas/TxFilter'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
     MessageEvent:
       type: object
       required: [id, attempt, type, at, actor]

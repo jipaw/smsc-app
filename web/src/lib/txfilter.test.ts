@@ -40,3 +40,19 @@ describe('toSearch / filterLink', () => {
     expect(filterLink({ partial: 'partial', campaign: CAMP })).toBe(`/transactions?parsial=partial&campaign=${CAMP}`)
   })
 })
+
+import { fromView, sameFilter, toView } from './txfilter'
+
+describe('tampilan tersimpan', () => {
+  it('toView/fromView bolak-balik', () => {
+    const f = { ...EMPTY_FILTER, status: ['failed'], partial: 'allsent' as const, to: '+62', campaign: CAMP }
+    expect(fromView(toView(f))).toEqual(f)
+  })
+  it('fromView membuang nilai yang tak lagi valid dengan aturan URL', () => {
+    expect(fromView({ status: ['failed', 'aneh'], source: 'ftp', partial: 'x', campaign: 'bukan' })).toEqual({ ...EMPTY_FILTER, status: ['failed'] })
+  })
+  it('sameFilter tidak peka urutan status', () => {
+    expect(sameFilter({ ...EMPTY_FILTER, status: ['a', 'b'] as string[] }, { ...EMPTY_FILTER, status: ['b', 'a'] })).toBe(true)
+    expect(sameFilter(EMPTY_FILTER, { ...EMPTY_FILTER, to: '+6' })).toBe(false)
+  })
+})

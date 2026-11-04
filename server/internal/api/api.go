@@ -160,6 +160,11 @@ func (a *API) Router() http.Handler {
 			r.With(operator("")).Post("/messages/{messageId}/cancel", a.cancelMessage)
 			r.With(operator("")).Post("/messages/{messageId}/retry", a.retryMessage)
 
+			r.With(viewer).Get("/saved-views", a.listSavedViews)
+			r.With(viewer).Post("/saved-views", a.createSavedView)
+			r.With(viewer).Put("/saved-views/{viewId}", a.updateSavedView)
+			r.With(viewer).Delete("/saved-views/{viewId}", a.deleteSavedView)
+
 			r.With(viewer).Get("/templates", a.listTemplates)
 			r.With(operator("")).Post("/templates", a.saveTemplate)
 			r.With(viewer).Get("/templates/{templateId}", a.getTemplate)

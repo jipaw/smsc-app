@@ -39,3 +39,27 @@ export function filterLink(patch: Partial<TxFilter>): string {
   const s = toSearch({ ...EMPTY_FILTER, ...patch }).toString()
   return '/transactions' + (s ? `?${s}` : '')
 }
+
+/** Bentuk filter di API tampilan tersimpan (kunci sama; nilai kosong = ""). */
+export interface ViewFilterDTO { status?: string[]; source?: string; to?: string; since?: string; partial?: string; campaign?: string }
+
+export function toView(f: TxFilter): Required<ViewFilterDTO> {
+  return { status: f.status, source: f.source, to: f.to, since: f.since, partial: f.partial, campaign: f.campaign }
+}
+
+/** Tampilan dari server → filter dashboard; lewat parseFilter agar nilai yang tak lagi valid dibuang dengan aturan yang sama dengan URL. */
+export function fromView(v: ViewFilterDTO): TxFilter {
+  const sp = new URLSearchParams()
+  if (v.status?.length) sp.set('status', v.status.join(','))
+  if (v.source) sp.set('source', v.source)
+  if (v.to) sp.set('to', v.to)
+  if (v.since) sp.set('since', v.since)
+  if (v.partial) sp.set('parsial', v.partial)
+  if (v.campaign) sp.set('campaign', v.campaign)
+  return parseFilter(sp)
+}
+
+/** Dua filter sama (urutan status tidak berpengaruh). */
+export function sameFilter(a: TxFilter, b: TxFilter): boolean {
+  return [...a.status].sort().join() === [...b.status].sort().join() && a.source === b.source && a.to === b.to && a.since === b.since && a.partial === b.partial && a.campaign === b.campaign
+}

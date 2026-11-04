@@ -1860,3 +1860,79 @@ func (a *API) oidcUnlink(w http.ResponseWriter, r *http.Request) {
 func (a *API) getSSO(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, a.Svc.SSOConfig(r.Context(), r.URL.Query().Get("probe") == "1"))
 }
+
+// ---------- tampilan transaksi tersimpan (fase 38; hanya sesi pengguna) ----------
+
+type savedViewIn struct {
+	Name   string          `json:"name"`
+	Filter core.ViewFilter `json:"filter"`
+}
+
+func (a *API) listSavedViews(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	items, err := a.Svc.ListSavedViews(r.Context(), p.user.ID)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *API) createSavedView(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	var in savedViewIn
+	if !a.decode(w, r, &in) {
+		return
+	}
+	v, err := a.Svc.CreateSavedView(r.Context(), p.user.ID, in.Name, in.Filter)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusCreated, v)
+}
+
+func (a *API) updateSavedView(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	id, perr := pathUUID(r, "viewId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	var in savedViewIn
+	if !a.decode(w, r, &in) {
+		return
+	}
+	v, err := a.Svc.UpdateSavedView(r.Context(), p.user.ID, id, in.Name, in.Filter)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, v)
+}
+
+func (a *API) deleteSavedView(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	id, perr := pathUUID(r, "viewId")
+	if perr != nil {
+		a.writeProblem(w, r, perr)
+		return
+	}
+	if err := a.Svc.DeleteSavedView(r.Context(), p.user.ID, id); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

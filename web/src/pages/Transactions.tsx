@@ -8,6 +8,7 @@ import { STATUSES, SOURCES, parseFilter, toSearch, EMPTY_FILTER, type TxFilter }
 import { partialParams, partialBadge, partialExplain, partialRetryLabel, partialRetryWarning } from '../lib/partial'
 import type { Message, MessageDetail, Page } from '../lib/types'
 import { Badge, Empty, ErrorBox, errMsg, Loading, Modal, useToast } from '../components/ui'
+import { SavedViews } from '../components/SavedViews'
 
 
 export function Transactions({ campaignId }: { campaignId?: string } = {}) {
@@ -61,6 +62,7 @@ export function Transactions({ campaignId }: { campaignId?: string } = {}) {
       <div className="row spread">{campaignId ? <h2>Pesan campaign</h2> : <h1>Transaksi</h1>}{op && <a className="btn" href={exportUrl} download>Ekspor CSV</a>}</div>
       <div className="card stack">
         {!campaignId && f.campaign && <div className="row" role="status"><span className="badge info">Campaign {f.campaign.slice(0, 8)}…</span><Link to={`/campaigns/${f.campaign}`}>Buka campaign</Link><button className="small" onClick={() => setF({ campaign: '' })}>Hapus filter campaign</button></div>}
+        {!campaignId && <SavedViews filter={f} apply={(nf) => setSp(toSearch(nf, sp), { replace: true })} />}
         <div className="row" role="group" aria-label="Filter status">{STATUSES.map((s) => (
           <label key={s} className="row" style={{ gap: 4 }}><input type="checkbox" checked={status.includes(s)} onChange={(e) => setF({ status: e.target.checked ? [...status, s] : status.filter((x) => x !== s) })} /><Badge status={s} /></label>))}</div>
         <div className="row">

@@ -491,6 +491,16 @@ CREATE UNLOGGED TABLE cmd_refs (
 );
 CREATE INDEX cmd_refs_created_idx ON cmd_refs (created_at);
 
+CREATE TABLE saved_views (
+  id         uuid PRIMARY KEY,
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 60),
+  filter     jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX saved_views_user_name_uq ON saved_views (user_id, lower(name));
+
 -- Seed: policy default sesuai docs/03 §4
 INSERT INTO dispatch_policies (id, name, is_default, min_delay_ms, max_delay_ms, burst_size, burst_pause_ms,
   max_inflight_per_sim, rate_per_minute, rate_per_hour, rate_per_day, send_window, max_attempts,
