@@ -88,6 +88,39 @@ func (s *Service) RecoverAssigned(ctx context.Context, since time.Time, skip map
 	return total
 }
 
+// ExtendSendingGrace: waktu sent_timeout pesan 'sending' tidak boleh terpotong oleh jeda tanpa leader. Pesan yang batasnya
+// (assigned_at + sent_timeout + grace) jatuh setelah `since` (leader terakhir terlihat) diberi tambahan sebesar jeda, maksimal
+// satu sent_timeout (jeda sangat panjang berarti seluruh cluster mati; selebihnya ditangani rekonsiliasi hello device).
+// Tanpa ini reaper di leader baru langsung menandai unknown, atau (retry_on_unknown) mengantre ulang lalu mengirim ganda.
+func (s *Service) ExtendSendingGrace(ctx context.Context, since time.Time) int {
+	if since.IsZero() {
+		return 0
+	}
+	eff, err := s.Effective(ctx, s.Pool, nil, nil, nil)
+	if err != nil {
+		return 0
+	}
+	gap := time.Since(since)
+	if max := time.Duration(eff.SentTimeoutMs) * time.Millisecond; gap > max {
+		gap = max
+	}
+	if gap <= 0 {
+		return 0
+	}
+	tag, err := s.Pool.Exec(ctx, `UPDATE messages SET sent_grace_ms = sent_grace_ms + $1::int
+		WHERE status='sending' AND assigned_at + (($2::int + sent_grace_ms) * interval '1 millisecond') > $3`, int(gap.Milliseconds()), eff.SentTimeoutMs, since)
+	if err != nil {
+		s.Log.Error("recover: perpanjang sent_timeout", "err", err)
+		return 0
+	}
+	n := int(tag.RowsAffected())
+	if n > 0 {
+		s.M.SendingGrace.Add(float64(n))
+		s.Log.Info("pengambilalihan leader: batas sent_timeout diperpanjang", "jumlah", n, "tambahan_ms", gap.Milliseconds())
+	}
+	return n
+}
+
 // LeaderWorkers: dipanggil begitu menjadi leader. Memulihkan pesan assigned lebih dulu (pass kedua setelah cache sesi
 // instance lain terisi), baru menjalankan semua worker leader. Semua berhenti bersama ctx.
 func (s *Service) LeaderWorkers(ctx context.Context) {
@@ -95,6 +128,7 @@ func (s *Service) LeaderWorkers(ctx context.Context) {
 		since := s.prevLeaderSeen()
 		skip := map[uuid.UUID]bool{}
 		rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		s.ExtendSendingGrace(rctx, since)
 		s.RecoverAssigned(rctx, since, skip)
 		cancel()
 		if ctx.Err() != nil {

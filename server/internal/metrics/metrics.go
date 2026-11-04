@@ -26,6 +26,7 @@ type Metrics struct {
 	Transitions     *prometheus.CounterVec
 	LeaseExpired    prometheus.Counter
 	LeaseRecovered  prometheus.Counter
+	SendingGrace    prometheus.Counter
 	EventIngest     *prometheus.CounterVec
 
 	WSConnections prometheus.Gauge
@@ -66,6 +67,7 @@ func New(pool *pgxpool.Pool) *Metrics {
 	m.Transitions = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_message_transitions_total", Help: "Transisi status pesan (dari -> ke)."}, []string{"from", "to"})
 	m.LeaseExpired = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_lease_expired_total", Help: "Lease pesan yang kedaluwarsa karena HP tidak mengonfirmasi (ack_timeout)."})
 	m.LeaseRecovered = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_lease_recovered_total", Help: "Pesan assigned yang dipulihkan (lease diperbarui + sms.send dikirim ulang) saat leader baru mengambil alih."})
+	m.SendingGrace = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_sending_grace_total", Help: "Pesan sending yang batas sent_timeout-nya diperpanjang karena jeda tanpa leader."})
 	m.EventIngest = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "smsc_event_ingest_total", Help: "Event status SMS dari HP yang diterima menurut state."}, []string{"state"})
 	m.WSConnections = prometheus.NewGauge(prometheus.GaugeOpts{Name: "smsc_ws_connections", Help: "Koneksi WebSocket device aktif."})
 	m.WSConnects = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_ws_connects_total", Help: "Total sesi WebSocket device yang berhasil dibuka (lonjakan = flapping)."})
@@ -97,7 +99,7 @@ func New(pool *pgxpool.Pool) *Metrics {
 	}
 	f(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "smsc_build_info", Help: "Info build (nilai selalu 1); label version berubah saat deploy.", ConstLabels: prometheus.Labels{"version": buildinfo.Version, "revision": buildinfo.Revision(), "go_version": runtime.Version()}}, func() float64 { return 1 }))
 	m.ScrapeErrors = prometheus.NewCounter(prometheus.CounterOpts{Name: "smsc_scrape_errors_total", Help: "Kegagalan membaca metrik berbasis database saat scrape."})
-	for _, c := range []prometheus.Collector{m.HTTPRequests, m.HTTPDuration, m.MessagesCreated, m.Transitions, m.LeaseExpired, m.LeaseRecovered, m.EventIngest, m.WSConnections, m.WSConnects, m.WSMessages,
+	for _, c := range []prometheus.Collector{m.HTTPRequests, m.HTTPDuration, m.MessagesCreated, m.Transitions, m.LeaseExpired, m.LeaseRecovered, m.SendingGrace, m.EventIngest, m.WSConnections, m.WSConnects, m.WSMessages,
 		m.DispatchAssignments, m.DispatchWait, m.CampaignMaterialized, m.WebhookDeliveries, m.EmailResults, m.WebhookDuration, m.RetentionRuns, m.RetentionRows, m.SCIMReconcileRuns, m.SCIMReconcileChanged, m.Leader, m.LeaderChanges, m.HubRelay, m.HubRemoteSessions, m.ScrapeErrors} {
 		f(c)
 	}

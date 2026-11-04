@@ -18,6 +18,7 @@ Spesifikasi: `docs/spec/04`, kontrak: `contracts/`.
 | **Campaign (fase 2)**: draft, impor penerima JSON/CSV, preview + estimasi, start/jadwal/jeda/lanjut/batal, materializer dengan backpressure, auto-pause, `no_capacity`, deteksi selesai | |
 | **Fase 13**: SCIM `Group` → peran (`SCIM_ADMIN_GROUPS`/`SCIM_OPERATOR_GROUPS`/`SCIM_VIEWER_GROUPS`), peran efektif = tertinggi(roles, grup), rekonsiliasi saat start | |
 | **Fase 14–15**: rekonsiliasi grup SCIM berkala (`SCIM_RECONCILE_INTERVAL`); status run terakhir tersimpan di database (`settings.scim_reconcile_last`) dan tampil di Pengaturan → SCIM | |
+| **Fase 22**: grace `sent_timeout` untuk pesan `sending` saat leader berganti (`messages.sent_grace_ms`, `smsc_sending_grace_total`) | |
 | **Fase 21**: pemulihan pesan `assigned` saat leader berganti (lease diperbarui + kirim ulang, `settings.leader_seen`, `smsc_lease_recovered_total`) | |
 | **Fase 20**: WS Hub multi-instance (`device_sessions`, `hub_commands`, `cmd_refs`; relay perintah/Request/close, event SSE, dan wake lewat LISTEN/NOTIFY + poll cadangan; `HUB_TICK`) | |
 | **Fase 19**: pemantauan lock leader + pemilihan ulang/ambil-alih standby (`LEADER_TICK`), metrik `smsc_leader_changes_total`, 4 alert leader | |

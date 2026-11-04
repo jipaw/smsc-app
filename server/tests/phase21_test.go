@@ -95,8 +95,8 @@ func TestTakeoverRecoversLeaseExpiredDuringGapOnly(t *testing.T) {
 // device offline: tidak disentuh (reaper yang menangani ack_timeout).
 func TestTakeoverSkipsOfflineDevice(t *testing.T) {
 	e, admin, dev, s := newTakeoverEnv(t)
-	_ = e.svc.SetPaused(context.Background(), false, "tes")
 	id := craftAssigned(t, e, admin, dev, "5 seconds")
+	_ = e.svc.SetPaused(context.Background(), false, "tes")
 	s.cancel()
 	waitFor(t, 5*time.Second, "device offline", func() bool { return !e.hub.Connected(dev) })
 	if n := e.svc.RecoverAssigned(context.Background(), time.Time{}, map[uuid.UUID]bool{}); n != 0 {
@@ -110,9 +110,9 @@ func TestTakeoverSkipsOfflineDevice(t *testing.T) {
 // LeaderWorkers pada instance lain (tanpa sesi lokal): memulihkan lewat relay hub, lalu worker jalan; leader_seen dicatat RunLeader.
 func TestLeaderWorkersRecoverThroughOtherInstance(t *testing.T) {
 	e, admin, dev, s := newTakeoverEnv(t)
-	_ = e.svc.SetPaused(context.Background(), false, "tes")
 	e.sql(`INSERT INTO settings(key,value) VALUES ('leader_seen', to_jsonb(now() - interval '20 seconds')) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`)
 	id := craftAssigned(t, e, admin, dev, "-5 seconds") // habis selama jeda
+	_ = e.svc.SetPaused(context.Background(), false, "tes")
 	b := e.peer()
 	waitFor(t, 5*time.Second, "B melihat sesi di A", func() bool { return b.hub.Connected(dev) })
 	ctx, cancel := context.WithCancel(context.Background())
@@ -129,4 +129,113 @@ func TestLeaderWorkersRecoverThroughOtherInstance(t *testing.T) {
 		t.Fatal("leader_seen harus diperbarui oleh leader")
 	}
 	waitFor(t, 5*time.Second, "metrik pemulihan di B", func() bool { return gauge(t, b, "smsc_lease_recovered_total", nil) == 1 })
+}
+
+// ---------- fase 22: pesan 'sending' saat leader berganti ----------
+
+// craftSending membuat pesan 'sending' yang dikirim `age` lalu (sent_timeout uji = 3 dtk).
+func craftSending(t *testing.T, e *env, admin *client, dev uuid.UUID, age string) string {
+	t.Helper()
+	m := admin.send(num, "sending "+uuid.NewString()[:6])[0]
+	e.sql(`UPDATE messages SET status='sending', sim_id=(SELECT id FROM sims WHERE device_id=$2 LIMIT 1), device_id=$2, attempt=1,
+		assigned_at=now() - $3::interval, lease_expires_at=NULL WHERE id=$1`, m.ID, dev, age)
+	return m.ID
+}
+
+func graceOf(e *env, id string) int {
+	var g int
+	_ = e.pool.QueryRow(context.Background(), `SELECT sent_grace_ms FROM messages WHERE id=$1`, id).Scan(&g)
+	return g
+}
+
+// batas sent_timeout yang jatuh di jeda tanpa leader diperpanjang; yang sudah lewat sebelum leader terakhir terlihat tidak.
+func TestTakeoverExtendsSendingDeadlineAcrossGap(t *testing.T) {
+	e, admin, dev, _ := newTakeoverEnv(t)
+	ctx := context.Background()
+	inGap := craftSending(t, e, admin, dev, "4 seconds")   // batas (3 dtk) lewat 1 dtk lalu: setelah leader terakhir terlihat
+	before := craftSending(t, e, admin, dev, "20 seconds") // batas lewat 17 dtk lalu: sebelum leader terakhir terlihat
+	fresh := craftSending(t, e, admin, dev, "1 second")    // batas masih 2 dtk lagi
+	since := time.Now().Add(-5 * time.Second)
+	if n := e.svc.ExtendSendingGrace(ctx, since); n != 2 {
+		t.Fatalf("dua pesan harus diperpanjang (inGap, fresh): %d", n)
+	}
+	if g := graceOf(e, inGap); g < 2900 || g > 3000 { // jeda 5 dtk dibatasi satu sent_timeout (3 dtk)
+		t.Fatalf("grace inGap: %d", g)
+	}
+	if graceOf(e, before) != 0 {
+		t.Fatal("pesan yang batasnya lewat sebelum jeda tidak boleh diperpanjang")
+	}
+	if graceOf(e, fresh) == 0 {
+		t.Fatal("pesan yang batasnya masih di depan juga mengalami jeda")
+	}
+	e.svc.ReapOnceForTest(ctx)
+	if status(e, inGap) != "sending" || status(e, fresh) != "sending" {
+		t.Fatalf("reaper tidak boleh menandai yang diperpanjang: %s %s", status(e, inGap), status(e, fresh))
+	}
+	if status(e, before) != "unknown" {
+		t.Fatalf("yang tak diperpanjang tetap unknown: %s", status(e, before))
+	}
+	// kumulatif untuk pengambilalihan berikutnya
+	e.svc.ExtendSendingGrace(ctx, time.Now().Add(-1*time.Second))
+	if g := graceOf(e, inGap); g < 3900 {
+		t.Fatalf("grace harus kumulatif: %d", g)
+	}
+	if v := gauge(t, e, "smsc_sending_grace_total", nil); v < 3 {
+		t.Fatalf("metrik: %v", v)
+	}
+	// tanpa info leader sebelumnya tidak ada perpanjangan
+	if n := e.svc.ExtendSendingGrace(ctx, time.Time{}); n != 0 {
+		t.Fatalf("since nol: %d", n)
+	}
+}
+
+// dengan retry_on_unknown, tanpa perpanjangan reaper mengantre ulang pesan yang mungkin sudah terkirim (kirim ganda).
+func TestTakeoverGraceAvoidsDuplicateRetryOnUnknown(t *testing.T) {
+	e, admin, dev, _ := newTakeoverEnv(t)
+	ctx := context.Background()
+	e.sql(`UPDATE dispatch_policies SET retry_on_unknown=true WHERE is_default`)
+	protected := craftSending(t, e, admin, dev, "4 seconds")
+	unprotected := craftSending(t, e, admin, dev, "4 seconds")
+	e.sql(`UPDATE messages SET sent_grace_ms=0 WHERE id=$1`, unprotected)
+	// hanya `protected` yang melewati jalur pengambilalihan
+	e.sql(`UPDATE messages SET sent_grace_ms=3000 WHERE id=$1`, protected)
+	e.svc.ReapOnceForTest(ctx)
+	if status(e, protected) != "sending" {
+		t.Fatalf("yang diperpanjang harus tetap sending: %s", status(e, protected))
+	}
+	if st := status(e, unprotected); st != "queued" {
+		t.Fatalf("kontrol: tanpa perpanjangan reaper mengantre ulang: %s", st)
+	}
+}
+
+// penugasan baru menghapus grace lama (grace hanya untuk satu percobaan kirim).
+func TestAssignmentResetsSendingGrace(t *testing.T) {
+	e, admin, dev, s := newTakeoverEnv(t)
+	s.OnSend = func(*Sim, proto.Envelope, proto.SmsSend) {}
+	m := admin.send(num, "reset grace")[0]
+	e.sql(`UPDATE messages SET sent_grace_ms=5000 WHERE id=$1`, m.ID)
+	_ = e.svc.SetPaused(context.Background(), false, "tes")
+	admin.waitStatus(m.ID, "assigned", 10*time.Second)
+	if g := graceOf(e, m.ID); g != 0 {
+		t.Fatalf("grace harus direset saat penugasan: %d", g)
+	}
+	_ = dev
+}
+
+// LeaderWorkers memperpanjang batas sending sebelum reaper leader baru berjalan.
+func TestLeaderWorkersExtendSendingBeforeReaper(t *testing.T) {
+	e, admin, dev, _ := newTakeoverEnv(t)
+	e.sql(`INSERT INTO settings(key,value) VALUES ('leader_seen', to_jsonb(now() - interval '4 seconds')) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`)
+	id := craftSending(t, e, admin, dev, "4 seconds")
+	b := e.peer()
+	b.svc.Cfg.ReaperInterval = 100 * time.Millisecond // reaper di B benar-benar berjalan
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.svc.RunLeader(ctx, 50*time.Millisecond, b.svc.LeaderWorkers); close(done) }()
+	defer func() { cancel(); <-done }()
+	waitFor(t, 5*time.Second, "grace terpasang", func() bool { return graceOf(e, id) > 0 })
+	time.Sleep(600 * time.Millisecond) // beri reaper B beberapa putaran
+	if status(e, id) != "sending" {
+		t.Fatalf("reaper leader baru tidak boleh langsung menandai: %s", status(e, id))
+	}
 }
