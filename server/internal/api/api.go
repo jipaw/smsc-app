@@ -126,6 +126,8 @@ func (a *API) Router() http.Handler {
 			r.Get("/auth/me", a.me)
 			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/password", a.changePassword)
 			r.Get("/auth/2fa", a.mfaStatus)
+			r.Get("/auth/preferences", a.getPrefs)
+			r.Put("/auth/preferences", a.putPrefs)
 			r.With(a.limit(a.acctLimit, userKey)).Post("/auth/oidc/link", a.oidcLinkBegin)
 			r.Delete("/auth/oidc/link", a.oidcUnlink)
 			r.Get("/auth/webauthn", a.webauthnList)

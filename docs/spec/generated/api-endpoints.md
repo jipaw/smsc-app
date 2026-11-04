@@ -1,5 +1,5 @@
 <!-- DIHASILKAN oleh contracts/tools/gen_api_ref.py dari openapi.yaml. Jangan edit manual. -->
-# Daftar endpoint (119 operasi)
+# Daftar endpoint (121 operasi)
 
 Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `deviceToken` = aplikasi Android, `publik` = tanpa auth.
 
@@ -30,6 +30,8 @@ Auth: `sessionCookie` = sesi dashboard, `apiKey` = API key sistem eksternal, `de
 | `POST` | `/auth/2fa/recovery-codes` | Terbitkan ulang kode pemulihan (kode lama hangus) | apiKey/sessionCookie | 200,401,409,429 |
 | `POST` | `/auth/logout` | Logout | apiKey/sessionCookie | 204 |
 | `GET` | `/auth/me` | Profil + peran pengguna saat ini | apiKey/sessionCookie | 200 |
+| `GET` | `/auth/preferences` | Preferensi pengguna yang login | apiKey/sessionCookie | 200,403 |
+| `PUT` | `/auth/preferences` | Ubah preferensi (mis. matikan notifikasi email) | apiKey/sessionCookie | 200,422 |
 | `POST` | `/invitations/lookup` | Periksa token undangan (halaman undangan, publik) | publik | 200,404,429 |
 | `POST` | `/invitations/accept` | Terima undangan dan buat akun (publik) | publik | 201,404,409,422,429 |
 

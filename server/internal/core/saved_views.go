@@ -255,9 +255,11 @@ func (s *Service) DeleteSavedView(ctx context.Context, user uuid.UUID, role stri
 		if err == nil {
 			s.Audit(ctx, "user:"+user.String(), "saved_view.moderate_delete", "saved_view", id.String(), map[string]any{"owner": owner, "name": name})
 			// pemilik diberi tahu (bukan diam-diam): siapa (bagian lokal email admin) dan nama tampilan
-			if e := s.notifyUser(ctx, s.Pool, owner, "saved_view.moderated", map[string]any{"view_id": id.String(), "name": name, "by": s.userLocal(ctx, user)}); e == nil {
+			by := s.userLocal(ctx, user)
+			if e := s.notifyUser(ctx, s.Pool, owner, "saved_view.moderated", map[string]any{"view_id": id.String(), "name": name, "by": by}); e == nil {
 				s.signalNotifications()
 			}
+			s.emailModeration(ctx, owner, user, name, by)
 			return nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {

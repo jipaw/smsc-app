@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -91,4 +92,65 @@ func (s *Service) userLocal(ctx context.Context, id uuid.UUID) string {
 		return ""
 	}
 	return l
+}
+
+// ---------- preferensi & email (fase 41) ----------
+
+type UserPrefs struct {
+	EmailNotifications bool `json:"email_notifications"`
+	EmailAvailable     bool `json:"email_available"`
+}
+
+func (s *Service) GetPrefs(ctx context.Context, user uuid.UUID) (UserPrefs, error) {
+	p := UserPrefs{EmailNotifications: true, EmailAvailable: s.EmailEnabled()}
+	err := s.Pool.QueryRow(ctx, `SELECT email_notifications FROM user_prefs WHERE user_id=$1`, user).Scan(&p.EmailNotifications)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return p, nil
+	}
+	return p, err
+}
+
+func (s *Service) SetPrefs(ctx context.Context, user uuid.UUID, emailNotifications bool) (UserPrefs, error) {
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO user_prefs(user_id, email_notifications) VALUES ($1,$2)
+		ON CONFLICT (user_id) DO UPDATE SET email_notifications=EXCLUDED.email_notifications, updated_at=now()`, user, emailNotifications); err != nil {
+		return UserPrefs{}, err
+	}
+	return s.GetPrefs(ctx, user)
+}
+
+func moderationEmail(name, by string) (subject, body string) {
+	subject = "Tampilan transaksi Anda dihapus oleh admin"
+	body = fmt.Sprintf(`Halo,
+
+Tampilan transaksi yang Anda bagikan ke tim, “%s”, dihapus oleh admin %s.
+
+Anda dapat membuatnya lagi di halaman Transaksi. Bila tampilan itu dianggap terlalu luas atau tidak sesuai,
+hubungi admin untuk penjelasan.
+
+Anda menerima email ini karena notifikasi email aktif di akun Anda. Untuk mematikannya, buka Akun > Preferensi di dashboard.
+`, name, by)
+	return
+}
+
+// emailModeration mengantre email ke pemilik tampilan yang dimoderasi. Tidak dikirim bila SMTP belum diatur, pengguna dinonaktifkan atau
+// mematikan notifikasi email, atau sudah ada email sejenis ke alamat itu dalam 10 menit (menahan banjir bila admin menghapus banyak sekaligus;
+// notifikasi dalam aplikasi tetap dibuat untuk setiap penghapusan). Kegagalan hanya dicatat: email adalah pelengkap, bukan syarat moderasi.
+func (s *Service) emailModeration(ctx context.Context, owner, admin uuid.UUID, name, by string) {
+	if !s.EmailEnabled() {
+		return
+	}
+	subject, body := moderationEmail(name, by)
+	enc, err := s.seal(purposeEmail, body)
+	if err != nil {
+		s.Log.Warn("email moderasi: segel gagal", "err", err)
+		return
+	}
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO email_outbox(id, kind, to_email, subject, body, created_by)
+		SELECT $2, 'saved_view_moderated', u.email, $3, $4, $5 FROM users u
+		WHERE u.id=$1 AND NOT u.disabled
+		  AND COALESCE((SELECT p.email_notifications FROM user_prefs p WHERE p.user_id=u.id), true)
+		  AND NOT EXISTS (SELECT 1 FROM email_outbox o WHERE o.kind='saved_view_moderated' AND lower(o.to_email)=lower(u.email) AND o.created_at > now() - interval '10 minutes')`,
+		owner, newID(), subject, enc, admin); err != nil {
+		s.Log.Warn("email moderasi: antre gagal", "err", err)
+	}
 }

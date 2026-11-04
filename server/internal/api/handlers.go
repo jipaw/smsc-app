@@ -1982,3 +1982,41 @@ func (a *API) readAllNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ---------- preferensi pengguna (fase 41; hanya sesi pengguna) ----------
+
+func (a *API) getPrefs(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	pr, err := a.Svc.GetPrefs(r.Context(), p.user.ID)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, pr)
+}
+
+func (a *API) putPrefs(w http.ResponseWriter, r *http.Request) {
+	p := a.sessionPrincipal(w, r)
+	if p == nil {
+		return
+	}
+	var in struct {
+		EmailNotifications *bool `json:"email_notifications"`
+	}
+	if !a.decode(w, r, &in) {
+		return
+	}
+	if in.EmailNotifications == nil {
+		a.writeProblem(w, r, core.Validation(core.FieldError{Field: "email_notifications", Message: "wajib true atau false"}))
+		return
+	}
+	pr, err := a.Svc.SetPrefs(r.Context(), p.user.ID, *in.EmailNotifications)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, pr)
+}

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import QRCode from 'qrcode'
-import { del, get, post } from '../lib/api'
+import { del, get, post, put } from '../lib/api'
 import { fmtTime } from '../lib/format'
 import { useMe, useRefreshMe } from '../lib/session'
 import { SSO_ERRORS } from '../lib/types'
@@ -16,10 +16,35 @@ export function Account() {
       <h1>Akun</h1>
       <div className="muted">{me.email} · {me.role}</div>
       {me.mfa_setup_required && <div className="banner" role="alert">Kebijakan keamanan mewajibkan 2FA untuk akun Anda. Aktifkan di bawah ini untuk membuka dashboard.</div>}
+      <Preferences />
       <SSOLink />
       {me.has_password === false ? <div className="card muted">Akun ini masuk lewat SSO dan tidak memiliki password lokal. Password dan verifikasi 2 langkah dikelola di penyedia identitas Anda.</div> : <><Password />
       <TwoFactor />
       <SecurityKeys /></>}
+    </div>
+  )
+}
+
+/** Preferensi pengguna: saat ini hanya notifikasi email (tampilan berbagi dimoderasi admin). */
+function Preferences() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const q = useQuery({ queryKey: ['prefs'], queryFn: () => get<{ email_notifications: boolean; email_available: boolean }>('/auth/preferences') })
+  const m = useMutation({
+    mutationFn: (v: boolean) => put<{ email_notifications: boolean; email_available: boolean }>('/auth/preferences', { email_notifications: v }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['prefs'] }); toast('Preferensi disimpan') }, onError: (e) => toast(e instanceof Error ? e.message : 'Gagal menyimpan', true),
+  })
+  if (q.isLoading) return <Loading />
+  if (q.error || !q.data) return <ErrorBox error={q.error} />
+  const p = q.data
+  return (
+    <div className="card stack" role="group" aria-label="Preferensi notifikasi">
+      <h2>Preferensi notifikasi</h2>
+      <label className="row" style={{ gap: 6 }}>
+        <input type="checkbox" checked={p.email_notifications} disabled={m.isPending} onChange={(e) => m.mutate(e.target.checked)} />
+        Kirim email bila tampilan transaksi yang saya bagikan dihapus admin
+      </label>
+      {!p.email_available && <div className="hint">Server belum memiliki SMTP, jadi email tidak akan dikirim; notifikasi di lonceng tetap muncul.</div>}
     </div>
   )
 }

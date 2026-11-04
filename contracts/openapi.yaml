@@ -1100,11 +1100,42 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '422': {$ref: '#/components/responses/ValidationError'}
 
+  /auth/preferences:
+    get:
+      tags: [Auth]
+      summary: Preferensi pengguna yang login
+      description: Hanya sesi dashboard. `email_available` = server punya SMTP; bila false, notifikasi email tidak pernah dikirim apa pun preferensinya.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserPrefs'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    put:
+      tags: [Auth]
+      summary: Ubah preferensi (mis. matikan notifikasi email)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email_notifications]
+              properties:
+                email_notifications: {type: boolean}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserPrefs'}
+        '422': {$ref: '#/components/responses/ValidationError'}
   /notifications:
     get:
       tags: [Messages]
       summary: Notifikasi dalam aplikasi milik pengguna yang login (terbaru dulu)
-      description: 'Hanya sesi dashboard. Jenis: `saved_view.shared` (tampilan dibagikan pengguna lain; data: view_id, name, owner) dan `saved_view.moderated` (tampilan berbagi milik Anda dihapus admin; data: view_id, name, by). Event SSE `notification.created` (tanpa muatan) memberi sinyal untuk refetch.'
+      description: 'Hanya sesi dashboard. Jenis: `saved_view.shared` (tampilan dibagikan pengguna lain; data: view_id, name, owner) dan `saved_view.moderated` (tampilan berbagi milik Anda dihapus admin; data: view_id, name, by; juga dikirim lewat email bila SMTP aktif, preferensi mengizinkan, dan belum ada email sejenis ke alamat itu dalam 10 menit). Event SSE `notification.created` (tanpa muatan) memberi sinyal untuk refetch.'
       parameters:
         - {name: unread, in: query, schema: {type: boolean}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
@@ -2615,6 +2646,12 @@ components:
         finished_at: {type: [string, 'null'], format: date-time}
         partial: {type: boolean, description: 'true bila pesan gagal setelah sebagian bagian SMS (multi-bagian) sudah terkirim. Retry membuat bagian itu ganda di penerima, sehingga wajib `confirm_duplicate_risk`.'}
         parts_sent: {type: [integer, 'null'], description: 'Jumlah bagian yang sudah terkirim saat gagal parsial; null bila bukan kegagalan parsial.'}
+    UserPrefs:
+      type: object
+      required: [email_notifications, email_available]
+      properties:
+        email_notifications: {type: boolean, description: 'Kirim email untuk peristiwa penting (saat ini: tampilan berbagi Anda dimoderasi admin). Default true.'}
+        email_available: {type: boolean}
     Notification:
       type: object
       required: [id, kind, data, created_at, read_at]

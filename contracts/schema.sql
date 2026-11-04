@@ -515,6 +515,12 @@ CREATE TABLE notifications (
 CREATE INDEX notifications_user_idx ON notifications (user_id, created_at DESC);
 CREATE INDEX notifications_unread_idx ON notifications (user_id) WHERE read_at IS NULL;
 
+CREATE TABLE user_prefs (
+  user_id             uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  email_notifications boolean NOT NULL DEFAULT true,
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
 -- Seed: policy default sesuai docs/03 §4
 INSERT INTO dispatch_policies (id, name, is_default, min_delay_ms, max_delay_ms, burst_size, burst_pause_ms,
   max_inflight_per_sim, rate_per_minute, rate_per_hour, rate_per_day, send_window, max_attempts,
