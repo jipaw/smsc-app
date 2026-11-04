@@ -496,6 +496,13 @@ func parseFilter(r *http.Request) (core.MessageFilter, *core.Problem) {
 		}
 		f.Partial = &b
 	}
+	if v := q.Get("all_sent"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return f, core.Validation(core.FieldError{Field: "all_sent", Message: "harus true atau false"})
+		}
+		f.AllSent = &b
+	}
 	f.SimID, perr = qUUID(r, "sim_id")
 	return f, perr
 }

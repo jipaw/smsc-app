@@ -48,3 +48,13 @@ describe('agregat parsial vs semua-terkirim', () => {
     expect(campaignFailedSuffix(3, 1)).toBe(' (parsial 2, semua bagian terkirim 1)')
   })
 })
+
+import { partialParams } from './partial'
+
+describe('partialParams', () => {
+  it('memetakan pilihan filter ke parameter API', () => {
+    expect(partialParams('')).toEqual({ partial: '', all_sent: '' })
+    expect(partialParams('partial')).toEqual({ partial: 'true', all_sent: 'false' }) // parsial sejati: tidak mencakup semua-terkirim
+    expect(partialParams('allsent')).toEqual({ partial: '', all_sent: 'true' })
+  })
+})

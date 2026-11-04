@@ -60,3 +60,10 @@ export function campaignFailedSuffix(partial: number | undefined, allSent: numbe
   if (a > 0) parts.push(`semua bagian terkirim ${a}`)
   return parts.length ? ` (${parts.join(', ')})` : ''
 }
+
+/** Parameter query daftar transaksi untuk filter kegagalan parsial: parsial sejati = partial=true&all_sent=false. */
+export function partialParams(kind: '' | 'partial' | 'allsent'): { partial: string; all_sent: string } {
+  if (kind === 'partial') return { partial: 'true', all_sent: 'false' }
+  if (kind === 'allsent') return { partial: '', all_sent: 'true' }
+  return { partial: '', all_sent: '' }
+}

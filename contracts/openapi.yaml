@@ -735,7 +735,8 @@ paths:
         - {name: client_ref, in: query, schema: {type: string}}
         - {name: created_from, in: query, schema: {type: string, format: date-time}}
         - {name: created_to, in: query, schema: {type: string, format: date-time}}
-        - {name: partial, in: query, description: 'true = hanya kegagalan parsial; false = selain itu.', schema: {type: boolean}}
+        - {name: partial, in: query, description: 'true = hanya kegagalan parsial (termasuk yang semua bagiannya terkirim); false = selain itu.', schema: {type: boolean}}
+        - {name: all_sent, in: query, description: 'true = hanya yang dinyatakan gagal tetapi SEMUA bagiannya terkirim; false = selain itu. Parsial sejati: `partial=true&all_sent=false`.', schema: {type: boolean}}
         - {$ref: '#/components/parameters/Limit'}
         - {$ref: '#/components/parameters/Cursor'}
       responses:

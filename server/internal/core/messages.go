@@ -432,7 +432,8 @@ type MessageFilter struct {
 	ClientRef   string
 	CreatedFrom *time.Time
 	CreatedTo   *time.Time
-	Partial     *bool // true = hanya kegagalan parsial; false = selain itu
+	Partial     *bool // true = hanya kegagalan parsial (termasuk all_sent); false = selain itu
+	AllSent     *bool // true = hanya yang gagal tetapi SEMUA bagian terkirim; false = selain itu (parsial sejati: partial=true&all_sent=false)
 }
 
 func encodeCursor(t time.Time, id uuid.UUID) string {
@@ -495,6 +496,13 @@ func (f MessageFilter) where(start int) (string, []any) {
 			conds = append(conds, "partial_sent IS NOT NULL")
 		} else {
 			conds = append(conds, "partial_sent IS NULL")
+		}
+	}
+	if f.AllSent != nil {
+		if *f.AllSent {
+			conds = append(conds, "(partial_sent IS NOT NULL AND partial_sent >= parts)")
+		} else {
+			conds = append(conds, "NOT (partial_sent IS NOT NULL AND partial_sent >= parts)")
 		}
 	}
 	if len(conds) == 0 {

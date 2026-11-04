@@ -166,3 +166,61 @@ func TestFailedEventWithPartsSentIsPartialAndNotRetried(t *testing.T) {
 	}
 	_ = s
 }
+
+// filter all_sent: gagal tetapi semua bagian terkirim; kombinasi dengan partial memberi parsial sejati.
+func TestListFilterAllSent(t *testing.T) {
+	e, admin, dev, _ := newTakeoverEnv(t)
+	mk := func(parts, sent int) string {
+		id := craftSending(t, e, admin, dev, "1 second")
+		if sent < 0 {
+			e.sql(`UPDATE messages SET status='failed', error_code='generic_failure', finished_at=now(), parts=$2 WHERE id=$1`, id, parts)
+		} else {
+			e.sql(`UPDATE messages SET status='failed', error_code='generic_failure', finished_at=now(), parts=$2, partial_sent=$3 WHERE id=$1`, id, parts, sent)
+		}
+		return id
+	}
+	strict, all, plain := mk(3, 1), mk(3, 3), mk(2, -1)
+	ids := func(q string) map[string]bool {
+		var out struct{ Items []partialView }
+		if st := admin.do("GET", "/api/v1/messages?"+q, nil, &out); st != 200 {
+			t.Fatalf("list %s: %d", q, st)
+		}
+		m := map[string]bool{}
+		for _, x := range out.Items {
+			m[x.ID] = true
+		}
+		return m
+	}
+	eq := func(q string, want ...string) {
+		t.Helper()
+		got := ids(q)
+		if len(got) != len(want) {
+			t.Fatalf("%s: %v, mau %v", q, got, want)
+		}
+		for _, w := range want {
+			if !got[w] {
+				t.Fatalf("%s: %v tanpa %s", q, got, w)
+			}
+		}
+	}
+	eq("all_sent=true", all)
+	eq("partial=true", strict, all)           // partial tetap mencakup keduanya
+	eq("partial=true&all_sent=false", strict) // parsial sejati
+	eq("partial=true&all_sent=true", all)
+	eq("partial=false&all_sent=true") // kontradiksi => kosong
+	if got := ids("all_sent=false&status=failed"); got[all] || !got[strict] || !got[plain] {
+		t.Fatalf("all_sent=false: %v", got)
+	}
+	if st := admin.do("GET", "/api/v1/messages?all_sent=entah", nil, nil); st != 422 {
+		t.Fatalf("nilai tidak valid harus 422: %d", st)
+	}
+	resp, err := admin.http.Get(e.srv.URL + "/api/v1/messages/export?all_sent=true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := csv.NewReader(resp.Body).ReadAll()
+	resp.Body.Close()
+	if len(rows) != 2 || rows[1][0] != all {
+		t.Fatalf("csv: %v", rows)
+	}
+}

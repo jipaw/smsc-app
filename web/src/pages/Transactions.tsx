@@ -3,7 +3,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { get, post, qs } from '../lib/api'
 import { ERROR_LABEL, fmtTime, rel } from '../lib/format'
 import { canOperate, useMe } from '../lib/session'
-import { partialBadge, partialExplain, partialRetryLabel, partialRetryWarning } from '../lib/partial'
+import { partialParams, partialBadge, partialExplain, partialRetryLabel, partialRetryWarning } from '../lib/partial'
 import type { Message, MessageDetail, Page } from '../lib/types'
 import { Badge, Empty, ErrorBox, errMsg, Loading, Modal, useToast } from '../components/ui'
 
@@ -18,13 +18,13 @@ export function Transactions({ campaignId }: { campaignId?: string } = {}) {
   const [source, setSource] = useState('')
   const [to, setTo] = useState('')
   const [from, setFrom] = useState('')
-  const [partialOnly, setPartialOnly] = useState(false)
+  const [partialKind, setPartialKind] = useState<'' | 'partial' | 'allsent'>('')
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [open, setOpen] = useState<string | null>(null)
   const seen = useRef<Set<string>>(new Set())
   const [fresh, setFresh] = useState<Set<string>>(new Set())
 
-  const filters = { status, source, to: to.trim(), created_from: from ? new Date(from).toISOString() : '', campaign_id: campaignId, partial: partialOnly ? 'true' : '' }
+  const filters = { status, source, to: to.trim(), created_from: from ? new Date(from).toISOString() : '', campaign_id: campaignId, ...partialParams(partialKind) }
   const q = useInfiniteQuery({
     queryKey: ['messages', filters],
     queryFn: ({ pageParam }) => get<Page<Message>>('/messages' + qs({ ...filters, limit: 50, cursor: pageParam })),
@@ -64,9 +64,10 @@ export function Transactions({ campaignId }: { campaignId?: string } = {}) {
         <div className="row">
           <input placeholder="Cari nomor (+62…)" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Cari nomor" />
           <select value={source} onChange={(e) => setSource(e.target.value)} aria-label="Sumber"><option value="">Semua sumber</option>{SOURCES.map((s) => <option key={s}>{s}</option>)}</select>
-          <label className="row" style={{ gap: 4 }}><input type="checkbox" checked={partialOnly} onChange={(e) => setPartialOnly(e.target.checked)} />Hanya gagal parsial</label>
+          <select value={partialKind} onChange={(e) => setPartialKind(e.target.value as '' | 'partial' | 'allsent')} aria-label="Kegagalan parsial">
+            <option value="">Semua pesan</option><option value="partial">Hanya gagal parsial</option><option value="allsent">Hanya gagal tetapi semua bagian terkirim</option></select>
           <label className="row">Sejak <input type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-          <button className="small" onClick={() => { setStatus([]); setSource(''); setTo(''); setFrom(''); setPartialOnly(false) }}>Reset</button>
+          <button className="small" onClick={() => { setStatus([]); setSource(''); setTo(''); setFrom(''); setPartialKind('') }}>Reset</button>
         </div>
         {op && sel.size > 0 && <div className="row"><strong>{sel.size} dipilih</strong>
           <button className="small" disabled={!retryable || bulk.isPending} onClick={() => bulk.mutate('retry')}>Retry ({retryable})</button>
