@@ -1,5 +1,7 @@
 # Panduan uji PoC di HP lewat winbuilder
 
+Versi halaman web (daftar centang, tombol salin): https://claude.ai/artifact/QCAQ5jUt1j1KLH6LbWx2Vk (privat; isinya sama dengan berkas ini).
+
 Panduan ini membawa Anda dari PC Windows (winbuilder) kosong sampai hasil uji di HP Android nyata terkumpul dan siap dilaporkan. Server yang dipakai adalah `smscd` sungguhan dengan dashboard, enrollment QR, dan opsi tailnet ter-embed, bukan server PoC Python lama. Risiko yang diuji: R1, R2, R3, R4, R5, R6 (`docs/05` §1), plus fitur fase 43–47.
 
 > **Status jujur:** semua yang ada di sini sudah lulus di lingkungan tanpa HP:

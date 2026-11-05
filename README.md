@@ -1,6 +1,8 @@
 # SMSC — SMS Gateway Android + Tailscale
 
-Paket desain (analisis, stack, kontrak, flow), server + dashboard (fase 1–13) yang teruji, dan skeleton PoC Android. Aplikasi Android produksi belum ada (menunggu hasil PoC).
+Paket desain (analisis, stack, kontrak, flow), server + dashboard (fase 1–50) yang teruji, dan skeleton PoC Android. Aplikasi Android produksi belum ada (menunggu hasil PoC).
+
+> **Menguji PoC di HP?** Mulai dari [`poc/WINBUILDER.md`](poc/WINBUILDER.md). Versi halaman web dengan daftar centang dan tombol salin ada di [halaman panduan uji PoC](https://claude.ai/artifact/QCAQ5jUt1j1KLH6LbWx2Vk). Halaman itu privat: minta pemiliknya membagikannya bila tidak bisa dibuka; isinya sama dengan berkas Markdown.
 
 ## Ringkasan keputusan
 
@@ -67,9 +69,10 @@ Paket desain (analisis, stack, kontrak, flow), server + dashboard (fase 1–13) 
 
 | Path | Isi |
 |---|---|
-| [`android/`](android/README.md) | `:core` (logika, 26 unit test), `:typecheck` (type-check terhadap API Android asli), `:app` (APK uji; butuh Android SDK) |
+| [`android/`](android/README.md) | `:core` (logika, enrollment, decoder QR; 43 tes), `:typecheck` (type-check terhadap API Android asli + tes manifest), `:agent` (agen perangkat JVM), `tsnetbridge/` (Tailscale ter-embed), `:app` (APK uji; butuh Android SDK) |
+| [`poc/WINBUILDER.md`](poc/WINBUILDER.md) | **Panduan uji di HP lewat winbuilder** (server smscd, build APK, F1–F9, R1–R6) · [versi halaman web](https://claude.ai/artifact/QCAQ5jUt1j1KLH6LbWx2Vk) |
 | [`poc/README.md`](poc/README.md) | Runbook eksperimen per risiko + [lembar hasil](poc/RESULTS_TEMPLATE.md) |
 | [`poc/server/`](poc/server/poc_server.py) | Server PoC satu-device (+ `selftest.py` memvalidasi skema dua arah) |
-| [`poc/tools/analyze.py`](poc/tools/analyze.py) | Ringkas `ledger.csv`/`events_*.csv` dari HP |
+| [`poc/tools/`](poc/tools/collect.py) | `collect.py` (bukti dari HP via adb), `doze.py` (Doze paksa terukur), `analyze.py` (ringkas `ledger.csv`/`events_*.csv`) |
 
 Urutan baca: `docs/01` → `docs/02` → `docs/spec/01` → sisanya sesuai peran (Android: spec 03/06; backend: 04/05/07; frontend: 08; ops: 10/09; pengguna: 11). Pertanyaan terbuka ada di `docs/05` §3.
